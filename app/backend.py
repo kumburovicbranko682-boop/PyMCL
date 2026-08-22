@@ -197,7 +197,9 @@ class BackendAPI(QObject):
     def _emit_ui_changed(self):
         """数据变了：失效实例快照再广播。改数据的入口一律走这个。"""
         self._inst_cache = None
-        BackendAPI.ui_changed.emit(self)
+        # 必须从实例访问：类级 BackendAPI.ui_changed 是未绑定 Signal，
+        # 没有 .emit（任务完成回调里就这么崩过）。信号无参，别传 self。
+        self.ui_changed.emit()
 
     def invalidate_instances(self):
         self._inst_cache = None
