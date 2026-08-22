@@ -537,11 +537,16 @@ def _mrpack_candidates(versions, limit=5):
     return [(f, v) for _rank, f, v in items[:limit]]
 
 
-def _copy_embedded_versions(tmpdir, instance: Instance):
-    """把整合包 overrides 里自带的 versions JSON 先拷进实例，供自定义版本安装。"""
+def _copy_embedded_versions(tmpdir, instance: Instance, plain=False):
+    """把整合包自带的 versions JSON 先拷进实例，供自定义版本安装。
+
+    CF/mrpack 的自带版本在 overrides/versions 下；“直接压缩的 .minecraft”
+    的版本就在包根 versions/（plain=True）。
+    """
     copied = []
     dest_root = instance.versions_dir()
-    for folder in ("overrides", "client-overrides"):
+    folders = ("overrides", "client-overrides", "") if plain else ("overrides", "client-overrides")
+    for folder in folders:
         src = Path(tmpdir) / folder / "versions"
         if not src.is_dir():
             continue
@@ -555,6 +560,75 @@ def _copy_embedded_versions(tmpdir, instance: Instance):
             shutil.copytree(ver_dir, target, dirs_exist_ok=True)
             copied.append(ver_dir.name)
     return copied
+
+
+def _nested_marker_root(tmpdir: Path, marker: str, depth: int = 3):
+    """zip 根目录没有 marker 时向下找包含它的目录（“压缩了文件夹本身”的包）。"""
+    for level in range(1, depth + 1):
+        hits = sorted(p for p in tmpdir.glob("*/" * level + marker) if p.is_file())
+        if hits:
+            return hits[0].parent
+    return None
+
+
+_PLAIN_MC_STRONG = frozenset(("mods", "config", "versions", "saves"))
+
+
+def _looks_like_mc_dir(root: Path) -> bool:
+    """像不像一个 .minecraft 目录（按标志性子目录判断）。"""
+    try:
+        names = {p.name.lower() for p in root.iterdir()}
+    except OSError:
+        return False
+    if "manifest.json" in names or "modrinth.index.json" in names:
+        return False
+    return bool(names & _PLAIN_MC_STRONG)
+
+
+def _plain_pack_root(tmpdir: Path):
+    """识别“直接压缩的 .minecraft 目录”整合包（可能还套了一层文件夹）。"""
+    if _looks_like_mc_dir(tmpdir):
+        return tmpdir
+    for level in (1, 2):
+        for cand in sorted(tmpdir.glob("*/" * level)):
+            if cand.is_dir() and _looks_like_mc_dir(cand):
+                return cand
+    return None
+
+
+def _plain_pack_version(root: Path):
+    """从 versions/<名>/<名>.json 推断 MC 版本与加载器（没有则返回 None）。"""
+    vdir = root / "versions"
+    if not vdir.is_dir():
+        return None
+    plain = None
+    for vd in sorted(vdir.iterdir()):
+        if not vd.is_dir():
+            continue
+        jf = vd / f"{vd.name}.json"
+        if not jf.is_file():
+            continue
+        j = utils.read_json(jf, None) or {}
+        vid = str(j.get("id") or vd.name)
+        libs = " ".join(str((l or {}).get("name") or "") for l in (j.get("libraries") or []))
+        mc = str(j.get("inheritsFrom") or "") or None
+        if "-forge" in vid or "minecraftforge" in libs:
+            m = re.search(r"-forge-?(.+)$", vid)
+            return {"mc": mc, "loader": "forge", "loader_version": m.group(1) if m else ""}
+        if "neoforge" in vid or "neoforge" in libs:
+            m = re.search(r"-neoforge-?(.+)$", vid)
+            return {"mc": mc, "loader": "neoforge", "loader_version": m.group(1) if m else ""}
+        if vid.startswith("fabric-loader-"):
+            m = re.match(r"^fabric-loader-([^-]+)-(.+)$", vid)
+            return {"mc": (m.group(2) if m else mc),
+                    "loader": "fabric-loader", "loader_version": m.group(1) if m else ""}
+        if vid.startswith("quilt-loader-"):
+            m = re.match(r"^quilt-loader-([^-]+)-(.+)$", vid)
+            return {"mc": (m.group(2) if m else mc),
+                    "loader": "quilt-loader", "loader_version": m.group(1) if m else ""}
+        if plain is None and manifest_mod.looks_like_minecraft_version(vid):
+            plain = {"mc": vid, "loader": None, "loader_version": ""}
+    return plain
 
 
 def _resolve_pack_minecraft(dm, declared, on_progress=None):
@@ -649,9 +723,16 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
         except (zipfile.BadZipFile, ValueError) as e:
             raise ModpackError(f"不是有效的 mrpack 文件: {e}")
 
+        pack_root = tmpdir
         index_file = tmpdir / "modrinth.index.json"
         if not index_file.is_file():
-            if (tmpdir / "manifest.json").is_file():
+            nested = _nested_marker_root(tmpdir, "modrinth.index.json")
+            if nested is not None:
+                pack_root = nested
+                index_file = nested / "modrinth.index.json"
+                _emit(on_progress, f"modrinth.index.json 位于子目录 {nested.name}/，按该层作为包根安装")
+        if not index_file.is_file():
+            if (pack_root / "manifest.json").is_file():
                 raise ModpackError(
                     "这是 CurseForge 整合包（含 manifest.json），请按 zip 安装，不是 mrpack")
             raise ModpackError(
@@ -677,7 +758,7 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
         _emit(on_progress, f"安装到实例 {instance.name} ({instance.path})")
         installer = Installer(instance, dm, on_progress=on_progress or dm.on_progress, cancel=cancel)
 
-        embedded = _copy_embedded_versions(tmpdir, instance)
+        embedded = _copy_embedded_versions(pack_root, instance)
         if embedded:
             _emit(on_progress, f"发现整合包自带版本: {', '.join(embedded)}")
 
@@ -748,7 +829,7 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
 
         # overrides
         for overrides_dir in ("overrides", "client-overrides"):
-            src = tmpdir / overrides_dir
+            src = pack_root / overrides_dir
             if src.is_dir():
                 _emit(on_progress, f"复制 {overrides_dir}")
                 _copy_tree_over(src, instance.path)
@@ -799,8 +880,18 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             raise ModpackError(f"不是有效的整合包 zip: {e}")
 
         manifest_file = tmpdir / "manifest.json"
+        pack_root = tmpdir
         if not manifest_file.is_file():
-            raise ModpackError("整合包缺少 manifest.json")
+            nested = _nested_marker_root(tmpdir, "manifest.json")
+            if nested is not None:
+                pack_root = nested
+                manifest_file = nested / "manifest.json"
+                _emit(on_progress, f"manifest.json 位于子目录 {nested.name}/，按该层作为包根安装")
+        if not manifest_file.is_file():
+            # 没有 manifest.json：按“直接压缩的 .minecraft 目录”整合包安装
+            return _install_plain_zip(dm, tmpdir, instance, pack_path,
+                                      on_progress=on_progress, cancel=cancel,
+                                      force=force, java=java)
         mf = utils.read_json(manifest_file, None) or {}
         if mf.get("manifestType") != "minecraftModpack":
             raise ModpackError("manifest.json 不是 minecraftModpack 类型")
@@ -813,7 +904,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
         _emit(on_progress, f"安装到实例 {instance.name} ({instance.path})")
         installer = Installer(instance, dm, on_progress=on_progress or dm.on_progress, cancel=cancel)
 
-        embedded = _copy_embedded_versions(tmpdir, instance)
+        embedded = _copy_embedded_versions(pack_root, instance)
         if embedded:
             _emit(on_progress, f"发现整合包自带版本: {', '.join(embedded)}")
 
@@ -875,7 +966,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
         # overrides
         overrides = mf.get("overrides")
         if overrides:
-            src = tmpdir / overrides
+            src = pack_root / overrides
             if src.is_dir():
                 _copy_tree_over(src, instance.path)
 
@@ -909,6 +1000,90 @@ def _copy_tree_over(src: Path, dest: Path):
         elif item.is_file():
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, target)
+
+
+def _copy_mc_tree(root: Path, dest: Path):
+    """整个 .minecraft 目录拷进实例。versions/ 由 _copy_embedded_versions
+    处理，logs / crash-reports 是运行垃圾不拷。"""
+    skip = {"versions", "logs", "crash-reports"}
+    for item in root.iterdir():
+        if item.name in skip:
+            continue
+        target = dest / item.name
+        try:
+            if item.is_dir():
+                shutil.copytree(item, target, dirs_exist_ok=True)
+            elif item.is_file():
+                shutil.copy2(item, target)
+        except OSError:
+            continue
+
+
+def _install_plain_zip(dm: DownloadManager, tmpdir: Path, instance: Instance, pack_path,
+                       on_progress=None, cancel=None, force=False, java=None):
+    """没有 manifest.json 的 zip：按“直接压缩的 .minecraft 目录”整合包安装。
+
+    版本与加载器从 zip 里 versions/<名>/<名>.json 推断；装好后其余目录
+    （mods / config / saves / 资源包等）原样拷入实例。
+    """
+    root = _plain_pack_root(tmpdir)
+    if root is None:
+        top = ", ".join(sorted(p.name for p in tmpdir.iterdir())[:10])
+        raise ModpackError(
+            "整合包缺少 manifest.json，也不是 .minecraft 目录结构。\n"
+            f"zip 顶层内容: {top or '(空)'}\n"
+            "支持三种格式：CurseForge 导出的 zip（内含 manifest.json）、"
+            "Modrinth 的 .mrpack、直接压缩的 .minecraft 目录（含 mods / versions 等）。"
+        )
+    rel = root.relative_to(tmpdir)
+    where = f"（位于 {rel} 子目录）" if str(rel) != "." else ""
+    _emit(on_progress, f"识别为 .minecraft 目录压缩包{where}，开始安装")
+    if instance.path.is_dir():
+        instance.ensure_standard_dirs()
+    else:
+        instance.create()
+    _emit(on_progress, f"安装到实例 {instance.name} ({instance.path})")
+    installer = Installer(instance, dm, on_progress=on_progress or dm.on_progress, cancel=cancel)
+
+    ver = _plain_pack_version(root) or {}
+    mc_version = ver.get("mc") or ""
+    loader = ver.get("loader")
+    loader_version = ver.get("loader_version") or ""
+
+    embedded = _copy_embedded_versions(root, instance, plain=True)
+    if embedded:
+        _emit(on_progress, f"发现自带版本: {', '.join(embedded)}")
+
+    loader_vid = None
+    if not mc_version:
+        _emit(on_progress, "包里没有可识别的版本信息，未安装游戏版本，稍后请在版本页选择")
+    else:
+        resolved = _resolve_pack_minecraft(dm, mc_version, on_progress) or mc_version
+        _emit(on_progress, f"安装 Minecraft {resolved}")
+        installer.install_version(resolved, force=force, java=java)
+        if loader:
+            _emit(on_progress, f"安装加载器 {loader} {loader_version} (Minecraft {resolved})")
+            try:
+                loader_vid = install_loader(installer, loader, loader_version, resolved, force=force)
+            except InstallError as e:
+                loader_vid = None
+                _emit(on_progress, f"加载器安装失败（{e}），已仅装原版；mods 可能无法加载")
+        else:
+            _emit(on_progress, "未识别到 Forge/Fabric 加载器，按原版安装（mods 不会被加载）")
+
+    _copy_mc_tree(root, instance.path)
+    pack_meta = {
+        "name": Path(pack_path).stem,
+        "version": "?",
+        "mc_version": mc_version or None,
+        "loader": (f"{loader}-{loader_version}" if loader else "vanilla"),
+        "source": "plain-zip",
+        "instance": instance.name,
+    }
+    instance.set_meta("modpack", pack_meta)
+    instance.set_meta("mc_version", loader_vid or mc_version or "")
+    _emit(on_progress, f"整合包 {pack_meta['name']} 安装完成 -> 实例 {instance.name}")
+    return pack_meta
 
 
 # ================================================================ 加载器
