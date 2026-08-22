@@ -326,13 +326,28 @@ class DashboardCard(QFrame):
             x = x0 + (w0 - w)
         if "n" in direction:
             y = y0 + (h0 - h)
+        # 画布边界：拖哪条边就钳哪条边。向下/右扩到画布底时必须缩尺寸，
+        # 不能让锚定的顶/左边被悄悄推走——那种隐性滑动会插进上面的卡片，
+        # 联动逻辑管不到（随机拖拽模糊测试里 log.se 叠上 banner 的根因）。
+        if "e" in direction and x + w > cw:
+            w = max(mw, cw - x)
+        if "w" in direction and x < 0:
+            x = 0
+            w = max(mw, x0 + w0)
+        if "s" in direction and y + h > ch:
+            h = max(mh, ch - y)
+        if "n" in direction and y < 0:
+            y = 0
+            h = max(mh, y0 + h0)
         x = max(0, min(x, cw - w))
         y = max(0, min(y, ch - h))
-        self.setGeometry(x, y, w, h)
+        self.canvas._resize_linked(self, direction,
+                                   QRect(x0, y0, w0, h0), QRect(x, y, w, h))
 
     def _commit_geometry(self):
         self.item.set_geometry_px(self.x(), self.y(), self.width(), self.height(),
                                   (self.canvas.width(), self.canvas.height()))
+        self.canvas._flush_link_pending()
         self.canvas._touch()
 
     def mousePressEvent(self, e):
@@ -420,6 +435,7 @@ class DashboardCanvas(QWidget):
         self.doc = default_doc()
         self.cards: list[DashboardCard] = []
         self.editing = False
+        self._link_pending: set[DashboardCard] = set()
 
         self._persist_timer = QTimer(self)
         self._persist_timer.setSingleShot(True)
@@ -524,6 +540,180 @@ class DashboardCanvas(QWidget):
     def _on_grid_changed(self, *_):
         self.doc.grid = int(self.grid_box.currentData() or 0)
         self.layout_changed.emit()
+
+    # ------------------------------------------------------------------
+    # 缩放联动
+    # ------------------------------------------------------------------
+    # 判定“贴着被拖边”的缝隙范围（px）：0=贴边，负=略有重叠；
+    # 上限覆盖默认布局 12px 的栏间缝。推挤时保持原缝不变。
+    _LINK_GAP_MAX = 28
+    _LINK_OVERLAP_MAX = 8
+
+    def _link_followers(self, active: DashboardCard, direction: str, old: QRect) -> dict:
+        """手势开始时锁定跟随者：卡片、原缝、固定不动的锚缘、起始矩形。
+
+        每帧重算会因邻居已跟随移动、缝隙变大而“掉链子”，所以按
+        (卡片, 方向, 起点矩形) 缓存，整个手势内保持不变。
+        """
+        key = (id(active), direction, old.getRect())
+        if getattr(self, "_link_key", None) == key:
+            return self._link_fols
+        fols: dict[str, list] = {"e": [], "w": [], "s": [], "n": []}
+        for c in self.cards:
+            if c is active:
+                continue
+            r = QRect(c.x(), c.y(), c.width(), c.height())
+            ov_v = old.y() < r.y() + r.height() and old.y() + old.height() > r.y()
+            ov_h = old.x() < r.x() + r.width() and old.x() + old.width() > r.x()
+            gap = c.x() - (old.x() + old.width())   # 右侧邻居（贴我的右边）
+            if -self._LINK_OVERLAP_MAX <= gap <= self._LINK_GAP_MAX and ov_v:
+                fols["e"].append((c, gap, c.x() + c.width(), r))
+            gap = old.x() - (c.x() + c.width())     # 左侧邻居（贴我的左边）
+            if -self._LINK_OVERLAP_MAX <= gap <= self._LINK_GAP_MAX and ov_v:
+                fols["w"].append((c, gap, c.x(), r))
+            gap = c.y() - (old.y() + old.height())  # 下方邻居
+            if -self._LINK_OVERLAP_MAX <= gap <= self._LINK_GAP_MAX and ov_h:
+                fols["s"].append((c, gap, c.y() + c.height(), r))
+            gap = old.y() - (c.y() + c.height())    # 上方邻居
+            if -self._LINK_OVERLAP_MAX <= gap <= self._LINK_GAP_MAX and ov_h:
+                fols["n"].append((c, gap, c.y(), r))
+        self._link_key = key
+        self._link_fols = fols
+        return fols
+
+    def _resize_linked(self, active: DashboardCard, direction: str,
+                       old: QRect, want: QRect):
+        """联动缩放：与被拖动边贴合（含留有小缝）的相邻卡片跟随让位/补位。
+
+        例：左卡 1/3 + 右卡 2/3 隔着一条竖边，把左卡拉宽到 2/3 时
+        右卡自动缩成 1/3，两卡的相对缝隙保持不变，不重叠也不留大缝；
+        反向拖则邻居自动补位变宽。
+
+        障碍物规则：跟随者被推挤时撞到任何非跟随卡片就停（例如把右卡
+        左推会压到别排卡片时，被拖的边停在障碍物前），保证缩放过程
+        永不产生新的重叠。所有参与者都不小于各自最小尺寸。
+        """
+        x, y, w, h = want.x(), want.y(), want.width(), want.height()
+        cw, ch = max(1, self.width()), max(1, self.height())
+        F = self._link_followers(active, direction, old)
+        touched: list[DashboardCard] = []
+
+        def rect(c: DashboardCard) -> QRect:
+            return QRect(c.x(), c.y(), c.width(), c.height())
+
+        def ov_v(a: QRect, b: QRect) -> bool:  # 纵向有重叠段（左右关系）
+            return a.y() < b.y() + b.height() and a.y() + a.height() > b.y()
+
+        def ov_h(a: QRect, b: QRect) -> bool:  # 横向有重叠段（上下关系）
+            return a.x() < b.x() + b.width() and a.x() + a.width() > b.x()
+
+        def blockers(side_fols):
+            fset = {id(c) for c, *_ in side_fols}
+            return [c for c in self.cards
+                    if c is not active and id(c) not in fset]
+
+        if "e" in direction:
+            edge = x + w
+            fols = F["e"]
+            lo = x + active.minimumWidth()
+            hi = cw
+            for c, gap, anchor_r, r0 in fols:
+                hi = min(hi, anchor_r - gap - c.minimumWidth())
+                for b in blockers(fols):  # 跟随者左移撞到它左侧的卡就停
+                    br = rect(b)
+                    if b.x() + b.width() <= r0.x() + self._LINK_GAP_MAX and ov_v(r0, br):
+                        lo = max(lo, b.x() + b.width() - gap)
+            for b in blockers(fols):  # 被拖卡拉宽压不到右侧非跟随卡
+                br = rect(b)
+                if (b.x() >= old.x() + old.width() - self._LINK_OVERLAP_MAX
+                        and (ov_v(old, br) or ov_v(want, br))):
+                    hi = min(hi, b.x())
+            edge = max(0, min(hi, max(lo, edge)))
+            for c, gap, anchor_r, _ in fols:
+                c.setGeometry(edge + gap, c.y(), max(1, anchor_r - edge - gap), c.height())
+                touched.append(c)
+            w = edge - x
+        if "w" in direction:
+            edge = x
+            fols = F["w"]
+            lo = 0
+            hi = old.x() + old.width() - active.minimumWidth()
+            for c, gap, anchor_l, r0 in fols:
+                lo = max(lo, anchor_l + c.minimumWidth() + gap)
+                for b in blockers(fols):  # 跟随者右移撞到它右侧的卡就停
+                    br = rect(b)
+                    if b.x() >= r0.x() + r0.width() - self._LINK_GAP_MAX and ov_v(r0, br):
+                        hi = min(hi, b.x() + gap)
+            for b in blockers(fols):  # 被拖卡拉宽压不到左侧非跟随卡
+                br = rect(b)
+                if (b.x() + b.width() <= old.x() + self._LINK_OVERLAP_MAX
+                        and (ov_v(old, br) or ov_v(want, br))):
+                    lo = max(lo, b.x() + b.width())
+            edge = min(cw, max(lo, min(hi, edge)))
+            for c, gap, anchor_l, _ in fols:
+                c.setGeometry(c.x(), c.y(), max(1, edge - gap - anchor_l), c.height())
+                touched.append(c)
+            w = old.x() + old.width() - edge
+            x = edge
+        if "s" in direction:
+            edge = y + h
+            fols = F["s"]
+            lo = y + active.minimumHeight()
+            hi = ch
+            for c, gap, anchor_b, r0 in fols:
+                hi = min(hi, anchor_b - gap - c.minimumHeight())
+                for b in blockers(fols):  # 跟随者上移撞到它上方的卡就停
+                    br = rect(b)
+                    if b.y() + b.height() <= r0.y() + self._LINK_GAP_MAX and ov_h(r0, br):
+                        lo = max(lo, b.y() + b.height() - gap)
+            for b in blockers(fols):  # 被拖卡拉长压不到下方非跟随卡
+                br = rect(b)
+                if (b.y() >= old.y() + old.height() - self._LINK_OVERLAP_MAX
+                        and (ov_h(old, br) or ov_h(want, br))):
+                    hi = min(hi, b.y())
+            edge = max(0, min(hi, max(lo, edge)))
+            for c, gap, anchor_b, _ in fols:
+                c.setGeometry(c.x(), edge + gap, c.width(), max(1, anchor_b - edge - gap))
+                touched.append(c)
+            h = edge - y
+        if "n" in direction:
+            edge = y
+            fols = F["n"]
+            lo = 0
+            hi = old.y() + old.height() - active.minimumHeight()
+            for c, gap, anchor_t, r0 in fols:
+                lo = max(lo, anchor_t + c.minimumHeight() + gap)
+                for b in blockers(fols):  # 跟随者下移撞到它下方的卡就停
+                    br = rect(b)
+                    if b.y() >= r0.y() + r0.height() - self._LINK_GAP_MAX and ov_h(r0, br):
+                        hi = min(hi, b.y() + gap)
+            for b in blockers(fols):  # 被拖卡拉长压不到上方非跟随卡
+                br = rect(b)
+                if (b.y() + b.height() <= old.y() + self._LINK_OVERLAP_MAX
+                        and (ov_h(old, br) or ov_h(want, br))):
+                    lo = max(lo, b.y() + b.height())
+            edge = min(ch, max(lo, min(hi, edge)))
+            for c, gap, anchor_t, _ in fols:
+                c.setGeometry(c.x(), c.y(), c.width(), max(1, edge - gap - anchor_t))
+                touched.append(c)
+            h = old.y() + old.height() - edge
+            y = edge
+
+        x = max(0, min(x, cw - w))
+        y = max(0, min(y, ch - h))
+        active.setGeometry(x, y, w, h)
+        if touched:
+            self._link_pending.update(touched)
+
+    def _flush_link_pending(self):
+        """松手时把联动过的邻居几何一并写回布局文档（否则下次重摆会弹回）。"""
+        if not self._link_pending:
+            return
+        size = (self.width(), self.height())
+        for c in self._link_pending:
+            c.item.set_geometry_px(c.x(), c.y(), c.width(), c.height(), size)
+        self._link_pending = set()
+        self._link_key = None  # 手势结束，下次重新锁定跟随者
 
     # ------------------------------------------------------------------
     # 编辑模式
@@ -645,11 +835,14 @@ class DashboardCanvas(QWidget):
     # ------------------------------------------------------------------
     def _style_edit_btn(self):
         from .pcl_chrome import Theme
-        # 注意：只有带 f 前缀的段才有 {{}} 转义，普通字符串段必须写单括号
+        # 胶囊样式：卡片底 + 描边，压在横幅渐变上也读得清；
+        # 注意只有带 f 前缀的段才有 {{}} 转义，普通字符串段必须写单括号
         self.edit_btn.setStyleSheet(
-            f"TransparentToolButton {{ color: {Theme.muted}; background: {Theme.hover};"
-            " border: none; padding: 5px 10px; border-radius: 4px; }"
-            f"TransparentToolButton:hover {{ color: {Theme.green}; }}"
+            f"TransparentToolButton {{ color: {Theme.text}; background: {Theme.card};"
+            f" border: 1px solid {Theme.line}; padding: 6px 14px; border-radius: 16px; }}"
+            f"TransparentToolButton:hover {{ color: {Theme.green};"
+            f" border-color: {Theme.green}; background: {Theme.card}; }}"
+            f"TransparentToolButton:pressed {{ background: {Theme.hover}; }}"
         )
         self.edit_btn.adjustSize()
 
@@ -670,8 +863,10 @@ class DashboardCanvas(QWidget):
         """摆放入口按钮 / 工具条，并保证层级在最上。"""
         m = 8
         if not self.editing:
+            # 查看模式入口放右下角：横幅铺满画布顶部，放顶部必然压在横幅上
             self.edit_btn.adjustSize()
-            self.edit_btn.move(self.width() - self.edit_btn.width() - m, m)
+            self.edit_btn.move(self.width() - self.edit_btn.width() - m,
+                               self.height() - self.edit_btn.height() - m)
             self.edit_btn.raise_()
         else:
             self.toolbar.adjustSize()
