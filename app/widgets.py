@@ -373,8 +373,10 @@ class ThumbnailTile(QWidget):
 class BannerWidget(QFrame):
     """启动页渐变 Hero 横幅。
 
-    右上两团白色微光会缓慢漂移（25fps 重绘，仅可见时运行），
-    让横幅有「活着」的感觉；系统关闭动画时静止。
+    右上两团白色微光会缓慢漂移，让横幅有「活着」的感觉。
+
+    性能：只重绘两团光所在的脏区（约横幅 1/4 面积），11fps 足够
+    平滑——之前 25fps 全件重绘在低端机上肉眼可见地拖慢整个页面。
     """
 
     def __init__(self, parent=None):
@@ -385,7 +387,7 @@ class BannerWidget(QFrame):
         self._g3 = QColor("#7BB661")
         self._glow_phase = 0.0
         self._glow_timer = QTimer(self)
-        self._glow_timer.setInterval(40)
+        self._glow_timer.setInterval(90)
         self._glow_timer.timeout.connect(self._tick_glow)
 
         layout = QHBoxLayout(self)
@@ -423,9 +425,24 @@ class BannerWidget(QFrame):
         super().hideEvent(e)
         self._glow_timer.stop()
 
+    def _glow_rects(self):
+        """两团光当前的包围盒（含 24px 漂移余量）。"""
+        from PySide6.QtCore import QRect
+        ph = self._glow_phase * 2 * math.pi
+        dx = math.sin(ph) * 16
+        dy = math.cos(ph * 0.7) * 10
+        r = self.rect()
+        e1 = QRect(int(r.right() - 260 + dx) - 24, int(-120 + dy) - 24, 320 + 48, 320 + 48)
+        e2 = QRect(int(r.right() - 420 - dx) - 24,
+                   int(r.bottom() - 140 - dy) - 24, 220 + 48, 220 + 48)
+        return e1, e2
+
     def _tick_glow(self):
-        self._glow_phase = (self._glow_phase + 0.012) % 1.0
-        self.update()
+        old1, old2 = self._glow_rects()
+        self._glow_phase = (self._glow_phase + 0.006) % 1.0
+        new1, new2 = self._glow_rects()
+        self.update(old1.united(new1).intersected(self.rect()))
+        self.update(new2.united(old2).intersected(self.rect()))
 
     def set_info(self, title: str, subtitle: str):
         self.title.setText(title)

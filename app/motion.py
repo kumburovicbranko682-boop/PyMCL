@@ -35,7 +35,7 @@ def _keep(widget, *anims):
 def fade(widget, start: float = 0.0, end: float = 1.0, ms: int = 180,
          on_done=None):
     """透明度过渡。结束移除 effect。"""
-    if not ui_motion_ok():
+    if not ui_motion_ok() or not widget.isVisible():
         if on_done:
             on_done()
         return
@@ -102,8 +102,13 @@ def tween(setter, start, end, ms: int = 240, on_done=None):
 
 
 def pop(widget, scale: float = 1.35, ms: int = 260):
-    """缩放脉冲（角标计数变化）：transform 缩放，不动布局。"""
-    if not ui_motion_ok():
+    """缩放脉冲（角标计数变化）：transform 缩放，不动布局。
+
+    上一个脉冲还没放完就跳过（下载计数高频变化时会连成一片抖动）。
+    """
+    if not ui_motion_ok() or not widget.isVisible():
+        return
+    if getattr(widget, "_mcl_anims", None):
         return
     sc = QGraphicsScale(widget)
     sc.setOrigin(QVector3D(widget.width() / 2, widget.height() / 2, 0))
@@ -148,7 +153,11 @@ class SmoothProgressBar(ProgressBar):
             self._shown = v
             ProgressBar.setValue(self, v)
             return
-        anim.stop()
+        if anim.state() == QVariantAnimation.Running:
+            anim.stop()          # 密集更新：直接跳终值，不再重启动画
+            self._shown = v
+            ProgressBar.setValue(self, v)
+            return
         anim.setStartValue(self._shown)
         anim.setEndValue(v)
         self._shown = v

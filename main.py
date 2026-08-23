@@ -567,8 +567,8 @@ def gui_main():
         from PySide6.QtCore import QPropertyAnimation, QEasingCurve
         window.setWindowOpacity(0.0)
         wa = QPropertyAnimation(window, b"windowOpacity", window)
-        wa.setDuration(260)
-        wa.setStartValue(0.0)
+        wa.setDuration(130)
+        wa.setStartValue(0.35)
         wa.setEndValue(1.0)
         wa.setEasingCurve(QEasingCurve.OutCubic)
         wa.start()

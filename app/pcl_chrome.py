@@ -755,7 +755,7 @@ class PclSideBar(QFrame):
 PclSubButton = PclNavButton
 
 
-def fade_stack_to(stack, widget, holder, duration: int = 180):
+def fade_stack_to(stack, widget, holder, duration: int = 150):
     """主栈切页：抓当前帧叠在新页上，淡出 + 轻微左移。holder 长期持有动画。"""
     from .motion_prefs import ui_motion_ok
 
