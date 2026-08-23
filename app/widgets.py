@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """widgets.py — 公共视觉组件：图标磁贴、胶囊徽章、渐变 Banner。"""
 
+import math
 import os
 
-from PySide6.QtCore import QObject, QRectF, QRunnable, Qt, QThreadPool, QUrl, Signal
+from PySide6.QtCore import QObject, QRectF, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QLinearGradient, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (
@@ -370,7 +371,11 @@ class ThumbnailTile(QWidget):
 
 
 class BannerWidget(QFrame):
-    """启动页渐变 Hero 横幅。"""
+    """启动页渐变 Hero 横幅。
+
+    右上两团白色微光会缓慢漂移（25fps 重绘，仅可见时运行），
+    让横幅有「活着」的感觉；系统关闭动画时静止。
+    """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -378,6 +383,10 @@ class BannerWidget(QFrame):
         self._g1 = QColor("#123B2A")
         self._g2 = QColor("#3E7C4F")
         self._g3 = QColor("#7BB661")
+        self._glow_phase = 0.0
+        self._glow_timer = QTimer(self)
+        self._glow_timer.setInterval(40)
+        self._glow_timer.timeout.connect(self._tick_glow)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(32, 26, 32, 26)
@@ -404,6 +413,20 @@ class BannerWidget(QFrame):
         self.right_area.setSpacing(10)
         layout.addLayout(self.right_area)
 
+    def showEvent(self, e):
+        super().showEvent(e)
+        from .motion_prefs import ui_motion_ok
+        if ui_motion_ok():
+            self._glow_timer.start()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._glow_timer.stop()
+
+    def _tick_glow(self):
+        self._glow_phase = (self._glow_phase + 0.012) % 1.0
+        self.update()
+
     def set_info(self, title: str, subtitle: str):
         self.title.setText(title)
         self.subtitle.setText(subtitle)
@@ -425,8 +448,12 @@ class BannerWidget(QFrame):
         painter.setPen(Qt.NoPen)
         glow = QColor(255, 255, 255, 18)
         painter.setBrush(glow)
-        painter.drawEllipse(int(rect.right() - 260), -120, 320, 320)
-        painter.drawEllipse(int(rect.right() - 420), int(rect.bottom() - 140), 220, 220)
+        ph = self._glow_phase * 2 * math.pi
+        dx = math.sin(ph) * 16
+        dy = math.cos(ph * 0.7) * 10
+        painter.drawEllipse(int(rect.right() - 260 + dx), int(-120 + dy), 320, 320)
+        painter.drawEllipse(int(rect.right() - 420 - dx),
+                            int(rect.bottom() - 140 - dy), 220, 220)
         painter.setClipping(False)
 
 

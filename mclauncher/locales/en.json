@@ -949,5 +949,7 @@
   "取消固定": "Unpin",
   "固定到侧栏的子页": "Sub-pages pinned to sidebar",
   "无法移出": "Cannot move out",
-  "该分区只剩这一个子页，移走会变空栏；先在「自定义分区」里补充其它子页": "This is the last sub-page in its section; moving it would leave the section empty. Add other pages in “Customize sections” first."
+  "该分区只剩这一个子页，移走会变空栏；先在「自定义分区」里补充其它子页": "This is the last sub-page in its section; moving it would leave the section empty. Add other pages in “Customize sections” first.",
+  "界面动画": "Interface animations",
+  "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant"
 }

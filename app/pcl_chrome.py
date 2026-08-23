@@ -700,8 +700,29 @@ class PclSideBar(QFrame):
 
     def _sync_group(self, gkey: str):
         info = self._groups[gkey]
-        info["host"].setVisible(info["expanded"])
+        host = info["host"]
         info["chevron"].setText("▾" if info["expanded"] else "▸")
+        prev = info.get("anim")
+        if prev is not None:
+            prev.stop()
+        from .motion import tween
+        if info["expanded"]:
+            if not host.isVisible():
+                target = max(1, host.sizeHint().height())
+                host.setMaximumHeight(0)
+                host.setVisible(True)
+                info["anim"] = tween(
+                    lambda h: host.setMaximumHeight(int(h)), 0, target, ms=180,
+                    on_done=lambda: host.setMaximumHeight(16777215))
+            else:
+                host.setMaximumHeight(16777215)
+                info["anim"] = None
+        else:
+            target = max(1, host.sizeHint().height())
+            info["anim"] = tween(
+                lambda h: host.setMaximumHeight(int(h)), target, 0, ms=160,
+                on_done=lambda: host.hide() if not info["expanded"]
+                else host.setMaximumHeight(16777215))
         current_in = any(
             self._buttons[k].isChecked() for k in info["children"] if k in self._buttons
         )

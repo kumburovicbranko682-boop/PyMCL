@@ -3,6 +3,7 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from ..motion import SmoothProgressBar
 from qfluentwidgets import (
     CaptionLabel, FluentIcon as FIF, PlainTextEdit, ProgressBar, PushButton, ScrollArea,
     SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentToolButton,
@@ -82,7 +83,7 @@ class TaskCard(SimpleCardWidget):
         top.addWidget(self.toggle_btn)
         top.addWidget(self.cancel_btn)
         body.addLayout(top)
-        self.progress = ProgressBar(self)
+        self.progress = SmoothProgressBar(self)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         body.addWidget(self.progress)
@@ -172,7 +173,7 @@ class DownloadDock(SimpleCardWidget):
         bar.addWidget(self.toggle_btn)
         root.addLayout(bar)
 
-        self.progress = ProgressBar(self)
+        self.progress = SmoothProgressBar(self)
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         root.addWidget(self.progress)

@@ -107,7 +107,8 @@ class BannerBody(QWidget):
         page.banner.right_area.addWidget(page.launch_btn, 0, Qt.AlignRight)
         page.banner.right_area.addWidget(page.stop_btn, 0, Qt.AlignRight)
 
-        page.progress = ProgressBar(self)
+        from ..motion import SmoothProgressBar
+        page.progress = SmoothProgressBar(self)
         page.progress.setRange(0, 100)
         page.progress.setValue(0)
         page.status_label = CaptionLabel(tr("就绪"))

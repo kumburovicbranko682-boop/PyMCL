@@ -31,6 +31,7 @@ from qfluentwidgets import FluentIcon as FIF
 from mclauncher.i18n import tr
 
 from .layout_model import LayoutDoc, LayoutItem, default_doc, min_size_for
+from . import motion
 
 GRID_CHOICES = [0, 4, 8, 16, 24]
 
@@ -435,6 +436,7 @@ class DashboardCanvas(QWidget):
         self.doc = default_doc()
         self.cards: list[DashboardCard] = []
         self.editing = False
+        self._grid_op = 0.0  # 编辑网格点阵的透明度（进出编辑模式时补间）
         self._link_pending: set[DashboardCard] = set()
 
         self._persist_timer = QTimer(self)
@@ -507,6 +509,7 @@ class DashboardCanvas(QWidget):
         self._apply_geometry()
         self._apply_grid_box()
         self._layout_chrome()
+        motion.fade(self, 0.25, 1.0, ms=150)
 
     def _apply_geometry(self):
         """按文档比例重摆全部卡片（构建后 / 画布尺寸变化时调用）。"""
@@ -698,6 +701,10 @@ class DashboardCanvas(QWidget):
         if touched:
             self._link_pending.update(touched)
 
+    def _set_grid_op(self, v):
+        self._grid_op = float(v)
+        self.update()
+
     def _flush_link_pending(self):
         """松手时把联动过的邻居几何一并写回布局文档（否则下次重摆会弹回）。"""
         if not self._link_pending:
@@ -715,10 +722,16 @@ class DashboardCanvas(QWidget):
         if self.editing == on:
             return
         self.editing = on
-        self.toolbar.setVisible(on)
+        self.toolbar.setVisible(True)
         for card in self.cards:
             card.set_edit_mode(on)
         self._layout_chrome()
+        if on:
+            motion.slide_in(self.toolbar, dy=-10, ms=200)
+        else:
+            motion.fade(self.toolbar, 1.0, 0.0, ms=140, on_done=self.toolbar.hide)
+        motion.tween(self._set_grid_op, 0.0 if on else 1.0,
+                     1.0 if on else 0.0, ms=220)
         self.update()
 
     def _open_palette(self):
@@ -746,6 +759,7 @@ class DashboardCanvas(QWidget):
         card.set_edit_mode(self.editing)
         card.show()
         card.raise_()
+        motion.fade(card, 0.0, 1.0, ms=180)
         self._touch(structural=True)
         return card
 
@@ -762,7 +776,7 @@ class DashboardCanvas(QWidget):
                 except Exception:
                     pass
         self.doc.items = [it for it in self.doc.items if it is not card.item]
-        card.deleteLater()
+        motion.fade(card, 1.0, 0.0, ms=130, on_done=card.deleteLater)
         self._touch(structural=True)
 
     def _find_free_spot(self, card_type: str, fx, fy, fw, fh) -> tuple[int, int, int, int]:
@@ -875,8 +889,9 @@ class DashboardCanvas(QWidget):
         return self._grid_pix
 
     def paintEvent(self, e):
-        if self.editing and self.doc.grid > 0:
+        if self._grid_op > 0.01 and self.doc.grid > 0:
             p = QPainter(self)
+            p.setOpacity(self._grid_op)
             p.drawPixmap(0, 0, self._grid_pixmap())
             p.end()
         super().paintEvent(e)

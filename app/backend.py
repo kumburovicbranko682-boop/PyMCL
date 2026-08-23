@@ -936,6 +936,7 @@ class BackendAPI(QObject):
             "feedback_heartbeat": bool(CONFIG.get("feedback_heartbeat", True)),
             "feedback_consent": CONFIG.get("feedback_consent") is True,
             "ui_fly_animation": bool(CONFIG.get("ui_fly_animation", True)),
+            "ui_motion": bool(CONFIG.get("ui_motion", True)),
             "ui_fly_duration_ms": int(CONFIG.get("ui_fly_duration_ms", 620)),
             "default_isolation": CONFIG.get("default_isolation") or "none",
             "default_jvm_args": CONFIG.get("default_jvm_args") or "",
@@ -1003,6 +1004,7 @@ class BackendAPI(QObject):
             "community_source": (data.get("community_source") or CONFIG.get("community_source") or "auto"),
             "use_system_proxy": bool(data.get("use_system_proxy", CONFIG.get("use_system_proxy", True))),
             "ui_fly_animation": bool(data.get("ui_fly_animation", CONFIG.get("ui_fly_animation", True))),
+            "ui_motion": bool(data.get("ui_motion", CONFIG.get("ui_motion", True))),
             "ui_fly_duration_ms": int(data.get("ui_fly_duration_ms")
                                       or CONFIG.get("ui_fly_duration_ms") or 620),
             "default_isolation": (data.get("default_isolation") or CONFIG.get("default_isolation") or "none"),

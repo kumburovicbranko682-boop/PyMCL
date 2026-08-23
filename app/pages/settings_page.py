@@ -113,6 +113,12 @@ class SettingsPage(QWidget):
         root.addWidget(iso_group)
 
         ui_group = SettingCardGroup(tr("界面"), host)
+        self.motion_card, self.motion_sw = _switch_card(
+            FIF.PLAY if hasattr(FIF, "PLAY") else FIF.SYNC,
+            tr("界面动画"),
+            tr("换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时"),
+            checked=bool(settings.get("ui_motion", True)))
+        ui_group.addSettingCard(self.motion_card)
         self.fly_card, self.fly_sw = _switch_card(
             FIF.SYNC,
             tr("下载飞入动画"),
@@ -951,6 +957,7 @@ class SettingsPage(QWidget):
             "gc_preset": self._gc_keys.get(self.gc_box.currentText(), "auto"),
             "download_limit_kbps": self.limit_spin.value(),
             "auto_check_update": self.auto_upd.isChecked(),
+            "ui_motion": self.motion_sw.isChecked(),
             "homepage_mode": self._home_keys.get(self.home_box.currentText(), "news"),
             "custom_homepage": self.hp_edit.text().strip(),
             "window_mode": self._win_keys.get(self.win_box.currentText(), "window"),

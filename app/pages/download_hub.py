@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
+from ..motion import fade as _mcl_fade
 from ..pcl_chrome import Theme
 
 
@@ -255,6 +256,7 @@ class DownloadCatBar(QFrame):
         self._lazy[index] = (btn, title)
         btn.clicked.connect(lambda _, o=owner, i=index: o._open_pending(i))
         self._add_btn(btn)
+        _mcl_fade(btn, 0.0, 1.0, ms=150)
 
     def wire_item(self, title: str, page) -> bool:
         """页面真正构造好后，把同名的懒建按钮接到页面上（不重复建按钮）。"""

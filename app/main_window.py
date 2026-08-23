@@ -1015,11 +1015,16 @@ class MainWindow(FluentWindowBase):
         if count <= 0:
             self.task_badge.hide()
             return
+        prev = int(self.task_badge.property("count") or 0)
         self.task_badge.setText("99+" if count > 99 else str(count))
         self.task_badge.adjustSize()
         self.task_badge.setFixedHeight(16)
         self.task_badge.show()
+        self.task_badge.setProperty("count", int(count))
         self._place_task_badge()
+        if count > prev:
+            from .motion import pop
+            pop(self.task_badge)
 
     def _place_task_badge(self):
         side = getattr(self, "side", None)
