@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel, MessageBoxBase, PrimaryPushButton, PushButton, StrongBodyLabel,
-    SubtitleLabel, ToolButton, TransparentToolButton,
+    SubtitleLabel, ToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -442,13 +442,6 @@ class DashboardCanvas(QWidget):
         self._persist_timer.setInterval(300)
         self._persist_timer.timeout.connect(self.layout_changed)
 
-        # 查看模式入口按钮
-        self.edit_btn = TransparentToolButton(FIF.EDIT, self)
-        self.edit_btn.setText(tr("编辑布局"))
-        self.edit_btn.setToolTip(tr("自由调整启动页布局：拖动、缩放、增删卡片"))
-        self.edit_btn.clicked.connect(lambda: self.set_edit_mode(True))
-        self._style_edit_btn()
-
         # 编辑模式工具条
         self.toolbar = QFrame(self)
         self.toolbar.setObjectName("dashToolbar")
@@ -722,7 +715,6 @@ class DashboardCanvas(QWidget):
         if self.editing == on:
             return
         self.editing = on
-        self.edit_btn.setVisible(not on)
         self.toolbar.setVisible(on)
         for card in self.cards:
             card.set_edit_mode(on)
@@ -833,19 +825,6 @@ class DashboardCanvas(QWidget):
     # ------------------------------------------------------------------
     # 视觉
     # ------------------------------------------------------------------
-    def _style_edit_btn(self):
-        from .pcl_chrome import Theme
-        # 胶囊样式：卡片底 + 描边，压在横幅渐变上也读得清；
-        # 注意只有带 f 前缀的段才有 {{}} 转义，普通字符串段必须写单括号
-        self.edit_btn.setStyleSheet(
-            f"TransparentToolButton {{ color: {Theme.text}; background: {Theme.card};"
-            f" border: 1px solid {Theme.line}; padding: 6px 14px; border-radius: 16px; }}"
-            f"TransparentToolButton:hover {{ color: {Theme.green};"
-            f" border-color: {Theme.green}; background: {Theme.card}; }}"
-            f"TransparentToolButton:pressed {{ background: {Theme.hover}; }}"
-        )
-        self.edit_btn.adjustSize()
-
     def _style_toolbar(self):
         from .pcl_chrome import Theme
         self.toolbar.setStyleSheet(
@@ -854,21 +833,14 @@ class DashboardCanvas(QWidget):
         )
 
     def restyle(self):
-        self._style_edit_btn()
         self._style_toolbar()
         for card in self.cards:
             card.restyle()
 
     def _layout_chrome(self):
-        """摆放入口按钮 / 工具条，并保证层级在最上。"""
-        m = 8
-        if not self.editing:
-            # 查看模式入口放右下角：横幅铺满画布顶部，放顶部必然压在横幅上
-            self.edit_btn.adjustSize()
-            self.edit_btn.move(self.width() - self.edit_btn.width() - m,
-                               self.height() - self.edit_btn.height() - m)
-            self.edit_btn.raise_()
-        else:
+        """摆放编辑工具条，并保证层级在最上。"""
+        if self.editing:
+            m = 8
             self.toolbar.adjustSize()
             self.toolbar.move(max(m, self.width() - self.toolbar.width() - m), m)
             self.toolbar.raise_()

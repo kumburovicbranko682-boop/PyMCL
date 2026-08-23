@@ -144,7 +144,10 @@ def t_construct_window():
 def t_edit_mode_toggle():
     c = lp.canvas
     c.set_edit_mode(True)
-    assert_(c.editing and c.toolbar.isVisible() and not c.edit_btn.isVisible())
+    assert_(c.editing and c.toolbar.isVisible())
+    # 入口按钮已挪到画布外（启动页顶部细栏），不再盖住卡片
+    assert_(not hasattr(c, "edit_btn"))
+    assert_(lp.edit_entry_btn.isVisible() and lp.edit_entry_btn.isEnabled())
     card = c.cards[0]
     assert_(card.shield.isVisible(), "shield on")
     assert_(all(g.isVisible() for g in card.grips), "grips on")
