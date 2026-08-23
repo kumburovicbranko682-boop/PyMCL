@@ -756,71 +756,15 @@ PclSubButton = PclNavButton
 
 
 def fade_stack_to(stack, widget, holder, duration: int = 170):
-    """主栈切页：新页从右缘滑入盖住旧页，旧页轻微视差退场。
-
-    旧实现是「底层先切好新页，旧页截图再淡出划走」，能看出内容
-    其实早就换了。改为双层封面：旧页截图静止垫底，新页截图从右
-    缘滑入——运动的是新内容本身。纯位移动画（不用 opacity
-    effect），每帧只是位图搬运，低端机也稳。
+    """主栈切页。曾经做过「截图封面滑入/淡出」，但每点一次导航都要
+    同步抓整屏光栅图，弱机就是肉眼可见的顿挫——换页直接瞬时，
+    动效只留给小范围的局部动画（进度补间、角标脉冲等）。
     """
-    from .motion_prefs import ui_motion_ok
-
-    old = stack.currentWidget()
-    if widget is None or widget is old:
-        return
-    if old is None or stack.width() < 8 or not ui_motion_ok():
-        _set_stack(stack, widget)
-        return
-    pix_old = old.grab()
+    _cleanup_nav_covers(holder)
     _set_stack(stack, widget)
-    if pix_old.isNull():
-        return
-    pix_new = widget.grab()
-    if pix_new.isNull():
-        return
-    w, h = stack.width(), stack.height()
-    gen = getattr(holder, "_nav_fade_gen", 0) + 1
-    holder._nav_fade_gen = gen
 
-    base = QLabel(stack)   # 旧页：静止垫底 + 视差左移
-    base.setPixmap(pix_old)
-    base.setScaledContents(True)
-    base.setGeometry(0, 0, w, h)
-    layer = QLabel(stack)  # 新页：从右缘滑入
-    layer.setPixmap(pix_new)
-    layer.setScaledContents(True)
-    layer.setGeometry(w, 0, w, h)
-    for c in (base, layer):
-        c.show()
-        c.raise_()
 
-    a_new = QPropertyAnimation(layer, b"pos", layer)
-    a_new.setDuration(duration)
-    a_new.setStartValue(QPoint(w, 0))
-    a_new.setEndValue(QPoint(0, 0))
-    a_new.setEasingCurve(QEasingCurve.OutCubic)
-    a_base = QPropertyAnimation(base, b"pos", base)
-    a_base.setDuration(duration)
-    a_base.setStartValue(QPoint(0, 0))
-    a_base.setEndValue(QPoint(-24, 0))
-    a_base.setEasingCurve(QEasingCurve.OutCubic)
-
-    def cleanup():
-        if getattr(holder, "_nav_fade_gen", 0) != gen:
-            return
-        for c in (base, layer):
-            try:
-                c.hide()
-                c.deleteLater()
-            except RuntimeError:
-                pass
-        if getattr(holder, "_nav_fade", None) is group:
-            holder._nav_fade = None
-            holder._nav_cover = None
-
-    group = QParallelAnimationGroup(layer)
-    group.addAnimation(a_new)
-    group.addAnimation(a_base)
+def _cleanup_nav_covers(holder):
     prev = getattr(holder, "_nav_cover", None)
     if prev is not None:
         try:
@@ -828,10 +772,14 @@ def fade_stack_to(stack, widget, holder, duration: int = 170):
             prev.deleteLater()
         except RuntimeError:
             pass
-    holder._nav_cover = layer
-    holder._nav_fade = group
-    group.finished.connect(cleanup)
-    group.start()
+        holder._nav_cover = None
+    group = getattr(holder, "_nav_fade", None)
+    if group is not None:
+        try:
+            group.stop()
+        except RuntimeError:
+            pass
+        holder._nav_fade = None
 
 
 def _stack_popout(stack, widget) -> bool:

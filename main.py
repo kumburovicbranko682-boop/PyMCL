@@ -562,16 +562,6 @@ def gui_main():
 
     install_guard(ui_hook=_ui_hook)
     window.show()
-    from app.motion_prefs import ui_motion_ok
-    if ui_motion_ok():
-        from PySide6.QtCore import QPropertyAnimation, QEasingCurve
-        window.setWindowOpacity(0.0)
-        wa = QPropertyAnimation(window, b"windowOpacity", window)
-        wa.setDuration(130)
-        wa.setStartValue(0.35)
-        wa.setEndValue(1.0)
-        wa.setEasingCurve(QEasingCurve.OutCubic)
-        wa.start()
     sys.exit(qt_app.exec())
 
 

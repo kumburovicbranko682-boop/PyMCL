@@ -509,7 +509,6 @@ class DashboardCanvas(QWidget):
         self._apply_geometry()
         self._apply_grid_box()
         self._layout_chrome()
-        motion.fade(self, 0.4, 1.0, ms=120)
 
     def _apply_geometry(self):
         """按文档比例重摆全部卡片（构建后 / 画布尺寸变化时调用）。"""
