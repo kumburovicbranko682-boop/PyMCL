@@ -428,6 +428,7 @@ class PclSideBar(QFrame):
     pinRequested = Signal(str)          # 兼容旧信号（无落点固定）
     pinAtRequested = Signal(str, str, bool)  # 拖到落点固定：(key, 目标key, 之前/之后)
     reorderRequested = Signal(str, str, bool)  # 侧栏内重排
+    editLayoutRequested = Signal()      # 底部「编辑布局」动作（不切换页面）
 
     def __init__(self, items: list, parent=None, width: int | None = None):
         super().__init__(parent)
@@ -476,6 +477,18 @@ class PclSideBar(QFrame):
                 first = spec[1]
         if not had_stretch:
             sl.addStretch(1)
+
+        # 底部动作：编辑启动页布局。放在侧栏最底（画布被卡片铺满，
+        # 悬浮按钮放页面里总会压住卡片文字——用户两轮实测）。
+        from qfluentwidgets import FluentIcon as _FIF
+        from mclauncher.i18n import tr as _tr
+        self.edit_btn = PclNavButton(_FIF.EDIT, _tr("编辑布局"), indent=False)
+        self.edit_btn.setCheckable(False)
+        self.edit_btn.setCursor(Qt.PointingHandCursor)
+        self.edit_btn.setToolTip(_tr("自由调整启动页布局：拖动、缩放、增删卡片"))
+        self.edit_btn.clicked.connect(self.editLayoutRequested.emit)
+        sl.addWidget(self.edit_btn)
+
         self.restyle()
         if first:
             self.set_current(first, emit=False)

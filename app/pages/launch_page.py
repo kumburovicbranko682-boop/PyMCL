@@ -2,11 +2,10 @@
 """启动页：自由布局画布（横幅/配置/日志/新闻/便签等卡片，可任意拖拽缩放）。"""
 
 from PySide6.QtCore import QTimer, QUrl
-from PySide6.QtWidgets import QHBoxLayout, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QTextBrowser, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, InfoBar, InfoBarPosition, StrongBodyLabel, TransparentToolButton,
+    CaptionLabel, InfoBar, InfoBarPosition, StrongBodyLabel,
 )
-from qfluentwidgets import FluentIcon as FIF
 
 from mclauncher.config import CONFIG
 from mclauncher.instances import JAVA_AUTO
@@ -59,20 +58,6 @@ class LaunchPage(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 12, 16, 12)
         root.setSpacing(0)
-
-        # 编辑入口放在画布外的顶部细栏：画布被卡片铺满，悬浮在任何角
-        # 都会压住卡片文字（用户实测两轮都有字叠字）。
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 8)
-        top.addStretch(1)
-        self.edit_entry_btn = TransparentToolButton(FIF.EDIT, self)
-        self.edit_entry_btn.setText(tr("编辑布局"))
-        self.edit_entry_btn.setToolTip(tr("自由调整启动页布局：拖动、缩放、增删卡片"))
-        self.edit_entry_btn.clicked.connect(lambda: self.canvas.set_edit_mode(True))
-        top.addWidget(self.edit_entry_btn)
-        root.addLayout(top)
-        self._style_edit_entry()
-
         root.addWidget(self.canvas)
 
         self._layout_persist = QTimer(self)
@@ -123,19 +108,6 @@ class LaunchPage(QWidget):
 
     def restyle(self):
         self.canvas.restyle()
-        self._style_edit_entry()
-
-    def _style_edit_entry(self):
-        from ..pcl_chrome import Theme
-        # 胶囊样式：卡片底 + 描边 + 悬停描绿（f 段才需要 {{}} 转义）
-        self.edit_entry_btn.setStyleSheet(
-            f"TransparentToolButton {{ color: {Theme.text}; background: {Theme.card};"
-            f" border: 1px solid {Theme.line}; padding: 6px 14px; border-radius: 16px; }}"
-            f"TransparentToolButton:hover {{ color: {Theme.green};"
-            f" border-color: {Theme.green}; background: {Theme.card}; }}"
-            f"TransparentToolButton:pressed {{ background: {Theme.hover}; }}"
-        )
-        self.edit_entry_btn.adjustSize()
 
     def _boot_load(self):
         if getattr(self, "_boot_loaded", False):

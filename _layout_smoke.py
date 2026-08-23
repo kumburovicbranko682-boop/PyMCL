@@ -145,9 +145,12 @@ def t_edit_mode_toggle():
     c = lp.canvas
     c.set_edit_mode(True)
     assert_(c.editing and c.toolbar.isVisible())
-    # 入口按钮已挪到画布外（启动页顶部细栏），不再盖住卡片
-    assert_(not hasattr(c, "edit_btn"))
-    assert_(lp.edit_entry_btn.isVisible() and lp.edit_entry_btn.isEnabled())
+    # 入口按钮已挪到侧边栏底部，不再盖住卡片
+    assert_(not hasattr(c, "edit_btn") and not hasattr(lp, "edit_entry_btn"))
+    sbtn = lp.window().side.edit_btn
+    assert_(sbtn.isVisible() and sbtn.isEnabled())
+    sbtn.click()
+    assert_(lp.canvas.editing, "sidebar entry enters edit mode")
     card = c.cards[0]
     assert_(card.shield.isVisible(), "shield on")
     assert_(all(g.isVisible() for g in card.grips), "grips on")

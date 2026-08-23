@@ -230,6 +230,8 @@ class MainWindow(FluentWindowBase):
         self.side.widthCommitted.connect(self._on_side_width)
         self.side.pinAtRequested.connect(self._pin_nav_at)
         self.side.reorderRequested.connect(self._on_sidebar_reorder)
+        self.side.editLayoutRequested.connect(
+            lambda: self.launch_page.canvas.set_edit_mode(True))
 
         self.hBoxLayout.setContentsMargins(0, TITLE_H, 0, 0)
         self.hBoxLayout.addWidget(self.side)
@@ -511,6 +513,8 @@ class MainWindow(FluentWindowBase):
         self.side.widthCommitted.connect(self._on_side_width)
         self.side.pinAtRequested.connect(self._pin_nav_at)
         self.side.reorderRequested.connect(self._on_sidebar_reorder)
+        self.side.editLayoutRequested.connect(
+            lambda: self.launch_page.canvas.set_edit_mode(True))
         self.hBoxLayout.insertWidget(0, self.side)
         self._create_task_badge()
         # 恢复选中态；原来的键被隐藏时回落到第一个可见项
