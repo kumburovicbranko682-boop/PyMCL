@@ -996,5 +996,16 @@
   "默认游戏窗口": "Default game window",
   "（可多选）": "(multi-select)",
   "（本轮：": "(this round:",
-  "＋ 新建实例": "+ New instance"
+  "＋ 新建实例": "+ New instance",
+  "冲突扫描": "Conflict scan",
+  "冲突扫描结果": "Conflict scan results",
+  "冲突扫描失败": "Conflict scan failed",
+  "共 {n} 个模组（启用 {on}）": "{n} mods total ({on} enabled)",
+  "未发现重复安装、缺失依赖或互斥模组": "No duplicate installs, missing dependencies or incompatible mods found",
+  "模组 {id} 安装了 {n} 份：{files}": "Mod {id} is installed {n} times: {files}",
+  "{name} 缺少依赖 {need}": "{name} is missing dependency {need}",
+  "{file} 是 {ml} 模组，当前目标是 {need}": "{file} is a {ml} mod, but the current target is {need}",
+  "{id} 与 {other} 不兼容": "{id} is incompatible with {other}",
+  "缺失的依赖可到「下载」页搜索安装": "Missing dependencies can be found and installed from the Download page",
+  "知道了": "Got it"
 }

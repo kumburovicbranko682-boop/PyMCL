@@ -233,8 +233,8 @@ def inspect_jar(path: Path) -> dict:
     return info
 
 
-def _mod_files(instance: Instance) -> list[Path]:
-    mods_dir = instance.path / "mods"
+def _mod_files(instance: Instance, mods_dir: Path | None = None) -> list[Path]:
+    mods_dir = Path(mods_dir) if mods_dir else instance.path / "mods"
     if not mods_dir.is_dir():
         return []
     out = []
@@ -243,7 +243,7 @@ def _mod_files(instance: Instance) -> list[Path]:
         if n.endswith(".jar") or n.endswith(".jar.disabled") or n.endswith(".disabled"):
             if p.is_file():
                 out.append(p)
-    if not out:
+    if not out and mods_dir == instance.path / "mods":
         out = list_instance_mods(instance)
     return out
 
@@ -254,10 +254,24 @@ _SKIP_DEP = {
 }
 
 
-def scan_conflicts(instance: Instance) -> dict:
-    loader = detect_loader(instance)
-    mc = detect_mc_version(instance)
-    files = _mod_files(instance)
+def _loader_from_vid(version_id: str):
+    low = str(version_id or "").lower()
+    for name in ("fabric", "quilt", "neoforge", "forge"):
+        if name in low:
+            return name
+    return None
+
+
+def scan_conflicts(instance: Instance, mods_dir: Path | None = None,
+                   version_id: str = "") -> dict:
+    """扫描 mods 目录：重复安装、缺依赖、加载器不匹配、互斥模组。
+
+    mods_dir/version_id 用于版本隔离目录：按那个版本推断加载器和 MC 版本。
+    """
+    from mclauncher.mods import _mc_version_from_text
+    loader = _loader_from_vid(version_id) or detect_loader(instance)
+    mc = (_mc_version_from_text(version_id) if version_id else None) or detect_mc_version(instance)
+    files = _mod_files(instance, mods_dir)
     mods = [inspect_jar(p) for p in files]
     by_id = {}
     issues = []
@@ -290,6 +304,8 @@ def scan_conflicts(instance: Instance) -> dict:
                     "severity": "error",
                     "id": m.get("id"),
                     "file": m.get("file"),
+                    "mod_loader": ml,
+                    "need": loader,
                     "message": f"{m.get('file')} 是 {ml} 模组，当前实例是 {loader}",
                 })
         for dep in m.get("depends") or []:
@@ -330,6 +346,7 @@ def scan_conflicts(instance: Instance) -> dict:
 
     return {
         "instance": instance.name,
+        "version": version_id or "",
         "loader": loader,
         "mc_version": mc,
         "mod_count": len(mods),

@@ -12,9 +12,9 @@ from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
-    MessageBox, PushButton, SubtitleLabel, SwitchButton, TransparentPushButton,
-    TransparentToolButton,
+    BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
+    LineEdit, MessageBox, MessageBoxBase, PushButton, SubtitleLabel, SwitchButton,
+    TransparentPushButton, TransparentToolButton,
 )
 
 from mclauncher.config import CONFIG
@@ -22,6 +22,76 @@ from mclauncher.i18n import tr
 from ..pcl_chrome import Theme, ghost_btn_qss, row_qss
 from ..widgets import EmptyState, IconTile, Pill
 from .catalog_page import PclCard
+
+
+def _issue_text(issue: dict) -> str:
+    """把结构化冲突条目拼成用户可读文案（走 i18n）。"""
+    kind = issue.get("type")
+    if kind == "duplicate_id":
+        files = "、".join(issue.get("files") or [])
+        return tr("模组 {id} 安装了 {n} 份：{files}").format(
+            id=issue.get("id"), n=len(issue.get("files") or []), files=files)
+    if kind == "missing_dep":
+        return tr("{name} 缺少依赖 {need}").format(
+            name=issue.get("file") or issue.get("id"), need=issue.get("need"))
+    if kind == "loader_mismatch":
+        return tr("{file} 是 {ml} 模组，当前目标是 {need}").format(
+            file=issue.get("file"), ml=issue.get("mod_loader"), need=issue.get("need"))
+    if kind == "breaks":
+        return tr("{id} 与 {other} 不兼容").format(
+            id=issue.get("id"), other=issue.get("other"))
+    return str(issue.get("message") or "")
+
+
+class _ConflictDialog(MessageBoxBase):
+    """冲突扫描结果：问题列表或「一切正常」。"""
+
+    def __init__(self, report: dict, parent=None):
+        super().__init__(parent)
+        issues = report.get("issues") or []
+        self.viewLayout.addWidget(SubtitleLabel(tr("冲突扫描结果"), self))
+
+        parts = [tr("共 {n} 个模组（启用 {on}）").format(
+            n=report.get("mod_count") or 0, on=report.get("enabled") or 0)]
+        if report.get("loader"):
+            parts.append(str(report["loader"]))
+        if report.get("mc_version"):
+            parts.append(str(report["mc_version"]))
+        summary = CaptionLabel(" · ".join(parts), self)
+        summary.setStyleSheet(f"color: {Theme.muted};")
+        self.viewLayout.addWidget(summary)
+
+        if not issues:
+            ok_label = BodyLabel(tr("未发现重复安装、缺失依赖或互斥模组"), self)
+            ok_label.setStyleSheet("color: #2E9B6B; font-weight: 600;")
+            self.viewLayout.addWidget(ok_label)
+        else:
+            scroll = QScrollArea(self)
+            scroll.setWidgetResizable(True)
+            scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+            host = QWidget()
+            box = QVBoxLayout(host)
+            box.setContentsMargins(0, 0, 0, 0)
+            box.setSpacing(6)
+            for issue in issues:
+                row = BodyLabel("· " + _issue_text(issue), host)
+                row.setWordWrap(True)
+                color = "#D6483C" if issue.get("severity") == "error" else "#E8862E"
+                row.setStyleSheet(f"color: {color};")
+                box.addWidget(row)
+            box.addStretch(1)
+            scroll.setWidget(host)
+            scroll.setMinimumWidth(440)
+            scroll.setMaximumHeight(320)
+            self.viewLayout.addWidget(scroll)
+            if any(i.get("type") == "missing_dep" for i in issues):
+                hint = CaptionLabel(tr("缺失的依赖可到「下载」页搜索安装"), self)
+                hint.setStyleSheet(f"color: {Theme.muted};")
+                self.viewLayout.addWidget(hint)
+
+        self.yesButton.setText(tr("知道了"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(480)
 
 
 def _fmt_size(n) -> str:
@@ -127,7 +197,9 @@ class ModManagerPage(QWidget):
         self.folder_btn = TransparentPushButton(FIF.FOLDER, tr("打开 mods 文件夹"))
         self.import_btn = TransparentPushButton(FIF.ADD, tr("导入 jar"))
         self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
-        for b in (self.folder_btn, self.import_btn, self.update_btn):
+        self.conflict_btn = TransparentPushButton(
+            getattr(FIF, "SEARCH_MIRROR", None) or FIF.SEARCH, tr("冲突扫描"))
+        for b in (self.folder_btn, self.import_btn, self.update_btn, self.conflict_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
         cv.addLayout(bar)
@@ -159,6 +231,7 @@ class ModManagerPage(QWidget):
         self.folder_btn.clicked.connect(self._open_folder)
         self.import_btn.clicked.connect(self._import_local)
         self.update_btn.clicked.connect(self._check_updates)
+        self.conflict_btn.clicked.connect(self._scan_conflicts)
         self.setAcceptDrops(True)
 
         self._reload_instances()
@@ -313,6 +386,23 @@ class ModManagerPage(QWidget):
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+
+    def _scan_conflicts(self):
+        inst = self._current_instance()
+        ver = self._current_version()
+        self.conflict_btn.setEnabled(False)
+
+        def ok(report):
+            self.conflict_btn.setEnabled(True)
+            _ConflictDialog(report or {}, self.window()).exec()
+
+        def err(msg):
+            self.conflict_btn.setEnabled(True)
+            InfoBar.error(tr("冲突扫描失败"), str(msg), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        self.backend.call_async(
+            lambda: self.backend.scan_mod_conflicts(inst, ver), ok, err)
 
     # ------------------------------------------------------------------
     def dragEnterEvent(self, event):

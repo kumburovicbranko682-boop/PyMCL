@@ -1051,6 +1051,16 @@ class BackendAPI:
     def start_mod_updates(self, instance: str) -> str:
         return self.start_task(f"检查模组更新 {instance}", self._mod_update_impl, instance)
 
+    def scan_mod_conflicts(self, instance: str, version: str = "") -> dict:
+        """扫描 mods：重复安装、缺依赖、加载器不匹配、互斥模组。
+
+        version 非空时扫那个版本的隔离 mods 目录，并按它推断加载器。
+        """
+        from mclauncher.ai.conflict import scan_conflicts
+        inst = self._instance(instance)
+        mods_dir = self._mods_folder(inst, version) if version else None
+        return scan_conflicts(inst, mods_dir=mods_dir, version_id=version)
+
     def cleaner_preview(self) -> dict:
         from mclauncher import cleaner as cleaner_mod
         return cleaner_mod.preview()
