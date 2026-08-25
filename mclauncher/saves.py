@@ -36,6 +36,48 @@ def _safe_child(folder: Path, name: str, what: str = "存档") -> Path:
     return target
 
 
+_GAME_MODES = {0: "生存", 1: "创造", 2: "冒险", 3: "旁观"}
+
+
+def read_level_meta(save_dir) -> dict:
+    """解析存档 level.dat（gzip NBT），失败时返回空 dict。"""
+    from . import nbt_lite as nbt
+    p = Path(save_dir) / "level.dat"
+    if not p.is_file():
+        return {}
+    try:
+        _root_name, root = nbt.loads(p.read_bytes())
+    except Exception:
+        return {}
+    data_tag = root.get("Data")
+    if not (isinstance(data_tag, tuple) and data_tag[0] == nbt.TAG_COMPOUND):
+        return {}
+    data = data_tag[1]
+
+    def val(key, default=None):
+        tag = data.get(key)
+        return tag[1] if isinstance(tag, tuple) else default
+
+    version_name = ""
+    vtag = data.get("Version")
+    if isinstance(vtag, tuple) and vtag[0] == nbt.TAG_COMPOUND:
+        ntag = vtag[1].get("Name")
+        version_name = ntag[1] if isinstance(ntag, tuple) else ""
+    game_type = int(val("GameType", 0) or 0)
+    hardcore = bool(val("hardcore", 0))
+    mode = "硬核" if hardcore else _GAME_MODES.get(game_type, "?")
+    return {
+        "level_name": str(val("LevelName", "") or ""),
+        "version_name": str(version_name),
+        "game_type": game_type,
+        "mode": mode,
+        "hardcore": hardcore,
+        "cheats": bool(val("allowCommands", 0)),
+        # LastPlayed 是毫秒时间戳
+        "last_played": int(val("LastPlayed", 0) or 0) // 1000,
+    }
+
+
 def list_saves(instance: Instance, version_id: str = "") -> list[dict]:
     folder = _game_dir(instance, version_id) / "saves"
     if not folder.is_dir():
@@ -51,6 +93,7 @@ def list_saves(instance: Instance, version_id: str = "") -> list[dict]:
             "icon": str(icon) if icon.is_file() else "",
             "bytes": _dir_size(p),
             "mtime": int(p.stat().st_mtime),
+            **read_level_meta(p),
         })
     return rows
 

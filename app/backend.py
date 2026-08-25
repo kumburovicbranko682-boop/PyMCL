@@ -744,6 +744,58 @@ class BackendAPI(QObject):
             extra_game_args=["--server", host, "--port", str(port)],
         )
 
+    def _latest_installed_version(self, inst) -> str:
+        ids = inst.installed_ids()
+        if not ids:
+            raise LaunchError(tr("请先到「启动」页安装一个版本。"))
+        return max(ids, key=lambda vid: (inst.versions_dir() / vid).stat().st_mtime)
+
+    def world_quickplay_supported(self, instance: str, version: str = "") -> bool:
+        """1.20+ 的版本 JSON 声明了 quickPlaySingleplayer 参数才支持直接进入世界。"""
+        import json as _json
+        inst = self._instance(instance)
+        if not version:
+            try:
+                version = self._latest_installed_version(inst)
+            except LaunchError:
+                return False
+        vjson = inst.version_json(version) or {}
+        try:
+            resolved = manifest_mod.resolve_inherits(vjson, lambda pid: inst.version_json(pid))
+        except Exception:
+            resolved = vjson
+        game_args = (resolved.get("arguments") or {}).get("game") or []
+        return "quickPlaySingleplayer" in _json.dumps(game_args)
+
+    def launch_world(self, instance: str, world: str, version: str = "") -> str:
+        """直接进入单人世界（quickPlay，需 Minecraft 1.20+）。"""
+        if not world:
+            raise LaunchError(tr("请先选择存档"))
+        inst = self._instance(instance)
+        if self.is_game_running() and not self.allow_multi_instance():
+            raise LaunchError(tr("游戏已在运行。如需同时开多个游戏，请在设置里允许多开。"))
+        version = version or self._latest_installed_version(inst)
+        if not self.world_quickplay_supported(instance, version):
+            raise LaunchError(tr("版本 {version} 不支持直接进入世界（需要 Minecraft 1.20 及以上）").format(
+                version=version))
+        acc = self.accounts.get_active()
+        if acc and acc.get("type") in ("microsoft", "authlib", "nide8"):
+            account = acc.get("name") or tr("离线模式")
+            username = acc.get("name") or "Player"
+        else:
+            account = tr("离线模式")
+            username = (acc or {}).get("name") or "Player"
+        return self.launch_game(
+            instance=inst.name,
+            version=version,
+            account=account,
+            username=username,
+            memory_mb=int(CONFIG.get("memory_mb") or 4096),
+            width=int(CONFIG.get("width") or 854),
+            height=int(CONFIG.get("height") or 480),
+            extra_game_args=["--quickPlaySingleplayer", world],
+        )
+
     def launch_game(self, instance: str, version: str, account: str,
                     username: str, memory_mb: int, width: int, height: int,
                     java: str = tr("自动选择"), extra_game_args=None) -> str:

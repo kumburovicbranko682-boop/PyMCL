@@ -34,9 +34,11 @@ class SavesDialog(MessageBoxBase):
         rows = QVBoxLayout(host)
         rows.setContentsMargins(0, 0, 0, 0)
         row = QHBoxLayout()
+        self.play_btn = PushButton(tr("进入世界"))
         self.open_btn = PushButton(tr("打开"))
         self.del_btn = PushButton(tr("删除存档"))
         self.dp_btn = PushButton(tr("把数据包装进所选存档"))
+        row.addWidget(self.play_btn)
         row.addWidget(self.open_btn)
         row.addWidget(self.del_btn)
         row.addWidget(self.dp_btn)
@@ -54,6 +56,7 @@ class SavesDialog(MessageBoxBase):
         self.cancelButton.hide()
         self.widget.setMinimumWidth(640)
         self.kind.currentTextChanged.connect(self.reload)
+        self.play_btn.clicked.connect(self._play)
         self.open_btn.clicked.connect(self._open)
         self.del_btn.clicked.connect(self._delete)
         self.dp_btn.clicked.connect(self._datapack)
@@ -65,6 +68,7 @@ class SavesDialog(MessageBoxBase):
     def _set_actions(self, kind: str):
         is_save = kind == tr("存档")
         is_backup = kind == tr("备份")
+        self.play_btn.setEnabled(is_save)
         self.del_btn.setEnabled(is_save or is_backup)
         self.del_btn.setText(tr("删除备份") if is_backup else tr("删除存档"))
         self.dp_btn.setEnabled(is_save)
@@ -94,7 +98,21 @@ class SavesDialog(MessageBoxBase):
                             pix = pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     except Exception:
                         pix = None
-                item = QListWidgetItem(f"{r['name']}  ({format_size(r.get('bytes') or 0)})")
+                details = []
+                if r.get("mode"):
+                    details.append(str(r["mode"]))
+                if r.get("version_name"):
+                    details.append(str(r["version_name"]))
+                if r.get("last_played"):
+                    import time as _time
+                    details.append(_time.strftime("%Y-%m-%d %H:%M",
+                                                  _time.localtime(r["last_played"])))
+                detail_text = " · ".join(details)
+                label = f"{r['name']}  ({format_size(r.get('bytes') or 0)})"
+                if detail_text:
+                    label += f"\n{detail_text}"
+                item = QListWidgetItem(label)
+                item.setData(Qt.UserRole, r["name"])
                 if pix:
                     item.setIcon(QIcon(pix))
                 self.list.addItem(item)
@@ -120,7 +138,22 @@ class SavesDialog(MessageBoxBase):
         item = self.list.currentItem()
         if not item:
             return ""
+        data = item.data(Qt.UserRole)
+        if data:
+            return str(data)
         return item.text().split("  (")[0]
+
+    def _play(self):
+        name = self._selected_name()
+        if not name:
+            MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
+            return
+        try:
+            self.backend.launch_world(self.instance, name, self.version)
+        except Exception as e:
+            MessageBox(tr("无法进入世界"), str(e), self).exec()
+            return
+        self.accept()
 
     def _open(self):
         name = self._selected_name()
