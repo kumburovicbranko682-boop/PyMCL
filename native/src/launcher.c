@@ -1,4 +1,5 @@
 #include "pymcl.h"
+#include <ctype.h>
 
 static cJSON *load_parent_ud(const char *pid, void *ud) {
     const char *inst = (const char *)ud;
@@ -88,6 +89,64 @@ static void apply_memory(char ***args, int *n, int memory_mb) {
     *args = out; *n = no;
 }
 
+/* 拆用户参数串追加进数组（引号感知；反斜杠按字面处理，Windows 路径友好）。
+ * 对齐 mclauncher/argsplit.split_args 的引号语义。 */
+static void split_args_append(const char *text, char ***out, int *n) {
+    if (!text) return;
+    const char *p = text;
+    char tok[2048];
+    while (*p) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+        size_t L = 0;
+        char q = 0;
+        while (*p && (q || !isspace((unsigned char)*p))) {
+            if (!q && (*p == '"' || *p == '\'')) { q = *p++; continue; }
+            if (q && *p == q) { q = 0; p++; continue; }
+            if (L + 1 < sizeof(tok)) tok[L++] = *p;
+            p++;
+        }
+        tok[L] = 0;
+        if (L) {
+            *out = (char **)realloc(*out, sizeof(char *) * (size_t)(*n + 1));
+            (*out)[(*n)++] = pymcl_strdup(tok);
+        }
+    }
+}
+
+/* GC 预设参数表（对齐 mclauncher/gc.py 的 ARGS，未知键回落 auto）。 */
+static const char *gc_preset_args(const char *key) {
+    static const struct { const char *k; const char *a; } tbl[] = {
+        { "auto", "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 -XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M" },
+        { "g1", "-XX:+UseG1GC" },
+        { "g1_tuned", "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 "
+                      "-XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M "
+                      "-XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:+ParallelRefProcEnabled" },
+        { "zgc", "-XX:+UseZGC -XX:+UnlockExperimentalVMOptions" },
+        { "none", "" },
+    };
+    if (!key || !key[0]) key = "auto";
+    for (size_t i = 0; i < sizeof(tbl) / sizeof(tbl[0]); i++)
+        if (pymcl_ieq(key, tbl[i].k)) return tbl[i].a;
+    return tbl[0].a;
+}
+
+/* GC 预设接到版本 jvm_args 前面；用户已写 GC 旗标时不叠加（对齐 gc.apply）。 */
+static void gc_merge_jvm(const char *preset, const char *existing, char *out, size_t n) {
+    char **bits = NULL; int nb = 0;
+    split_args_append(existing, &bits, &nb);
+    int has_gc = 0;
+    for (int i = 0; i < nb; i++) {
+        if (pymcl_startswith(bits[i], "-XX:+Use") && strstr(bits[i], "GC")) has_gc = 1;
+        free(bits[i]);
+    }
+    free(bits);
+    const char *extra = gc_preset_args(preset);
+    if (has_gc || !extra[0]) snprintf(out, n, "%s", existing ? existing : "");
+    else if (!existing || !existing[0]) snprintf(out, n, "%s", extra);
+    else snprintf(out, n, "%s %s", extra, existing);
+}
+
 static void patch_ignore(char **args, int n, const char **names, int nn) {
     for (int i = 0; i < n; i++) {
         if (!pymcl_startswith(args[i], "-DignoreList=")) continue;
@@ -107,7 +166,20 @@ static void patch_ignore(char **args, int n, const char **names, int nn) {
 
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,
                          const char *java_exe, int memory_mb, int width, int height,
+                         cJSON *extra_game_args,
                          char ***argv, int *argc, char *natives_out, size_t nn) {
+    /* 版本设置以前在 C 桥启动时完全不生效：内存/JVM/GC/游戏参数/直连/
+     * 全屏/窗口尺寸保存了也白存。取值次序对齐 launch_flow.prepare。 */
+    pymcl_launch_prep prep;
+    pymcl_launch_prep_load(instance, version, &prep);
+    if (prep.memory_mb > 0) memory_mb = prep.memory_mb;
+    if (prep.window_width > 0) width = prep.window_width;
+    if (prep.window_height > 0) height = prep.window_height;
+    if (prep.fullscreen) {
+        /* 全屏兜底 1280x720（对齐 launch_flow.resolve_resolution）。 */
+        if (width < 1280) width = 1280;
+        if (height < 720) height = 720;
+    }
     cJSON *vjson = instance_version_json(instance, version);
     if (!vjson) { pymcl_set_error("版本 %s 未安装，请先安装。", version); return -1; }
     cJSON *resolved = manifest_resolve_inherits(vjson, load_parent_ud, (void *)instance);
@@ -290,6 +362,23 @@ int build_launch_command(const char *instance, const char *version, cJSON *accou
         jvm[nj++] = pymcl_strdup("-Dfml.ignoreInvalidMinecraftCertificates=true");
         jvm[nj++] = pymcl_strdup("-Dfml.ignorePatchDiscrepancies=true");
     }
+    /* 全局 default_jvm_args + GC 预设 + 版本 jvm_args 插在清单参数前
+     * （对齐 mclauncher/launcher.py: default_jvm + extra_jvm + jvm_args）；
+     * 用户写的 -Xmx/-Xms 随后被 apply_memory 统一收编，与 Python 相同。 */
+    {
+        char merged[4096];
+        gc_merge_jvm(prep.gc, prep.jvm_args, merged, sizeof(merged));
+        char **pre = NULL; int np = 0;
+        split_args_append(config_str("default_jvm_args", ""), &pre, &np);
+        split_args_append(merged, &pre, &np);
+        if (np) {
+            jvm = (char **)realloc(jvm, sizeof(char *) * (size_t)(nj + np));
+            memmove(jvm + np, jvm, sizeof(char *) * (size_t)nj);
+            for (int i = 0; i < np; i++) jvm[i] = pre[i];
+            nj += np;
+            free(pre);
+        }
+    }
     if (manifest_is_legacy(resolved) && memory_mb > 1024) memory_mb = 1024;
     for (int i = 0; i < nj; i++) if (strcmp(jvm[i], "-p") == 0) { free(jvm[i]); jvm[i] = pymcl_strdup("--module-path"); }
     apply_memory(&jvm, &nj, memory_mb);
@@ -318,6 +407,47 @@ int build_launch_command(const char *instance, const char *version, cJSON *accou
             snprintf(a, sizeof(a), "-Dlog4j.configurationFile=%s", lp);
             jvm = (char **)realloc(jvm, sizeof(char *) * (size_t)(nj + 1));
             jvm[nj++] = pymcl_strdup(a);
+        }
+    }
+    /* 附加游戏参数：RPC extra_game_args（WinUI 启动页直连服务器以前被
+     * 整个丢弃）+ 版本设置 game_args + 直连 --server/--port + 全屏，
+     * 追加在清单游戏参数之后（对齐 launch_flow.prepare 的 extras）。 */
+    {
+        char **ex = NULL; int ne = 0;
+        if (cJSON_IsArray(extra_game_args)) {
+            cJSON *e;
+            cJSON_ArrayForEach(e, extra_game_args) {
+                char buf[512] = {0};
+                if (cJSON_IsString(e) && e->valuestring[0])
+                    snprintf(buf, sizeof(buf), "%s", e->valuestring);
+                else if (cJSON_IsNumber(e))
+                    snprintf(buf, sizeof(buf), "%d", e->valueint);
+                if (!buf[0]) continue;
+                ex = (char **)realloc(ex, sizeof(char *) * (size_t)(ne + 1));
+                ex[ne++] = pymcl_strdup(buf);
+            }
+        }
+        split_args_append(prep.game_args, &ex, &ne);
+        int has_server = 0, has_fs = 0;
+        for (int i = 0; i < ne; i++) {
+            if (strcmp(ex[i], "--server") == 0) has_server = 1;
+            if (strcmp(ex[i], "--fullscreen") == 0) has_fs = 1;
+        }
+        if (prep.server[0] && !has_server) {
+            ex = (char **)realloc(ex, sizeof(char *) * (size_t)(ne + 4));
+            ex[ne++] = pymcl_strdup("--server");
+            ex[ne++] = pymcl_strdup(prep.server);
+            ex[ne++] = pymcl_strdup("--port");
+            ex[ne++] = pymcl_strdup(prep.port[0] ? prep.port : "25565");
+        }
+        if (prep.fullscreen && !has_fs) {
+            ex = (char **)realloc(ex, sizeof(char *) * (size_t)(ne + 1));
+            ex[ne++] = pymcl_strdup("--fullscreen");
+        }
+        if (ne) {
+            game = (char **)realloc(game, sizeof(char *) * (size_t)(ng + ne));
+            for (int i = 0; i < ne; i++) game[ng++] = ex[i];
+            free(ex);
         }
     }
     const char *mainc = cJSON_GetStringValue(cJSON_GetObjectItem(resolved, "mainClass")) ?: "net.minecraft.client.main.Main";

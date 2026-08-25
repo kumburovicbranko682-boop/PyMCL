@@ -230,8 +230,23 @@ char *select_native_classifier(cJSON *lib);
 int install_loader(const char *instance, const char *loader, const char *ver, const char *mc, pymcl_ctx *ctx, char *vid_out, size_t n);
 
 /* ---------- launcher ---------- */
+/* 启动参数侧的版本/全局设置（对齐 mclauncher/launch_flow.prepare）。
+ * 0 / 空串表示无覆盖。 */
+typedef struct {
+    int memory_mb;
+    int window_width;
+    int window_height;
+    int fullscreen;            /* window_mode ∈ {maximize, fullscreen} */
+    char gc[32];               /* 生效 GC 预设键：版本 > 全局 gc_preset > auto */
+    char jvm_args[2048];       /* 版本设置 jvm_args 原文 */
+    char game_args[2048];      /* 版本设置 game_args 原文 */
+    char server[256];          /* 直连服务器 */
+    char port[16];
+} pymcl_launch_prep;
+void pymcl_launch_prep_load(const char *instance, const char *version_id, pymcl_launch_prep *out);
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,
                          const char *java_exe, int memory_mb, int width, int height,
+                         cJSON *extra_game_args,
                          char ***argv, int *argc, char *natives_out, size_t nn);
 HANDLE game_spawn(const char **argv, int argc, const char *cwd, HANDLE *pipe);
 void game_kill(HANDLE proc);

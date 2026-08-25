@@ -209,6 +209,44 @@ int pymcl_apply_isolation(const char *inst, const char *ver, char *gdir_out, siz
     return 0;
 }
 
+/* 启动参数侧的版本/全局设置（对齐 launch_flow.prepare 的取值次序）。
+ * 版本设置对话框保存的 内存/JVM/GC/游戏参数/直连/全屏/窗口尺寸 以前在
+ * C 桥启动时一个都不生效：保存提示是真的，启动命令完全不体现。 */
+/* 正整数设置值；容忍字符串数字（Python 侧 int() 同样接受）。 */
+static int vs_positive_int(cJSON *v) {
+    if (cJSON_IsNumber(v)) return v->valueint > 0 ? v->valueint : 0;
+    const char *s = cJSON_GetStringValue(v);
+    if (s && s[0]) { int k = atoi(s); return k > 0 ? k : 0; }
+    return 0;
+}
+
+void pymcl_launch_prep_load(const char *inst, const char *ver, pymcl_launch_prep *out) {
+    memset(out, 0, sizeof(*out));
+    char path[PYMCL_PATH];
+    version_settings_path(inst, ver, path, sizeof(path));
+    cJSON *j = pymcl_read_json(path);
+    out->memory_mb = vs_positive_int(cJSON_GetObjectItem(j, "memory_mb"));
+    out->window_width = vs_positive_int(cJSON_GetObjectItem(j, "window_width"));
+    out->window_height = vs_positive_int(cJSON_GetObjectItem(j, "window_height"));
+    const char *mode = cJSON_GetStringValue(cJSON_GetObjectItem(j, "window_mode"));
+    if (!mode || !mode[0]) mode = config_str("window_mode", "window");
+    out->fullscreen = strcmp(mode, "maximize") == 0 || strcmp(mode, "fullscreen") == 0;
+    const char *gc = cJSON_GetStringValue(cJSON_GetObjectItem(j, "gc"));
+    if (!gc || !gc[0]) gc = config_str("gc_preset", "auto");
+    if (!gc[0]) gc = "auto";
+    snprintf(out->gc, sizeof(out->gc), "%s", gc);
+    snprintf(out->jvm_args, sizeof(out->jvm_args), "%s",
+             cJSON_GetStringValue(cJSON_GetObjectItem(j, "jvm_args")) ?: "");
+    snprintf(out->game_args, sizeof(out->game_args), "%s",
+             cJSON_GetStringValue(cJSON_GetObjectItem(j, "game_args")) ?: "");
+    snprintf(out->server, sizeof(out->server), "%s",
+             cJSON_GetStringValue(cJSON_GetObjectItem(j, "server")) ?: "");
+    cJSON *port = cJSON_GetObjectItem(j, "port");
+    if (cJSON_IsNumber(port)) snprintf(out->port, sizeof(out->port), "%d", port->valueint);
+    else snprintf(out->port, sizeof(out->port), "%s", cJSON_GetStringValue(port) ?: "");
+    cJSON_Delete(j);
+}
+
 static cJSON *vs_defaults(void) {
     return cJSON_Parse(
         "{\"isolation\":\"none\",\"memory_mb\":null,\"java\":\"自动选择\","
