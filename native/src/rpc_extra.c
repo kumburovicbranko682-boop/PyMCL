@@ -800,12 +800,18 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         }
         if (strcmp(method, "lan_hint") == 0)
             return cJSON_CreateString("联机功能在纯 C 桥下有限，请安装 Python 环境以启用陶瓦。");
-        if (strcmp(method, "ai_list_chats") == 0 || strcmp(method, "ai_new_chat") == 0
-            || strcmp(method, "ai_delete_chat") == 0 || strcmp(method, "ai_set_active") == 0) {
+        /* 读操作降级成空列表让页面能渲染；但新建/删除/切换以前也返回空
+         * store 假装成功——点「新建对话」什么都不发生、也不报错。改成诚实报错。 */
+        if (strcmp(method, "ai_list_chats") == 0) {
             cJSON *o = cJSON_CreateObject();
             cJSON_AddItemToObject(o, "chats", cJSON_CreateArray());
             cJSON_AddStringToObject(o, "active_id", "");
             return o;
+        }
+        if (strcmp(method, "ai_new_chat") == 0 || strcmp(method, "ai_delete_chat") == 0
+            || strcmp(method, "ai_set_active") == 0) {
+            pymcl_set_error("AI 对话管理需要 Python 后端（未找到可用 Python）");
+            return NULL;
         }
         if (strcmp(method, "check_update") == 0) {
             cJSON *o = cJSON_CreateObject();
