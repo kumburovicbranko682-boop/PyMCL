@@ -63,6 +63,8 @@ DEFAULT_CONFIG = {
     "device_id": "",
     "default_isolation": "none",
     "default_jvm_args": "",
+    # 全局包装器命令：版本设置未填 wrapper 时兜底（对齐 HMCL 的「包裹命令」）
+    "wrapper_command": "",
     "default_priority": "normal",
     "update_url": "https://pymcl.dev/update.json",
     "theme_color": "#2E9B6B",

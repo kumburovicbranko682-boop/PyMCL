@@ -109,7 +109,8 @@ static void version_settings_path(const char *inst, const char *ver, char *out, 
 static cJSON *vs_defaults(void) {
     return cJSON_Parse(
         "{\"isolation\":\"none\",\"memory_mb\":null,\"java\":\"自动选择\","
-        "\"jvm_args\":\"\",\"game_args\":\"\",\"pre_launch\":\"\",\"post_launch\":\"\","
+        "\"jvm_args\":\"\",\"game_args\":\"\",\"wrapper\":\"\","
+        "\"pre_launch\":\"\",\"post_launch\":\"\","
         "\"pre_launch_wait\":true,\"server\":\"\",\"port\":\"\",\"process_priority\":\"normal\","
         "\"icon\":\"\",\"hidden\":false,\"login_account\":\"\",\"auth_server\":\"\","
         "\"auth_server_name\":\"\",\"nide8_id\":\"\",\"gc\":\"\",\"window_title\":\"\","

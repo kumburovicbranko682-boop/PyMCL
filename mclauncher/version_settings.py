@@ -29,6 +29,8 @@ DEFAULTS = {
     "java": "自动选择",
     "jvm_args": "",
     "game_args": "",
+    # 包装器命令：挂在 java 前面执行（如 optirun / gamemoderun / mangohud）
+    "wrapper": "",
     "pre_launch": "",
     "post_launch": "",
     "pre_launch_wait": True,

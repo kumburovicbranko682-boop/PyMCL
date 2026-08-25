@@ -317,6 +317,12 @@ class SettingsPage(QWidget):
         self.jvm_edit.setText(settings.get("default_jvm_args") or "")
         perf_group.addSettingCard(self.jvm_card)
 
+        self.wrapper_card, self.wrapper_edit = _line_card(
+            FIF.COMMAND_PROMPT, tr("包装器命令"),
+            tr("挂在 Java 前执行，如 gamemoderun / optirun；版本设置可单独覆盖"))
+        self.wrapper_edit.setText(settings.get("wrapper_command") or "")
+        perf_group.addSettingCard(self.wrapper_card)
+
         res_card = SettingCard(FIF.VIEW, tr("默认分辨率"), tr("游戏窗口的默认宽高"))
         res_row = QHBoxLayout()
         self.width_spin = SpinBox(res_card)
@@ -952,6 +958,7 @@ class SettingsPage(QWidget):
             "ui_background": self.bg_edit.text().strip(),
             "default_isolation": self._iso_keys.get(self.iso_box.currentText(), "none"),
             "default_jvm_args": self.jvm_edit.text().strip(),
+            "wrapper_command": self.wrapper_edit.text().strip(),
             "update_url": self.upd_url.text().strip(),
             "launcher_visibility": self._vis_keys.get(self.vis_box.currentText(), "keep"),
             "gc_preset": self._gc_keys.get(self.gc_box.currentText(), "auto"),

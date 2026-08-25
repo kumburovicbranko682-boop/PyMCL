@@ -26,12 +26,15 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     from . import gc as gc_mod
     jvm = gc_mod.apply(settings.get("gc") or CONFIG.get("gc_preset") or "auto",
                        settings.get("jvm_args") or "")
+    # 包装器：版本设置优先，空则用全局配置（对齐 HMCL 的「包裹命令」）
+    wrapper = split_args(settings.get("wrapper") or CONFIG.get("wrapper_command") or "")
     return {
         "settings": settings,
         "game_dir": gdir,
         "memory_mb": mem,
         "extra_game_args": extras,
         "jvm_args": jvm,
+        "wrapper": wrapper,
         "priority": settings.get("process_priority") or CONFIG.get("default_priority") or "normal",
         "global_mods": n,
         "pre_launch_wait": settings.get("pre_launch_wait", True),

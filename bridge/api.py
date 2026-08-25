@@ -727,6 +727,7 @@ class BackendAPI:
             "feedback_consent": CONFIG.get("feedback_consent") is True,
             "default_isolation": CONFIG.get("default_isolation") or "none",
             "default_jvm_args": CONFIG.get("default_jvm_args") or "",
+            "wrapper_command": CONFIG.get("wrapper_command") or "",
             "update_url": CONFIG.get("update_url") or "",
             "download_source": CONFIG.get("download_source") or "auto",
             "community_source": CONFIG.get("community_source") or "auto",
@@ -788,6 +789,8 @@ class BackendAPI:
             patch["default_isolation"] = data.get("default_isolation") or "none"
         if "default_jvm_args" in data:
             patch["default_jvm_args"] = data.get("default_jvm_args") or ""
+        if "wrapper_command" in data:
+            patch["wrapper_command"] = data.get("wrapper_command") or ""
         if "update_url" in data:
             patch["update_url"] = data.get("update_url") or ""
         if "download_source" in data:
@@ -1631,6 +1634,8 @@ class BackendAPI:
                 props = dict(props)
                 props["nide8_id"] = prep["nide8_id"]
         width, height = launch_flow.resolve_resolution(prep, width, height)
+        if prep.get("wrapper"):
+            log(f"包装器命令: {' '.join(prep['wrapper'])}")
         cmd, _natives, _vdir, game_dir = build_launch_command(
             inst, version, props, java_exe,
             memory_mb=memory_mb, width=width, height=height,
@@ -1638,6 +1643,7 @@ class BackendAPI:
             extra_jvm_args=prep["jvm_args"],
             game_directory=game_dir,
             authlib_api=props.get("authlib_api"),
+            wrapper=prep.get("wrapper"),
         )
         log(f"实际启动: {cmd[0]}")
         log("正在启动游戏进程…")
@@ -1825,6 +1831,7 @@ class BackendAPI:
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
             authlib_api=props.get("authlib_api"),
+            wrapper=prep.get("wrapper"),
         )
         if not dest:
             dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.bat")
@@ -2088,6 +2095,7 @@ class BackendAPI:
             extra_game_args=prep["extra_game_args"],
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
+            wrapper=prep.get("wrapper"),
         )
         return " ".join(cmd)
 

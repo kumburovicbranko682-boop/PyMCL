@@ -236,10 +236,12 @@ def watch_window_title(proc, title: str, timeout: float = 90.0):
 def build_launch_command(instance, version_id, account_props, java_exe,
                          memory_mb=4096, width=None, height=None,
                          extra_game_args=None, extra_jvm_args=None,
-                         game_directory=None, authlib_api=None):
+                         game_directory=None, authlib_api=None, wrapper=None):
     """
     构建启动命令。返回 (cmd, natives_dir, version_dir, game_dir)。
     account_props: {'name', 'uuid', 'token', 'user_type', 'xuid'}
+    wrapper: 包装器命令（字符串或 argv 列表），挂在 java 前执行，
+             如 Linux 上的 optirun / gamemoderun / mangohud。
     """
     vjson = instance.version_json(version_id)
     if not vjson:
@@ -404,6 +406,9 @@ def build_launch_command(instance, version_id, account_props, java_exe,
         raise LaunchError(
             f"拒绝用 Java {major} 启动：命令含模块参数。请改用 Java 17。"
         )
+    if wrapper:
+        wrap = list(wrapper) if isinstance(wrapper, (list, tuple)) else split_args(wrapper)
+        cmd = [str(a) for a in wrap if a not in (None, "")] + cmd
     return cmd, natives_dir, vdir, game_directory or instance.path
 
 

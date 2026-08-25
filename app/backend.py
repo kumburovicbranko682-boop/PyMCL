@@ -992,6 +992,7 @@ class BackendAPI(QObject):
             "ui_fly_duration_ms": int(CONFIG.get("ui_fly_duration_ms", 620)),
             "default_isolation": CONFIG.get("default_isolation") or "none",
             "default_jvm_args": CONFIG.get("default_jvm_args") or "",
+            "wrapper_command": CONFIG.get("wrapper_command") or "",
             "default_priority": CONFIG.get("default_priority") or "normal",
             "update_url": CONFIG.get("update_url") or "",
             "theme_color": CONFIG.get("theme_color") or "#2E9B6B",
@@ -1062,6 +1063,8 @@ class BackendAPI(QObject):
             "default_isolation": (data.get("default_isolation") or CONFIG.get("default_isolation") or "none"),
             "default_jvm_args": (data.get("default_jvm_args") if "default_jvm_args" in data
                                  else CONFIG.get("default_jvm_args") or ""),
+            "wrapper_command": (data.get("wrapper_command") if "wrapper_command" in data
+                                else CONFIG.get("wrapper_command") or ""),
             "default_priority": (data.get("default_priority") or CONFIG.get("default_priority") or "normal"),
             "update_url": (data.get("update_url") if "update_url" in data
                            else CONFIG.get("update_url") or ""),
@@ -2046,6 +2049,8 @@ class BackendAPI(QObject):
                 props["nide8_id"] = prep["nide8_id"]
             log(f"统一通行证: {props.get('nide8_id')}")
         width, height = launch_flow.resolve_resolution(prep, width, height)
+        if prep.get("wrapper"):
+            log(f"包装器命令: {' '.join(prep['wrapper'])}")
         cmd, _natives, _vdir, game_dir = build_launch_command(
             inst, version, props, java_exe,
             memory_mb=memory_mb, width=width, height=height,
@@ -2053,6 +2058,7 @@ class BackendAPI(QObject):
             extra_jvm_args=prep["jvm_args"],
             game_directory=game_dir,
             authlib_api=props.get("authlib_api"),
+            wrapper=prep.get("wrapper"),
         )
         log(f"实际启动: {cmd[0]}")
         log(tr("正在启动游戏进程…"))
@@ -2259,6 +2265,7 @@ class BackendAPI(QObject):
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
             authlib_api=props.get("authlib_api"),
+            wrapper=prep.get("wrapper"),
         )
         if not dest:
             dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.bat")
@@ -2536,6 +2543,7 @@ class BackendAPI(QObject):
             extra_game_args=prep["extra_game_args"],
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
+            wrapper=prep.get("wrapper"),
         )
         return " ".join(cmd)
 

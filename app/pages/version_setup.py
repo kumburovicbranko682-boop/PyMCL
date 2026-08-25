@@ -76,6 +76,10 @@ class VersionSetupDialog(MessageBoxBase):
         self.game.setPlaceholderText(tr("附加游戏参数"))
         self.game.setText(data.get("game_args") or "")
 
+        self.wrapper = LineEdit()
+        self.wrapper.setPlaceholderText(tr("挂在 Java 前的命令，如 gamemoderun / optirun"))
+        self.wrapper.setText(data.get("wrapper") or "")
+
         self.login = ComboBox()
         self.login.addItem(tr("跟随启动页"))
         accounts = backend.get_accounts() or []
@@ -135,6 +139,7 @@ class VersionSetupDialog(MessageBoxBase):
         form.addRow(form_label("GC"), self.gc)
         form.addRow(form_label(tr("JVM 参数")), self.jvm)
         form.addRow(form_label(tr("游戏参数")), self.game)
+        form.addRow(form_label(tr("包装器")), self.wrapper)
         form.addRow(form_label(tr("绑定账号")), self.login)
         form.addRow(form_label(tr("统一通行证")), self.nide8)
         form.addRow(form_label(tr("认证服")), self.auth_server)
@@ -191,6 +196,7 @@ class VersionSetupDialog(MessageBoxBase):
             "java": java,
             "jvm_args": self.jvm.toPlainText().strip(),
             "game_args": self.game.text().strip(),
+            "wrapper": self.wrapper.text().strip(),
             "server": self.server.text().strip(),
             "port": self.port.text().strip(),
             "pre_launch": self.pre.text().strip(),
