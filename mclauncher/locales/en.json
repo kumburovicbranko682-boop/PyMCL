@@ -1007,5 +1007,15 @@
   "选择 Java 可执行文件": "Choose Java executable",
   "Java 可执行文件 (java.exe javaw.exe)": "Java executable (java.exe javaw.exe)",
   "Java 可执行文件 (java)": "Java executable (java)",
-  "Java {major}: {path}": "Java {major}: {path}"
+  "Java {major}: {path}": "Java {major}: {path}",
+  "旁观": "Spectator",
+  "硬核": "Hardcore",
+  "和平": "Peaceful",
+  "简单": "Easy",
+  "普通": "Normal",
+  "困难": "Hard",
+  "种子: {s}": "Seed: {s}",
+  "难度: {d}": "Difficulty: {d}",
+  "已开启作弊": "Cheats enabled",
+  "最后游玩: {t}": "Last played: {t}"
 }

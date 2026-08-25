@@ -1006,5 +1006,15 @@
   "选择 Java 可执行文件": "选择 Java 可执行文件",
   "Java 可执行文件 (java.exe javaw.exe)": "Java 可执行文件 (java.exe javaw.exe)",
   "Java 可执行文件 (java)": "Java 可执行文件 (java)",
-  "Java {major}: {path}": "Java {major}: {path}"
+  "Java {major}: {path}": "Java {major}: {path}",
+  "旁观": "旁观",
+  "硬核": "硬核",
+  "和平": "和平",
+  "简单": "简单",
+  "普通": "普通",
+  "困难": "困难",
+  "种子: {s}": "种子: {s}",
+  "难度: {d}": "难度: {d}",
+  "已开启作弊": "已开启作弊",
+  "最后游玩: {t}": "最后游玩: {t}"
 }

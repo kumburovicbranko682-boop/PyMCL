@@ -94,7 +94,29 @@ class SavesDialog(MessageBoxBase):
                             pix = pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     except Exception:
                         pix = None
-                item = QListWidgetItem(f"{r['name']}  ({format_size(r.get('bytes') or 0)})")
+                text = f"{r['name']}  ({format_size(r.get('bytes') or 0)})"
+                bits = []
+                if r.get("game_mode"):
+                    bits.append(tr(r["game_mode"]))
+                if r.get("version"):
+                    bits.append(r["version"])
+                if bits:
+                    text += "  ·  " + " / ".join(bits)
+                item = QListWidgetItem(text)
+                tip = []
+                if r.get("seed"):
+                    tip.append(tr("种子: {s}").format(s=r["seed"]))
+                if r.get("difficulty"):
+                    tip.append(tr("难度: {d}").format(d=tr(r["difficulty"])))
+                if r.get("cheats"):
+                    tip.append(tr("已开启作弊"))
+                if r.get("last_played"):
+                    import time as _time
+                    tip.append(tr("最后游玩: {t}").format(
+                        t=_time.strftime("%Y-%m-%d %H:%M",
+                                         _time.localtime(r["last_played"]))))
+                if tip:
+                    item.setToolTip("\n".join(tip))
                 if pix:
                     item.setIcon(QIcon(pix))
                 self.list.addItem(item)

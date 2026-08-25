@@ -36,6 +36,47 @@ def _safe_child(folder: Path, name: str, what: str = "存档") -> Path:
     return target
 
 
+_GAME_TYPES = {0: "生存", 1: "创造", 2: "冒险", 3: "旁观"}
+_DIFFICULTIES = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
+
+
+def world_info(world_dir) -> dict:
+    """解析 level.dat 的世界元数据（种子 / 模式 / 版本等）。
+
+    坏档或缺文件返回 {}，不打断列表。
+    """
+    level = Path(world_dir) / "level.dat"
+    if not level.is_file():
+        return {}
+    try:
+        from . import nbt
+        root = nbt.load_file(level)
+        data = next(iter(root.values()), {}) or {}
+        data = data.get("Data") or data
+        if not isinstance(data, dict):
+            return {}
+    except Exception:
+        return {}
+    seed = data.get("RandomSeed")
+    if seed is None:
+        seed = (data.get("WorldGenSettings") or {}).get("seed")
+    game_type = data.get("GameType")
+    hardcore = bool(data.get("hardcore"))
+    info = {
+        "level_name": str(data.get("LevelName") or ""),
+        "seed": str(seed) if seed is not None else "",
+        "game_type": int(game_type) if game_type is not None else -1,
+        "game_mode": ("硬核" if hardcore and game_type == 0
+                      else _GAME_TYPES.get(game_type, "")),
+        "hardcore": hardcore,
+        "cheats": bool(data.get("allowCommands")),
+        "difficulty": _DIFFICULTIES.get(data.get("Difficulty"), ""),
+        "version": str((data.get("Version") or {}).get("Name") or ""),
+        "last_played": int(data.get("LastPlayed") or 0) // 1000,
+    }
+    return info
+
+
 def list_saves(instance: Instance, version_id: str = "") -> list[dict]:
     folder = _game_dir(instance, version_id) / "saves"
     if not folder.is_dir():
@@ -45,13 +86,15 @@ def list_saves(instance: Instance, version_id: str = "") -> list[dict]:
         if not p.is_dir() or p.name.startswith("."):
             continue
         icon = p / "icon.png"
-        rows.append({
+        row = {
             "name": p.name,
             "path": str(p),
             "icon": str(icon) if icon.is_file() else "",
             "bytes": _dir_size(p),
             "mtime": int(p.stat().st_mtime),
-        })
+        }
+        row.update(world_info(p))
+        rows.append(row)
     return rows
 
 
