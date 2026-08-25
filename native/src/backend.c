@@ -385,6 +385,17 @@ static void *task_run(void *p) {
                 /* 与 Python 桥一致：工作目录 = 隔离后的游戏目录（可能是
                  * versions/<id>），不是永远的实例根。 */
                 pymcl_apply_isolation(inst, ver, ip, sizeof(ip));
+                {
+                    /* 全局 Mod：与 Python 桥一致，每次启动链接进游戏 mods。 */
+                    char gmods[PYMCL_PATH];
+                    pymcl_path_join(gmods, sizeof(gmods), ip, "mods");
+                    int gm = pymcl_global_mods_apply(gmods);
+                    if (gm > 0) {
+                        char lbuf[96];
+                        snprintf(lbuf, sizeof(lbuf), "已应用 %d 个全局模组", gm);
+                        ctx_log(t, lbuf);
+                    }
+                }
                 pymcl_launch_prep hooks;
                 pymcl_launch_prep_load(inst, ver, &hooks);
                 run_launch_hook(t, hooks.pre_launch, ip, hooks.pre_launch_wait);

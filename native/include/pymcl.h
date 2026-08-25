@@ -281,6 +281,8 @@ int pymcl_version_hidden(const char *instance, const char *version_id);
 int pymcl_apply_isolation(const char *instance, const char *version_id, char *gdir_out, size_t n);
 void pymcl_playtime_record(const char *instance_name, const char *version_id, long long duration_sec);
 void pymcl_format_playtime(long long seconds, char *out, size_t n);
+void pymcl_global_mods_root(char *out, size_t n);
+int pymcl_global_mods_apply(const char *game_mods_dir);
 
 /* ---------- backend / server ---------- */
 typedef void (*sse_emit_fn)(const char *event, cJSON *data);

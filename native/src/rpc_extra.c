@@ -252,6 +252,63 @@ void pymcl_launch_prep_load(const char *inst, const char *ver, pymcl_launch_prep
     cJSON_Delete(j);
 }
 
+/* 全局 Mod 根目录（对齐 mclauncher/global_mods.root：自定义 global_mods_dir
+ * 优先，否则 <root>/shared/mods）。C 桥以前打开的是 <root>/global_mods——
+ * 一个任何启动链路都不读的目录，用户放进去的 jar 谁都不会加载。 */
+void pymcl_global_mods_root(char *out, size_t n) {
+    const char *custom = config_str("global_mods_dir", "");
+    while (*custom == ' ' || *custom == '\t') custom++;
+    if (custom[0]) {
+        snprintf(out, n, "%s", custom);
+        size_t L = strlen(out);
+        while (L && (out[L - 1] == ' ' || out[L - 1] == '\t')) out[--L] = 0;
+        if (out[0]) return;
+    }
+    pymcl_path_join3(out, n, g_root, "shared", "mods");
+}
+
+static int name_iends_jar(const char *name) {
+    size_t L = strlen(name);
+    return L >= 4 && _stricmp(name + L - 4, ".jar") == 0;
+}
+
+/* 启动前把启用的全局 jar 链接/复制进游戏 mods（对齐 global_mods.apply：
+ * 符号链接优先、失败复制、已存在跳过；返回启用的 jar 数）。
+ * Python 桥每次启动都做这一步，C 桥以前从不做。 */
+int pymcl_global_mods_apply(const char *game_mods_dir) {
+    char src_dir[PYMCL_PATH];
+    pymcl_global_mods_root(src_dir, sizeof(src_dir));
+    pymcl_ensure_dir(game_mods_dir);
+    if (!pymcl_dir_exists(src_dir)) return 0;
+    wchar_t *w = pymcl_u8_to_wide(src_dir);
+    wchar_t pat[PYMCL_PATH];
+    _snwprintf(pat, PYMCL_PATH, L"%s\\*", w);
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW(pat, &fd);
+    free(w);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    int n = 0;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        char *name = pymcl_wide_to_u8(fd.cFileName);
+        if (!name_iends_jar(name)) { free(name); continue; }
+        char src[PYMCL_PATH], dst[PYMCL_PATH];
+        pymcl_path_join(src, sizeof(src), src_dir, name);
+        pymcl_path_join(dst, sizeof(dst), game_mods_dir, name);
+        free(name);
+        if (GetFileAttributesA(dst) == INVALID_FILE_ATTRIBUTES) {
+            wchar_t *wd = pymcl_u8_to_wide(dst), *ws = pymcl_u8_to_wide(src);
+            /* 0x2 = SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE，与 Python 相同 */
+            if (!CreateSymbolicLinkW(wd, ws, 0x2))
+                CopyFileW(ws, wd, TRUE);
+            free(wd); free(ws);
+        }
+        n++;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return n;
+}
+
 static cJSON *vs_defaults(void) {
     return cJSON_Parse(
         "{\"isolation\":\"none\",\"memory_mb\":null,\"java\":\"自动选择\","
@@ -607,7 +664,9 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         return list_mod_entries(pstr(params, "instance", "default"));
     if (strcmp(method, "open_global_mods") == 0) {
         char p[PYMCL_PATH];
-        pymcl_path_join(p, sizeof(p), g_root, "global_mods");
+        /* 必须与 Python 的 global_mods.root 同目录，否则这里打开 A、
+         * 启动链接的却是 B，用户放的 jar 永远不生效。 */
+        pymcl_global_mods_root(p, sizeof(p));
         pymcl_ensure_dir(p);
         pymcl_open_folder(p);
         return cJSON_CreateTrue();
