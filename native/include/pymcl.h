@@ -163,6 +163,8 @@ char *fetch_text_mirrors(const char **urls, int n, int timeout);
 /* ---------- instances ---------- */
 int instance_list(cJSON **out);
 int instance_path(const char *name, char *out, size_t n);
+/* 外部游戏目录：注册过返回其绝对路径，否则 NULL */
+const char *instance_external_path(const char *name);
 int instance_create(const char *name, cJSON *meta);
 int instance_delete(const char *name);
 int instance_rename(const char *name, const char *new_name);

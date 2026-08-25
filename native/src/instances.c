@@ -35,6 +35,19 @@ void sanitize_instance_name(const char *raw, char *out, size_t n) {
     if (strlen(out) > 48) out[48] = 0;
 }
 
+/* 外部游戏目录注册表（config.json 的 external_instances，与 Python 侧共享）。 */
+static cJSON *external_registry(void) {
+    cJSON *v = cJSON_GetObjectItem(config_obj(), "external_instances");
+    return cJSON_IsObject(v) ? v : NULL;
+}
+
+const char *instance_external_path(const char *name) {
+    cJSON *reg = external_registry();
+    if (!reg || !name || !name[0]) return NULL;
+    cJSON *v = cJSON_GetObjectItem(reg, name);
+    return (cJSON_IsString(v) && v->valuestring[0]) ? v->valuestring : NULL;
+}
+
 int instance_path(const char *name, char *out, size_t n) {
     if (!name || !name[0] || strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
         pymcl_set_error("非法实例名: %s", name ? name : "");
@@ -43,6 +56,11 @@ int instance_path(const char *name, char *out, size_t n) {
     if (strpbrk(name, "\\/:*?\"<>|")) {
         pymcl_set_error("非法实例名: %s", name);
         return -1;
+    }
+    const char *ext = instance_external_path(name);
+    if (ext) {
+        snprintf(out, n, "%s", ext);
+        return 0;
     }
     char root[PYMCL_PATH];
     pymcl_instances_dir(root, sizeof(root));
@@ -61,29 +79,50 @@ void unique_instance_name(const char *raw, char *out, size_t n) {
     }
 }
 
+static int list_contains(cJSON *arr, const char *name) {
+    cJSON *it;
+    cJSON_ArrayForEach(it, arr) {
+        if (cJSON_IsString(it) && strcmp(it->valuestring, name) == 0) return 1;
+    }
+    return 0;
+}
+
 int instance_list(cJSON **out) {
     *out = cJSON_CreateArray();
     char root[PYMCL_PATH];
     pymcl_instances_dir(root, sizeof(root));
-    if (!pymcl_dir_exists(root)) return 0;
-    wchar_t *w = pymcl_u8_to_wide(root);
-    wchar_t pat[PYMCL_PATH];
-    _snwprintf(pat, PYMCL_PATH, L"%s\\*", w);
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(pat, &fd);
-    free(w);
-    if (h == INVALID_HANDLE_VALUE) return 0;
-    do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-        if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
-        char *name = pymcl_wide_to_u8(fd.cFileName);
-        char meta[PYMCL_PATH], ip[PYMCL_PATH];
-        instance_path(name, ip, sizeof(ip));
-        pymcl_path_join(meta, sizeof(meta), ip, ".instance.json");
-        if (pymcl_file_exists(meta)) cJSON_AddItemToArray(*out, cJSON_CreateString(name));
-        free(name);
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
+    if (pymcl_dir_exists(root)) {
+        wchar_t *w = pymcl_u8_to_wide(root);
+        wchar_t pat[PYMCL_PATH];
+        _snwprintf(pat, PYMCL_PATH, L"%s\\*", w);
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW(pat, &fd);
+        free(w);
+        if (h != INVALID_HANDLE_VALUE) {
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+                if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+                char *name = pymcl_wide_to_u8(fd.cFileName);
+                char meta[PYMCL_PATH], ip[PYMCL_PATH];
+                pymcl_path_join(ip, sizeof(ip), root, name);
+                pymcl_path_join(meta, sizeof(meta), ip, ".instance.json");
+                if (pymcl_file_exists(meta)) cJSON_AddItemToArray(*out, cJSON_CreateString(name));
+                free(name);
+            } while (FindNextFileW(h, &fd));
+            FindClose(h);
+        }
+    }
+    /* 外部游戏目录：注册过且目录仍存在的也算实例（与 Python 侧一致） */
+    cJSON *reg = external_registry();
+    if (reg) {
+        cJSON *it;
+        cJSON_ArrayForEach(it, reg) {
+            if (!cJSON_IsString(it) || !it->valuestring[0]) continue;
+            if (list_contains(*out, it->string)) continue;
+            if (pymcl_dir_exists(it->valuestring))
+                cJSON_AddItemToArray(*out, cJSON_CreateString(it->string));
+        }
+    }
     return 0;
 }
 
@@ -101,6 +140,11 @@ void instance_ensure_dirs(const char *name) {
 int instance_create(const char *name, cJSON *meta) {
     char ip[PYMCL_PATH];
     if (instance_path(name, ip, sizeof(ip)) != 0) return -1;
+    if (instance_external_path(name)) {
+        /* 外部目录是用户自己的 .minecraft，绝不往里面铺标准目录结构 */
+        pymcl_set_error("实例 %s 已存在。", name);
+        return -1;
+    }
     char existing_meta[PYMCL_PATH];
     pymcl_path_join(existing_meta, sizeof(existing_meta), ip, ".instance.json");
     if (pymcl_dir_exists(ip) && pymcl_file_exists(existing_meta)) {
@@ -127,25 +171,59 @@ int instance_create(const char *name, cJSON *meta) {
     return r;
 }
 
+static void reset_default_if(const char *name) {
+    if (strcmp(config_str("default_instance", "default"), name) != 0) return;
+    cJSON *list = NULL;
+    instance_list(&list);
+    const char *next = "default";
+    if (cJSON_GetArraySize(list) > 0)
+        next = cJSON_GetArrayItem(list, 0)->valuestring;
+    config_set_str("default_instance", next);
+    config_save();
+    cJSON_Delete(list);
+}
+
 int instance_delete(const char *name) {
+    if (instance_external_path(name)) {
+        /* 外部目录只解除注册，绝不删用户文件 */
+        cJSON *reg = external_registry();
+        if (reg) cJSON_DeleteItemFromObject(reg, name);
+        config_save();
+        reset_default_if(name);
+        return 0;
+    }
     char ip[PYMCL_PATH];
     if (instance_path(name, ip, sizeof(ip)) != 0) return -1;
     if (!pymcl_dir_exists(ip)) { pymcl_set_error("实例 %s 不存在。", name); return -1; }
     pymcl_remove_tree(ip);
-    if (strcmp(config_str("default_instance", "default"), name) == 0) {
-        cJSON *list = NULL;
-        instance_list(&list);
-        const char *next = "default";
-        if (cJSON_GetArraySize(list) > 0)
-            next = cJSON_GetArrayItem(list, 0)->valuestring;
-        config_set_str("default_instance", next);
-        config_save();
-        cJSON_Delete(list);
-    }
+    reset_default_if(name);
     return 0;
 }
 
 int instance_rename(const char *name, const char *new_name) {
+    if (instance_external_path(name)) {
+        /* 外部目录只改注册名，不移动文件夹、不写 .instance.json */
+        if (!new_name || !new_name[0] || strpbrk(new_name, "\\/:*?\"<>|")) {
+            pymcl_set_error("非法实例名: %s", new_name ? new_name : "");
+            return -1;
+        }
+        char np[PYMCL_PATH];
+        if (instance_external_path(new_name)
+            || (instance_path(new_name, np, sizeof(np)) == 0 && pymcl_dir_exists(np))) {
+            pymcl_set_error("实例 %s 已存在。", new_name);
+            return -1;
+        }
+        cJSON *reg = external_registry();
+        cJSON *v = reg ? cJSON_DetachItemFromObject(reg, name) : NULL;
+        if (!v) { pymcl_set_error("外部实例不存在: %s", name); return -1; }
+        cJSON_AddItemToObject(reg, new_name, v);
+        config_save();
+        if (strcmp(config_str("default_instance", ""), name) == 0) {
+            config_set_str("default_instance", new_name);
+            config_save();
+        }
+        return 0;
+    }
     char a[PYMCL_PATH], b[PYMCL_PATH];
     if (instance_path(name, a, sizeof(a)) != 0) return -1;
     if (instance_path(new_name, b, sizeof(b)) != 0) return -1;

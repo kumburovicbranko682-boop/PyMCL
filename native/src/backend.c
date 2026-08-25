@@ -423,6 +423,15 @@ static cJSON *rpc_get_instances(void) {
         cJSON_AddStringToObject(row, "pack_version", packver ? packver : "");
         cJSON_AddStringToObject(row, "java", jp);
         cJSON_AddStringToObject(row, "java_label", pymcl_ieq(jp, PYMCL_JAVA_AUTO) ? PYMCL_JAVA_AUTO : pymcl_basename(jp));
+        {
+            char ip[PYMCL_PATH];
+            const char *ext = instance_external_path(nm);
+            cJSON_AddBoolToObject(row, "external", ext != NULL);
+            if (instance_path(nm, ip, sizeof(ip)) == 0)
+                cJSON_AddStringToObject(row, "path", ip);
+            else
+                cJSON_AddStringToObject(row, "path", "");
+        }
         cJSON_AddItemToArray(out, row);
         cJSON_Delete(ids);
         cJSON_Delete(meta);
