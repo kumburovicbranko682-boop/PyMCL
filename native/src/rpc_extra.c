@@ -591,27 +591,31 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     if (strcmp(method, "preflight_launch") == 0) {
         cJSON *r = py_rpc_call(method, params);
         if (r) return r;
-        /* C-only: basic existence check */
+        /* C-only 兜底：形状必须与 mclauncher/preflight.py 一致
+         * （{"ok", "items": [{level, code, title, detail}]}）。以前这里发
+         * "issues"+"message"，WinUI 只认 "items"+"title/detail"，预检结果
+         * 被整个丢掉，失败也照样放行启动。 */
         const char *inst = pstr(params, "instance", "default");
         const char *ver = pstr(params, "version", "");
         cJSON *out = cJSON_CreateObject();
-        cJSON *issues = cJSON_CreateArray();
+        cJSON *items = cJSON_CreateArray();
         if (!ver[0]) {
-            cJSON *iss = cJSON_CreateObject();
-            cJSON_AddStringToObject(iss, "level", "error");
-            cJSON_AddStringToObject(iss, "code", "no_version");
-            cJSON_AddStringToObject(iss, "message", "请先选择版本");
-            cJSON_AddItemToArray(issues, iss);
+            cJSON *it = cJSON_CreateObject();
+            cJSON_AddStringToObject(it, "level", "error");
+            cJSON_AddStringToObject(it, "code", "no_version");
+            cJSON_AddStringToObject(it, "title", "请先选择版本");
+            cJSON_AddStringToObject(it, "detail", "没有指定要启动的游戏版本");
+            cJSON_AddItemToArray(items, it);
         } else if (!instance_has_version(inst, ver)) {
-            cJSON *iss = cJSON_CreateObject();
-            cJSON_AddStringToObject(iss, "level", "error");
-            cJSON_AddStringToObject(iss, "code", "missing_version");
-            cJSON_AddStringToObject(iss, "message", "版本未安装");
-            cJSON_AddItemToArray(issues, iss);
+            cJSON *it = cJSON_CreateObject();
+            cJSON_AddStringToObject(it, "level", "error");
+            cJSON_AddStringToObject(it, "code", "missing_version");
+            cJSON_AddStringToObject(it, "title", "版本未安装");
+            cJSON_AddStringToObject(it, "detail", "请先在下载页安装该版本");
+            cJSON_AddItemToArray(items, it);
         }
-        cJSON_AddItemToObject(out, "issues", issues);
-        cJSON_AddBoolToObject(out, "ok", cJSON_GetArraySize(issues) == 0);
-        cJSON_AddBoolToObject(out, "can_launch", cJSON_GetArraySize(issues) == 0);
+        cJSON_AddBoolToObject(out, "ok", cJSON_GetArraySize(items) == 0);
+        cJSON_AddItemToObject(out, "items", items);
         return out;
     }
     if (strcmp(method, "apply_crash_action") == 0) {
