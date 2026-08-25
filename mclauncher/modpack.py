@@ -235,7 +235,9 @@ def install_cf_modpack(dm: DownloadManager, addon_id, instance: Instance,
     else:
         raise ModpackError(f"整合包下载失败: {last_err}")
     try:
-        return install_cf_zip(dm, tmp, instance, on_progress=on_progress, cancel=cancel)
+        return install_cf_zip(dm, tmp, instance, on_progress=on_progress, cancel=cancel,
+                              addon_id=addon_id, file_id=file_id,
+                              cf_slug=info.get("slug") or cf_slug)
     finally:
         try:
             tmp.unlink(missing_ok=True)
@@ -685,7 +687,8 @@ def install_mrpack_by_slug(dm: DownloadManager, slug, instance: Instance,
         try:
             return install_mrpack(dm, pack_file.get("url"), instance,
                                   on_progress=on_progress, cancel=cancel,
-                                  force=force, java=java)
+                                  force=force, java=java,
+                                  slug=slug, source_version_id=v.get("id"))
         except (ModpackError, InstallError, manifest_mod.VersionNotFound) as e:
             last_err = e
             _emit(on_progress, f"{label} 安装失败: {e}")
@@ -710,8 +713,13 @@ def _fetch_mrpack(dm: DownloadManager, source):
 
 
 def install_mrpack(dm: DownloadManager, source, instance: Instance,
-                   on_progress=None, cancel=None, force=False, java=None):
-    """安装 .mrpack 整合包到指定实例。"""
+                   on_progress=None, cancel=None, force=False, java=None,
+                   slug=None, source_version_id=None):
+    """安装 .mrpack 整合包到指定实例。
+
+    slug / source_version_id：从 Modrinth 目录安装时记录来源，
+    之后「检查整合包更新」靠它们定位新版本。
+    """
     downloaded = bool(re.match(r"^https?://", str(source)))
     _emit(on_progress, f"{'下载' if downloaded else '读取'}整合包: {source}")
     pack_path = _fetch_mrpack(dm, source)
@@ -795,6 +803,7 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
         from .mods import modrinth_download_urls
         tasks = []
         sha512_checks = []
+        managed_files = []
         for f in idx.get("files", []):
             env = f.get("env") or {}
             if env.get("client") in ("unsupported", "server"):
@@ -812,6 +821,7 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
                 modrinth_download_urls(downloads), dest,
                 hashes.get("sha1"), f.get("size"), hashes.get("sha512"),
             ))
+            managed_files.append(Path(rel).as_posix())
             if hashes.get("sha512"):
                 sha512_checks.append((dest, hashes["sha512"]))
         if tasks:
@@ -828,11 +838,12 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
             _emit(on_progress, "索引中没有客户端文件需要下载")
 
         # overrides
+        override_copied = []
         for overrides_dir in ("overrides", "client-overrides"):
             src = pack_root / overrides_dir
             if src.is_dir():
                 _emit(on_progress, f"复制 {overrides_dir}")
-                _copy_tree_over(src, instance.path)
+                override_copied = _copy_tree_over(src, instance.path)
                 break
 
         pack_meta = {
@@ -842,6 +853,10 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
             "loader": f"{loader}-{deps.get(loader)}" if loader else None,
             "source": "modrinth",
             "instance": instance.name,
+            "slug": slug or "",
+            "source_version_id": str(source_version_id or ""),
+            "managed_files": managed_files,
+            "override_files": _override_records(instance, override_copied),
         }
         instance.set_meta("modpack", pack_meta)
         instance.set_meta("mc_version", loader_vid or mc_version)
@@ -859,8 +874,13 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
 # ================================================================ CurseForge
 
 def install_cf_zip(dm: DownloadManager, source, instance: Instance,
-                   on_progress=None, cancel=None, force=False, java=None):
-    """安装 CurseForge 整合包 zip（本地文件或直链）。"""
+                   on_progress=None, cancel=None, force=False, java=None,
+                   addon_id=None, file_id=None, cf_slug=None):
+    """安装 CurseForge 整合包 zip（本地文件或直链）。
+
+    addon_id / file_id / cf_slug：从 CurseForge 目录安装时记录来源，
+    之后「检查整合包更新」靠它们定位新文件。
+    """
     downloaded = False
     if re.match(r"^https?://", str(source)):
         tmp = Path(tempfile.gettempdir()) / f"pymcl_cfpack_{abs(hash(str(source)))}.zip"
@@ -943,6 +963,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             except Exception as e:
                 utils.log.warning("批量查询整合包 Mod 元数据失败，将仅用 CDN 规则: %s", e)
         tasks = []
+        managed_files = []
         for f in raw_files:
             pid, fid = f.get("projectID"), f.get("fileID")
             info = meta.get(int(fid), {}) if fid is not None else {}
@@ -950,6 +971,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             download_url = info.get("downloadUrl")
             dest_name = filename or f"mod-{pid}-{fid}.jar"
             dest = instance.path / "mods" / dest_name
+            managed_files.append(f"mods/{dest_name}")
             sha1 = None
             for h in info.get("hashes") or []:
                 if h.get("algo") == 1 and h.get("value"):
@@ -964,11 +986,12 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             _emit(on_progress, "整合包 Mod 下载完成")
 
         # overrides
+        override_copied = []
         overrides = mf.get("overrides")
         if overrides:
             src = pack_root / overrides
             if src.is_dir():
-                _copy_tree_over(src, instance.path)
+                override_copied = _copy_tree_over(src, instance.path)
 
         pack_meta = {
             "name": mf.get("name", Path(pack_path).stem),
@@ -977,6 +1000,11 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             "loader": loader_id,
             "source": "curseforge",
             "instance": instance.name,
+            "addon_id": str(addon_id or ""),
+            "file_id": str(file_id or ""),
+            "slug": cf_slug or "",
+            "managed_files": managed_files,
+            "override_files": _override_records(instance, override_copied),
         }
         instance.set_meta("modpack", pack_meta)
         instance.set_meta("mc_version", loader_vid or mc_version)
@@ -991,7 +1019,9 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                 pass
 
 
-def _copy_tree_over(src: Path, dest: Path):
+def _copy_tree_over(src: Path, dest: Path) -> list[str]:
+    """把 src 树覆盖复制进 dest，返回复制的文件相对路径（POSIX 分隔）。"""
+    copied = []
     for item in src.rglob("*"):
         rel = item.relative_to(src)
         target = dest / rel
@@ -1000,6 +1030,20 @@ def _copy_tree_over(src: Path, dest: Path):
         elif item.is_file():
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, target)
+            copied.append(rel.as_posix())
+    return copied
+
+
+def _override_records(instance: Instance, copied: list[str]) -> list[dict]:
+    """记录 overrides 文件的 sha1，更新整合包时用来区分用户是否改过。"""
+    records = []
+    for rel in copied:
+        p = instance.path / rel
+        try:
+            records.append({"path": rel, "sha1": utils.sha1_file(p)})
+        except OSError:
+            records.append({"path": rel, "sha1": ""})
+    return records
 
 
 def _copy_mc_tree(root: Path, dest: Path):

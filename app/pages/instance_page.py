@@ -62,6 +62,12 @@ class InstanceCard(SimpleCardWidget):
         actions.addWidget(java_btn)
         actions.addWidget(rename_btn)
         actions.addWidget(export_btn)
+        if info.get("pack"):
+            update_btn = TransparentToolButton(
+                FIF.UPDATE if hasattr(FIF, "UPDATE") else FIF.SYNC)
+            update_btn.setToolTip(tr("检查整合包更新"))
+            update_btn.clicked.connect(lambda: page.check_pack_update(info["name"]))
+            actions.addWidget(update_btn)
         actions.addWidget(delete_btn)
         layout.addLayout(actions)
 
@@ -96,6 +102,7 @@ class InstancePage(QWidget):
         self._reloading = False
         self._cols = 0
         self._picking_java = False
+        self._checking_pack = False
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
         self._resize_timer.setInterval(120)
@@ -174,6 +181,59 @@ class InstancePage(QWidget):
 
     def export_pack(self, name: str):
         self.backend.export_modpack(name)
+
+    def check_pack_update(self, name: str):
+        if self._checking_pack:
+            return
+        self._checking_pack = True
+
+        def fetch():
+            state = self.backend.get_modpack_state(name)
+            if not state.get("can_update"):
+                return {"state": state}
+            return {"state": state, "check": self.backend.check_modpack_update(name)}
+
+        def done(result):
+            self._checking_pack = False
+            state = result.get("state") or {}
+            if not state.get("can_update"):
+                MessageBox(tr("无法检查更新"),
+                           state.get("reason") or tr("该实例不是整合包安装"), self).exec()
+                return
+            check = result.get("check") or {}
+            if not check.get("has_update"):
+                from qfluentwidgets import InfoBar, InfoBarPosition
+                InfoBar.success(
+                    tr("已是最新"),
+                    tr("整合包 {name} 当前 {version} 已是最新版本").format(
+                        name=state.get("name") or name,
+                        version=check.get("current") or state.get("version") or "?"),
+                    parent=self, position=InfoBarPosition.TOP, duration=3500)
+                return
+            lines = [
+                tr("整合包「{name}」有新版本：").format(name=state.get("name") or name),
+                f"{check.get('current') or '?'}  →  {check.get('latest') or '?'}"
+                + (f"（{check.get('date')}）" if check.get("date") else ""),
+                "",
+                tr("更新会替换整合包管理的模组与配置；你修改过的配置会先备份到实例的 backups 目录。"),
+            ]
+            if check.get("changelog"):
+                lines += ["", tr("更新日志："), check["changelog"][:400]]
+            box = MessageBox(tr("发现整合包更新"), "\n".join(lines), self)
+            box.yesButton.setText(tr("立即更新"))
+            box.cancelButton.setText(tr("取消"))
+            if box.exec():
+                self.backend.update_modpack(name, check.get("latest_id") or "")
+                from qfluentwidgets import InfoBar, InfoBarPosition
+                InfoBar.info(tr("整合包更新中"),
+                             tr("进度见「任务」页，完成后实例会自动刷新"),
+                             parent=self, position=InfoBarPosition.TOP, duration=3500)
+
+        def failed(msg):
+            self._checking_pack = False
+            MessageBox(tr("检查整合包更新失败"), str(msg or tr("未知错误")), self).exec()
+
+        self.backend.call_async(fetch, done, failed)
 
     def pick_java(self, name: str):
         if self._picking_java:

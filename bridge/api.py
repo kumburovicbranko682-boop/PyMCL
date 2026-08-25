@@ -963,6 +963,20 @@ class BackendAPI:
     def export_modpack(self, instance: str, dest: str = "") -> str:
         return self.start_task(f"导出整合包 {instance}", self._export_pack_impl, instance, dest)
 
+    def get_modpack_state(self, instance: str) -> dict:
+        from mclauncher import modpack_update
+        return modpack_update.pack_state(self._instance(instance))
+
+    def check_modpack_update(self, instance: str) -> dict:
+        from mclauncher import modpack_update
+        dm = DownloadManager(threads=2)
+        return modpack_update.check_update(
+            dm, self._instance(instance), api_key=CONFIG.get("curseforge_api_key"))
+
+    def update_modpack(self, instance: str, version_id: str = "") -> str:
+        return self.start_task(f"更新整合包 {instance}",
+                               self._update_modpack_impl, instance, version_id)
+
     def start_mod_updates(self, instance: str) -> str:
         return self.start_task(f"检查模组更新 {instance}", self._mod_update_impl, instance)
 
@@ -1683,6 +1697,17 @@ class BackendAPI:
         dm = self._dm(progress, log)
         installer = Installer(inst, dm, on_progress=dm.on_progress, cancel=dm.cancel)
         return repair(installer, version)
+
+    def _update_modpack_impl(self, progress, log, instance, version_id=""):
+        from mclauncher import modpack_update
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        meta = modpack_update.update(
+            dm, inst, on_progress=dm.on_progress, cancel=dm.cancel,
+            target_version_id=version_id or None,
+            api_key=CONFIG.get("curseforge_api_key"))
+        self._emit("ui_changed", {})
+        return f"整合包已更新到 {meta.get('version') or '?'}"
 
     def _export_pack_impl(self, progress, log, instance, dest):
         from mclauncher.export_pack import export_mrpack
