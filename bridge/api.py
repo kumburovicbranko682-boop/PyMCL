@@ -548,6 +548,10 @@ class BackendAPI:
         cmd, _natives, _vdir, _gdir = launcher.build_launch_command(
             inst, version, props, java_exe, memory_mb=memory_mb,
             width=width, height=height)
+        from mclauncher import launch_flow, version_settings as _vs
+        wrapper = str(_vs.load(inst, version).get("wrapper") or "").strip()
+        if wrapper:
+            cmd = launch_flow.apply_wrapper(cmd, wrapper)
         return cmd
 
     def start_microsoft_login(self) -> str:
@@ -1605,6 +1609,9 @@ class BackendAPI:
             game_directory=game_dir,
             authlib_api=props.get("authlib_api"),
         )
+        if prep.get("wrapper"):
+            cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
+            log(f"包装器命令: {prep['wrapper']}")
         log(f"实际启动: {cmd[0]}")
         log("正在启动游戏进程…")
         progress(3, 4, "游戏启动中")
@@ -1755,6 +1762,8 @@ class BackendAPI:
             game_directory=prep["game_dir"],
             authlib_api=props.get("authlib_api"),
         )
+        if prep.get("wrapper"):
+            cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
         if not dest:
             dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.bat")
         path = vops.export_launch_bat(Path(dest), cmd, gdir)

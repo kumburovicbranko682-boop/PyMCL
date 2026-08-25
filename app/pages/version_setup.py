@@ -116,6 +116,10 @@ class VersionSetupDialog(MessageBoxBase):
         skin_map = {"steve": "Steve", "alex": "Alex"}
         self.skin.setCurrentText(skin_map.get(data.get("offline_skin") or "default", tr("默认")))
 
+        self.wrapper = LineEdit()
+        self.wrapper.setPlaceholderText(tr("包装 Java 进程的命令，如 gamemoderun / prime-run"))
+        self.wrapper.setText(data.get("wrapper") or "")
+
         self.pre = LineEdit()
         self.pre.setPlaceholderText(tr("启动前命令（cmd / 脚本）"))
         self.pre.setText(data.get("pre_launch") or "")
@@ -145,6 +149,7 @@ class VersionSetupDialog(MessageBoxBase):
         form.addRow(form_label(tr("窗口宽度")), self.win_w)
         form.addRow(form_label(tr("窗口高度")), self.win_h)
         form.addRow(form_label(tr("离线皮肤")), self.skin)
+        form.addRow(form_label(tr("包装器")), self.wrapper)
         form.addRow(form_label(tr("启动前")), self.pre)
         form.addRow("", self.wait)
         form.addRow(form_label(tr("退出后")), self.post)
@@ -191,6 +196,7 @@ class VersionSetupDialog(MessageBoxBase):
             "java": java,
             "jvm_args": self.jvm.toPlainText().strip(),
             "game_args": self.game.text().strip(),
+            "wrapper": self.wrapper.text().strip(),
             "server": self.server.text().strip(),
             "port": self.port.text().strip(),
             "pre_launch": self.pre.text().strip(),

@@ -29,6 +29,7 @@ DEFAULTS = {
     "java": "自动选择",
     "jvm_args": "",
     "game_args": "",
+    "wrapper": "",
     "pre_launch": "",
     "post_launch": "",
     "pre_launch_wait": True,

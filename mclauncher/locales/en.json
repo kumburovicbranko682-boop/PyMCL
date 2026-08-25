@@ -191,6 +191,8 @@
   "助手": "Assistant",
   "助手出错": "Assistant error",
   "勾选要显示在卡片上的入口：": "Pick the shortcuts shown on this card:",
+  "包装 Java 进程的命令，如 gamemoderun / prime-run": "Command that wraps the Java process, e.g. gamemoderun / prime-run",
+  "包装器": "Wrapper",
   "卡片设置": "Card settings",
   "卡片随意拖动 / 缩放 / 增删，自由摆放": "Drag, resize, add or remove cards freely",
   "卡通": "Cartoon",

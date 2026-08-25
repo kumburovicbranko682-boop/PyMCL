@@ -42,7 +42,17 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "window_width": _positive(settings.get("window_width")),
         "window_height": _positive(settings.get("window_height")),
         "window_title": (settings.get("window_title") or "").strip(),
+        "wrapper": str(settings.get("wrapper") or "").strip(),
     }
+
+
+def apply_wrapper(cmd, wrapper: str) -> list:
+    """包装器命令（HMCL 同款）：如 gamemoderun / prime-run / optirun，
+    拆参后前缀到启动命令，让包装器进程带起 Java。空串原样返回。"""
+    w = str(wrapper or "").strip()
+    if not w:
+        return list(cmd)
+    return split_args(w) + list(cmd)
 
 
 def _positive(value):
