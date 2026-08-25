@@ -1146,9 +1146,17 @@ class BackendAPI:
             "description": hit.get("description") or "",
         }
 
-    def search_modpacks(self, query: str, source: str) -> list[dict]:
+    def search_modpacks(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
+        """搜索整合包。extra 携带 game_version / category（与 app 门面一致，
+        少了它 WinUI/EziApp 下载页的筛选框就是摆设）。"""
+        extra = extra or {}
         src = "curseforge" if (source or "").lower().startswith("curse") else "modrinth"
         q = (query or "").strip()
+        from mclauncher.catalog_files import category_facets
+        cats = category_facets(extra.get("category") or extra.get("type") or "")
+        gv = extra.get("game_version") or extra.get("version") or ""
+        if isinstance(gv, str) and gv.startswith("全部"):
+            gv = ""
         if not q:
             rows = []
             seen = set()
@@ -1180,7 +1188,9 @@ class BackendAPI:
         key = CONFIG.get("curseforge_api_key")
         hits = []
         try:
-            hits = modpack_mod.search_modpacks_chinese(dm, q, limit=25, api_key=key)
+            hits = modpack_mod.search_modpacks_chinese(
+                dm, q, limit=25, api_key=key, game_version=gv or None,
+                categories=cats or None)
         except Exception:
             hits = []
         if hits and any(h.get("matched_alias") for h in hits):
@@ -1190,9 +1200,13 @@ class BackendAPI:
         if not hits:
             try:
                 if src == "curseforge":
-                    hits = modpack_mod.search_cf_modpacks(dm, q, limit=25, api_key=key)
+                    hits = modpack_mod.search_cf_modpacks(
+                        dm, q, limit=25, api_key=key, game_version=gv or None,
+                        categories=cats or None)
                 else:
-                    hits = modpack_mod.modrinth_search(dm, q, limit=25)
+                    hits = modpack_mod.modrinth_search(
+                        dm, q, limit=25, game_version=gv or None,
+                        categories=cats or None)
             except Exception:
                 hits = []
         else:
