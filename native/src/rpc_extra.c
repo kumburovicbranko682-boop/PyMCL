@@ -758,8 +758,11 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
             return o;
         }
         if (strcmp(method, "check_update") == 0) {
+            /* 契约键是 has_update（mclauncher/updater.check）；
+             * 以前写成 update，好在缺键=false 行为撞对了，仍按契约对齐。 */
             cJSON *o = cJSON_CreateObject();
-            cJSON_AddBoolToObject(o, "update", 0);
+            cJSON_AddBoolToObject(o, "ok", 1);
+            cJSON_AddBoolToObject(o, "has_update", 0);
             cJSON_AddStringToObject(o, "message", "当前为 C 桥；自更新需 Python");
             return o;
         }
