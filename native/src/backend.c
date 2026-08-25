@@ -912,8 +912,15 @@ cJSON *backend_call(const char *method, cJSON *params) {
 
     /* Align remaining RPC with Python bridge/api.py (native first, then py_rpc). */
     {
+        /* rpc_align_call 用「设错误 + 返回 NULL」表达显式拒绝（ai_send /
+         * terracotta_host 这类一次性 py_rpc 下必假成功的方法）。以前这里
+         * 把 NULL 一律当「没处理」，继续丢给通用 py_rpc 兜底，等于把上面
+         * 特意立的挡板拆了：AI 页在 C 桥下又会永远卡在「正在想…」。
+         * 先清错误缓冲，NULL + 有错误 = 已处理的拒绝，原样上抛。 */
+        pymcl_set_error("");
         cJSON *aligned = rpc_align_call(method, params, emit);
         if (aligned) return aligned;
+        if (pymcl_error()[0]) return NULL;
     }
     {
         cJSON *via_py = py_rpc_call(method, params);
