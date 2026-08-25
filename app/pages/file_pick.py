@@ -238,13 +238,72 @@ class FilePickDialog(MessageBoxBase):
         info.addWidget(meta)
         if row.get("filename"):
             info.addWidget(fn)
+        changelog_lab = QLabel()
+        changelog_lab.setWordWrap(True)
+        changelog_lab.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        changelog_lab.setStyleSheet(
+            f"color: {Theme.muted}; font-size: 11px; background: transparent; padding: 4px 0 2px 0;")
+        changelog_lab.hide()
+        info.addWidget(changelog_lab)
         lay.addLayout(info, 1)
+        cl_btn = TransparentPushButton(tr("更新日志"))
+        cl_btn.setFixedHeight(28)
+        cl_btn.clicked.connect(
+            lambda _, r=row, lab=changelog_lab, b=cl_btn: self._toggle_changelog(r, lab, b))
+        lay.addWidget(cl_btn)
         btn = PushButton(tr("安装"))
         btn.setFixedSize(64, 28)
         btn.setStyleSheet(ghost_btn_qss())
         btn.clicked.connect(lambda _, r=row: self._pick(r))
         lay.addWidget(btn)
         return host
+
+    def _toggle_changelog(self, row: dict, lab, btn):
+        """展开/收起该文件的更新日志；没缓存时按需向源站拉全文。"""
+        # isHidden 只看显式 hide/show 状态；isVisible 在对话框尚未显示时恒 False
+        if not lab.isHidden():
+            lab.hide()
+            return
+        cached = str(row.get("_changelog_full") or "").strip()
+        if not cached:
+            # 列表接口带的 changelog 截断到 400 字；不满说明是全文，直接用
+            inline = str(row.get("changelog") or "").strip()
+            if inline and len(inline) < 400:
+                cached = inline
+        if cached:
+            lab.setText(cached)
+            lab.show()
+            return
+        extra = {
+            "source": row.get("source") or self.item.get("source") or "",
+            "id": self.item.get("id"),
+            "slug": self.item.get("slug"),
+            "kind": self.kind,
+            "file_id": row.get("id"),
+        }
+        lab.setText(tr("正在加载更新日志…"))
+        lab.show()
+        btn.setEnabled(False)
+
+        def ok(text):
+            btn.setEnabled(True)
+            text = str(text or "").strip() or tr("（这个文件没有填写更新日志）")
+            row["_changelog_full"] = text
+            lab.setText(text)
+
+        def err(msg):
+            btn.setEnabled(True)
+            lab.setText(tr("更新日志加载失败") + f": {msg}")
+
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(lambda e=extra: self.backend.get_file_changelog(e),
+                       guard(self, ok), guard(self, err))
+            return
+        try:
+            ok(self.backend.get_file_changelog(extra))
+        except Exception as exc:
+            err(exc)
 
     def _pick(self, row):
         self.chosen = row

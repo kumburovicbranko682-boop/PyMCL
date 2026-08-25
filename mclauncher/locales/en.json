@@ -596,6 +596,8 @@
   "更新、清理、导出、全局 Mod": "Update, clean, export, global mods",
   "更新启动器": "Update launcher",
   "更新失败": "Update failed",
+  "更新日志": "Changelog",
+  "更新日志加载失败": "Failed to load changelog",
   "更新清单 URL": "Update manifest URL",
   "最小化": "Minimize",
   "最新": "Latest",
@@ -669,6 +671,7 @@
   "正在保存皮肤…": "Saving skin…",
   "正在准备联机内核。": "Preparing multiplayer runtime…",
   "正在加入房间": "Joining room",
+  "正在加载更新日志…": "Loading changelog…",
   "正在加载版本列表…": "Loading version list…",
   "正在取消…": "Cancelling…",
   "正在启动": "Launching",
@@ -1065,5 +1068,6 @@
   "（可多选）": "(multi-select)",
   "（本轮：": "(this round:",
   "（读取中…）": "(loading…)",
+  "（这个文件没有填写更新日志）": "(No changelog was provided for this file)",
   "＋ 新建实例": "+ New instance"
 }

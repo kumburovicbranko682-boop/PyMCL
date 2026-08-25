@@ -349,6 +349,11 @@ class BackendAPI:
         from mclauncher.catalog_files import list_project_files
         return list_project_files(DownloadManager(threads=2), extra or {})
 
+    def get_file_changelog(self, extra: dict | None = None) -> str:
+        """拉取目录文件/版本的完整更新日志（Modrinth 原文 / CF HTML 转文本）。"""
+        from mclauncher.catalog_files import fetch_changelog
+        return fetch_changelog(DownloadManager(threads=2), extra or {})
+
     def list_loader_versions(self, mc_version: str, loader: str) -> list[dict]:
         from mclauncher.loader_meta import list_loader_versions
         return list_loader_versions(DownloadManager(threads=2), mc_version, loader)
