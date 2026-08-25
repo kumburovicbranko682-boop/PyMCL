@@ -1396,9 +1396,16 @@ class BackendAPI:
             "description": hit.get("description") or "",
         }
 
-    def search_modpacks(self, query: str, source: str) -> list[dict]:
+    def search_modpacks(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
+        """搜索整合包。extra 携带 game_version / category / sort / offset（与 Qt 门面对齐）。"""
+        extra = extra or {}
         src = "curseforge" if (source or "").lower().startswith("curse") else "modrinth"
         q = (query or "").strip()
+        from mclauncher.catalog_files import category_facets
+        cats = category_facets(extra.get("category") or extra.get("type") or "")
+        gv = extra.get("game_version") or extra.get("version") or ""
+        if isinstance(gv, str) and gv.startswith("全部"):
+            gv = ""
         if not q:
             rows = []
             seen = set()
@@ -1428,11 +1435,17 @@ class BackendAPI:
             return rows
         dm = DownloadManager(threads=2)
         key = CONFIG.get("curseforge_api_key")
+        sort = str(extra.get("sort") or "")
+        offset = int(extra.get("offset") or 0)
         hits = []
-        try:
-            hits = modpack_mod.search_modpacks_chinese(dm, q, limit=25, api_key=key)
-        except Exception:
-            hits = []
+        # 中文别名目录只有一页结果，翻页时直接走源站搜索
+        if not offset:
+            try:
+                hits = modpack_mod.search_modpacks_chinese(
+                    dm, q, limit=25, api_key=key, game_version=gv or None,
+                    categories=cats or None)
+            except Exception:
+                hits = []
         if hits and any(h.get("matched_alias") for h in hits):
             rows = [self._modpack_row(h, src) for h in hits]
             self._pack_cache = rows
@@ -1440,9 +1453,13 @@ class BackendAPI:
         if not hits:
             try:
                 if src == "curseforge":
-                    hits = modpack_mod.search_cf_modpacks(dm, q, limit=25, api_key=key)
+                    hits = modpack_mod.search_cf_modpacks(
+                        dm, q, limit=25, api_key=key, game_version=gv or None,
+                        categories=cats or None, sort=sort, offset=offset)
                 else:
-                    hits = modpack_mod.modrinth_search(dm, q, limit=25)
+                    hits = modpack_mod.modrinth_search(
+                        dm, q, limit=25, game_version=gv or None,
+                        categories=cats or None, sort=sort, offset=offset)
             except Exception:
                 hits = []
         else:
@@ -1479,13 +1496,17 @@ class BackendAPI:
             gv = ""
         from mclauncher.catalog_files import category_facets
         cats = category_facets(extra.get("category") or extra.get("type") or "")
+        sort = str(extra.get("sort") or "")
+        offset = int(extra.get("offset") or 0)
         try:
             if src == "curseforge":
                 hits = mods_mod.search_curseforge(
                     dm, q, limit=30, api_key=CONFIG.get("curseforge_api_key"),
-                    class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None)
+                    class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None,
+                    sort=sort, offset=offset)
             else:
-                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None, categories=cats)
+                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None,
+                                            categories=cats, sort=sort, offset=offset)
         except Exception:
             hits = []
         rows = []
@@ -1542,10 +1563,13 @@ class BackendAPI:
             gv = ""
         from mclauncher.catalog_files import category_facets
         cats = category_facets(extra.get("category") or extra.get("type") or "")
+        sort = str(extra.get("sort") or "")
+        offset = int(extra.get("offset") or 0)
         if want_mr:
             try:
                 hits = mods_mod.search_modrinth_projects(
-                    dm, q, spec["mr"], limit=30, game_version=gv or None, categories=cats)
+                    dm, q, spec["mr"], limit=30, game_version=gv or None, categories=cats,
+                    sort=sort, offset=offset)
                 rows.extend(self._content_row(h, "modrinth") for h in hits)
             except Exception:
                 pass
@@ -1556,6 +1580,7 @@ class BackendAPI:
                     api_key=CONFIG.get("curseforge_api_key"),
                     class_id=spec["cf"],
                     game_version=gv or None,
+                    sort=sort, offset=offset,
                 )
                 for h in hits:
                     row = self._content_row(h, "curseforge")

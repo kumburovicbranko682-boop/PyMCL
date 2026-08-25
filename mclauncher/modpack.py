@@ -242,7 +242,7 @@ def update_modpack(dm: DownloadManager, instance: Instance, on_progress=None,
 # ================================================================ CurseForge 搜索（BMCLAPI 镜像）
 
 def search_cf_modpacks(dm: DownloadManager, query, limit=25, api_key=None,
-                       game_version=None, categories=None):
+                       game_version=None, categories=None, sort="", offset=0):
     """搜索 CurseForge 整合包（走 BMCLAPI 国内镜像，无需 API key）。"""
     from .mods import search_curseforge, CF_CLASS_MODPACK
     from .catalog_files import cf_category_tokens
@@ -251,7 +251,8 @@ def search_cf_modpacks(dm: DownloadManager, query, limit=25, api_key=None,
         tokens.extend(cf_category_tokens(c) or [str(c).lower()])
     hits = search_curseforge(dm, query=query, limit=limit, api_key=api_key,
                              class_id=CF_CLASS_MODPACK,
-                             game_version=game_version, categories=tokens or None)
+                             game_version=game_version, categories=tokens or None,
+                             sort=sort, offset=offset)
     for h in hits:
         h["description"] = h.pop("summary", "")
         h.pop("cf_categories", None)
@@ -598,12 +599,13 @@ def _match_filters_cf(mod: dict, game_version=None, cat_keys=None) -> bool:
 # ================================================================ Modrinth
 
 def modrinth_search(dm: DownloadManager, query, limit=25,
-                    game_version=None, categories=None):
+                    game_version=None, categories=None, sort="", offset=0):
     """搜索 Modrinth 整合包（官方优先，MCIM 镜像兜底）。
 
     中文关键词先经 mcmod.cn 中文名数据库翻成英文名再搜（HMCL/PCL2 同款）。
+    sort/offset：下载页排序与「加载更多」分页。
     """
-    from .mods import mirror_modrinth_url, _mr_facets
+    from .mods import mirror_modrinth_url, _mr_facets, mr_sort_index
     from .catalog_files import category_facets
     from . import mod_translate
 
@@ -615,8 +617,10 @@ def modrinth_search(dm: DownloadManager, query, limit=25,
         "query": query,
         "facets": facets,
         "limit": limit,
-        "index": "relevance",
+        "index": mr_sort_index(sort, query) if sort else "relevance",
     }
+    if offset:
+        params["offset"] = int(offset)
     if categories:
         cats = category_facets(categories[0] if len(categories) == 1 else "")
         # 多类型时 _mr_facets 生成 OR 组，单类型走 facets 里的精确分类

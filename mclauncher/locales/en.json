@@ -1161,5 +1161,10 @@
   "更新中…": "Updating…",
   "部分更新失败": "Some updates failed",
   "模组已更新": "Mods updated",
-  "已更新 {n} 个模组": "Updated {n} mod(s)"
+  "已更新 {n} 个模组": "Updated {n} mod(s)",
+  "默认排序": "Default Sort",
+  "最近更新": "Recently Updated",
+  "最新发布": "Newest",
+  "排序": "Sort",
+  "加载更多": "Load More"
 }

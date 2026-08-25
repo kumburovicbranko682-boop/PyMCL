@@ -359,15 +359,19 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
         want_cf = True
     rows = []
     q = (query or "").strip()
+    sort = str(extra.get("sort") or "")
+    offset = int(extra.get("offset") or 0)
     from .config import CONFIG
     api_key = CONFIG.get("curseforge_api_key")
     if want_mr:
         try:
             if kind == "mod":
-                hits = mods_mod.search_mods(dm, q or " ", limit=30, game_version=gv, categories=cats)
+                hits = mods_mod.search_mods(dm, q or " ", limit=30, game_version=gv,
+                                            categories=cats, sort=sort, offset=offset)
             else:
                 hits = mods_mod.search_modrinth_projects(
-                    dm, q, KIND_MR[kind], limit=30, game_version=gv, categories=cats)
+                    dm, q, KIND_MR[kind], limit=30, game_version=gv, categories=cats,
+                    sort=sort, offset=offset)
             for h in hits:
                 rows.append(_hit_row(h, "modrinth"))
         except Exception:
@@ -379,6 +383,7 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
                 class_id=KIND_CF.get(kind, mods_mod.CF_CLASS_MOD),
                 game_version=gv,
                 categories=cf_category_tokens(extra.get("category") or extra.get("type") or ""),
+                sort=sort, offset=offset,
             )
             for h in hits:
                 row = _hit_row(h, "curseforge")

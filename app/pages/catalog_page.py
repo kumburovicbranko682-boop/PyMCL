@@ -339,6 +339,10 @@ class PclCatalogPage(QWidget):
         self.version_box.setCurrentIndex(0)
         self.type_box = ComboBox()
         self.type_box.addItems(spec.get("types") or [tr("全部")])
+        # 排序方式（PCL2/HMCL 下载页同款）；键与 mclauncher.mods.SORT_KEYS 对应
+        self._sort_keys = ["", "downloads", "updated", "newest"]
+        self.sort_box = ComboBox()
+        self.sort_box.addItems([tr("默认排序"), tr("下载量"), tr("最近更新"), tr("最新发布")])
         grid.addWidget(self._lab(tr("名称")), 0, 0)
         grid.addWidget(self.name_edit, 0, 1)
         grid.addWidget(self._lab(tr("来源")), 0, 2)
@@ -347,6 +351,8 @@ class PclCatalogPage(QWidget):
         grid.addWidget(self.version_box, 1, 1)
         grid.addWidget(self._lab(tr("类型")), 1, 2)
         grid.addWidget(self.type_box, 1, 3)
+        grid.addWidget(self._lab(tr("排序")), 2, 0)
+        grid.addWidget(self.sort_box, 2, 1)
         grid.setColumnStretch(1, 3)
         grid.setColumnStretch(3, 2)
         sc.addLayout(grid)
@@ -415,6 +421,11 @@ class PclCatalogPage(QWidget):
         self._search_token = 0
         self._popular_loaded = False
         self._mode = "search"
+        # 分页状态：偏移量 + 累计结果（「加载更多」在旧结果后追加）
+        self._offset = 0
+        self._results: list[dict] = []
+        self._page_size = 25 if spec.get("search") == "search_modpacks" else 30
+        self.sort_box.currentIndexChanged.connect(lambda _i: self._search())
         self.setAcceptDrops(True)
         self._reload_instances()
         self._show_idle()
@@ -455,7 +466,14 @@ class PclCatalogPage(QWidget):
         self.source_box.setCurrentIndex(0)
         self.version_box.setCurrentIndex(0)
         self.type_box.setCurrentIndex(0)
+        self.sort_box.blockSignals(True)
+        self.sort_box.setCurrentIndex(0)
+        self.sort_box.blockSignals(False)
         self._search()
+
+    def _sort_key(self) -> str:
+        idx = self.sort_box.currentIndex()
+        return self._sort_keys[idx] if 0 <= idx < len(self._sort_keys) else ""
 
     def _clear_list(self):
         while self.list_layout.count():
@@ -469,10 +487,13 @@ class PclCatalogPage(QWidget):
         self.list_layout.addWidget(EmptyState(self.spec["icon"], tr("输入名称后点击搜索")))
         self.list_layout.addStretch(1)
 
-    def _search(self):
+    def _search(self, *_sig, append=False):
         self._search_token += 1
         token = self._search_token
-        self._clear_list()
+        if not append:
+            self._offset = 0
+            self._results = []
+            self._clear_list()
         fn = getattr(self.backend, self.spec["search"], None)
         if not callable(fn):
             self.list_layout.addWidget(EmptyState(self.spec["icon"], self.spec["empty_search"]))
@@ -485,6 +506,8 @@ class PclCatalogPage(QWidget):
         extra = {
             "game_version": "" if (not gv or str(gv).startswith(tr("全部"))) else gv,
             "category": type_f,
+            "sort": self._sort_key(),
+            "offset": self._offset,
         }
         call_async = getattr(self.backend, "call_async", None)
 
@@ -495,15 +518,20 @@ class PclCatalogPage(QWidget):
                 return fn(query, source)
 
         if callable(call_async):
-            self.list_layout.addWidget(EmptyState(self.spec["icon"], tr("正在搜索…")))
-            self.list_layout.addStretch(1)
+            if not append:
+                self.list_layout.addWidget(EmptyState(self.spec["icon"], tr("正在搜索…")))
+                self.list_layout.addStretch(1)
             call_async(
                 _call,
-                lambda rows, t=token, tf=type_f: self._on_search_ok(t, rows, tf),
+                lambda rows, t=token, ap=append: self._on_search_ok(t, rows, ap),
                 lambda err, t=token: self._on_search_err(t, err),
             )
             return
-        self._on_search_ok(token, _call(), type_f)
+        self._on_search_ok(token, _call(), append)
+
+    def _load_more(self):
+        self._offset += self._page_size
+        self._search(append=True)
 
     def _on_search_err(self, token, err):
         if token != self._search_token:
@@ -512,11 +540,20 @@ class PclCatalogPage(QWidget):
         self.list_layout.addWidget(EmptyState(self.spec["icon"], f"搜索失败: {err}"))
         self.list_layout.addStretch(1)
 
-    def _on_search_ok(self, token, results, type_f):
+    def _on_search_ok(self, token, results, append=False):
         if token != self._search_token:
             return
         results = list(results or [])
-        del type_f
+        if append:
+            # 翻页去重：两源合并或镜像抖动可能重发同一条
+            seen = {(r.get("source"), r.get("id") or r.get("slug") or r.get("name"))
+                    for r in self._results}
+            results = [r for r in results
+                       if (r.get("source"), r.get("id") or r.get("slug") or r.get("name"))
+                       not in seen]
+            self._results.extend(results)
+        else:
+            self._results = results
         self._clear_list()
         query = self.name_edit.text().strip()
         if not query:
@@ -525,12 +562,18 @@ class PclCatalogPage(QWidget):
                 f"color: {Theme.title}; font-size: 13px; font-weight: 700;"
                 " background: transparent; padding: 10px 12px 6px 12px;")
             self.list_layout.addWidget(head)
-        if not results:
+        if not self._results:
             self.list_layout.addWidget(EmptyState(self.spec["icon"], self.spec["empty_search"]))
             self.list_layout.addStretch(1)
             return
-        for row in results:
+        for row in self._results:
             self.list_layout.addWidget(PclResultRow(row, self._install, on_fav=self._toggle_fav))
+        # 本页拿满说明源站可能还有下一页（热门推荐是本地列表，不翻页）
+        if query and len(results) >= self._page_size:
+            more = PushButton(tr("加载更多"))
+            more.setFixedHeight(34)
+            more.clicked.connect(self._load_more)
+            self.list_layout.addWidget(more)
         self.list_layout.addStretch(1)
 
     def _set_mode(self, mode: str):

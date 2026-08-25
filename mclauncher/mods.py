@@ -119,6 +119,30 @@ class ModError(Exception):
 
 # ================================================================ 搜索
 
+# 统一排序键（下载页排序下拉，PCL2/HMCL 同款）→ (Modrinth index, CurseForge sortField)
+# CurseForge ModsSearchSortField: 2=Popularity 3=LastUpdated 6=TotalDownloads 11=ReleasedDate
+SORT_KEYS = {
+    "relevance": ("relevance", 2),
+    "downloads": ("downloads", 6),
+    "updated": ("updated", 3),
+    "newest": ("newest", 11),
+    "follows": ("follows", 2),   # CF 没有关注数，退回人气
+}
+
+
+def mr_sort_index(sort, query="") -> str:
+    """Modrinth search 的 index 参数；sort 留空保持旧行为（有词按相关度，无词按下载量）。"""
+    mr = SORT_KEYS.get(str(sort or "").strip().lower(), ("", 0))[0]
+    if mr:
+        return mr
+    return "relevance" if (query or "").strip() else "downloads"
+
+
+def cf_sort_field(sort) -> int:
+    """CurseForge search 的 sortField；sort 留空保持旧行为（按人气）。"""
+    return SORT_KEYS.get(str(sort or "").strip().lower(), ("", 2))[1] or 2
+
+
 def _mr_facets(project_type, game_version=None, categories=None):
     facets = [[f"project_type:{project_type}"]]
     if game_version:
@@ -129,10 +153,12 @@ def _mr_facets(project_type, game_version=None, categories=None):
     return json.dumps(facets)
 
 
-def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categories=None):
+def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categories=None,
+                sort="", offset=0):
     """搜索 Modrinth 模组（project_type:mod），官方与镜像短超时轮询。
 
     中文关键词先经 mcmod.cn 中文名数据库翻成英文名再搜（HMCL/PCL2 同款）。
+    sort/offset：下载页排序与「加载更多」分页。
     """
     from . import mod_translate
     rec = mod_translate.best_cn_match(query, "mod", dm=dm)
@@ -142,8 +168,10 @@ def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categor
         "query": query or " ",
         "facets": _mr_facets("mod", game_version, categories),
         "limit": limit,
-        "index": "relevance" if (query or "").strip() else "downloads",
+        "index": mr_sort_index(sort, query),
     }
+    if offset:
+        params["offset"] = int(offset)
     last_err = None
     from . import source
     for base in source.modrinth_api_bases():
@@ -734,12 +762,13 @@ _CF_TRANSLATE_KIND = {CF_CLASS_MOD: "mod", CF_CLASS_MODPACK: "modpack"}
 
 def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
                       class_id=CF_CLASS_MOD, slug=None, game_version=None,
-                      categories=None):
+                      categories=None, sort="", offset=0):
     """搜索 CurseForge（官方 API 优先，国内镜像兜底）。
 
     categories 是 canonical key 的展示名碎片（见 catalog_files.CF_TYPE_TOKENS）；
     CF 的 categoryFilter 对 slug 约束不稳定，这里改为拉回结果后按分类名过滤。
     中文关键词经 mcmod.cn 中文名数据库翻译：先按 slug 精确找本体，再按英文名全文搜。
+    sort/offset：下载页排序与「加载更多」分页。
     """
     from . import mod_translate
     kind = _CF_TRANSLATE_KIND.get(class_id)
@@ -752,9 +781,10 @@ def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
     params = {
         "gameId": 432,
         "classId": class_id,
-        "sortField": 2,      # 按人气排序
+        "sortField": cf_sort_field(sort),
+        "sortOrder": "desc",
         "pageSize": limit * 2 if categories else limit,
-        "index": 0,
+        "index": int(offset or 0),
     }
     if query:
         params["searchFilter"] = query
@@ -765,8 +795,9 @@ def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
 
     data = _cf_fetch(dm, "/mods/search", api_key=api_key, params=params)
     hits = [_cf_norm(m) for m in _cf_items(data)]
-    if cn_slug:
-        # 中文命中的本体置顶；全文搜没带回来就按 slug 单独取一次
+    if cn_slug and not offset:
+        # 中文命中的本体置顶（只在第一页做，翻页别重复置顶）；
+        # 全文搜没带回来就按 slug 单独取一次
         front = [h for h in hits if (h.get("slug") or "").lower() == cn_slug.lower()]
         if front:
             hits = front + [h for h in hits if h not in front]
@@ -1079,14 +1110,16 @@ CONTENT_KINDS = {
 
 
 def search_modrinth_projects(dm: DownloadManager, query, project_type, limit=30,
-                             game_version=None, categories=None):
+                             game_version=None, categories=None, sort="", offset=0):
     """按 project_type 搜 Modrinth（shader / resourcepack / datapack / mod）。"""
     params = {
         "query": query or " ",
         "facets": _mr_facets(project_type, game_version, categories),
         "limit": limit,
-        "index": "relevance" if (query or "").strip() else "downloads",
+        "index": mr_sort_index(sort, query),
     }
+    if offset:
+        params["offset"] = int(offset)
     last_err = None
     data = None
     from . import source
