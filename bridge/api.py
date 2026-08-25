@@ -2331,6 +2331,20 @@ class BackendAPI:
         inst_name = instance or CONFIG.get("default_instance", "default")
         return playtime_mod.get_playtime(inst_name)
 
+    def get_version_stats(self, instance: str = "") -> dict:
+        """每版本游玩统计（HMCL 游戏列表同款）：秒数/上次游玩 + 可读文案。"""
+        from mclauncher import playtime as playtime_mod
+        inst_name = instance or CONFIG.get("default_instance", "default")
+        out = {}
+        for vid, row in playtime_mod.version_stats(inst_name).items():
+            out[vid] = {
+                "seconds": row["seconds"],
+                "last": row["last"],
+                "seconds_text": playtime_mod.format_duration(row["seconds"]),
+                "last_text": playtime_mod.format_last_played(row["last"]),
+            }
+        return out
+
     def get_all_playtime(self) -> dict:
         from mclauncher import playtime as playtime_mod
         return playtime_mod.get_all_playtime()

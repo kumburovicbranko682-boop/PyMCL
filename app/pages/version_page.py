@@ -238,7 +238,14 @@ class VersionPage(QWidget):
 
         self._installed_checks = []
         instance = self.instance_box.currentText() or "default"
-        for v in self.backend.get_installed_versions(instance, include_hidden=self._show_hidden):
+        try:
+            stats = self.backend.get_version_stats(instance) or {}
+        except Exception:
+            stats = {}
+        ids = self.backend.get_installed_versions(instance, include_hidden=self._show_hidden)
+        # HMCL 游戏列表同款：最近玩过的排前面；没玩过的保持原（字母）顺序垫底
+        ids = sorted(ids, key=lambda vid: -(stats.get(vid, {}).get("last") or 0))
+        for v in ids:
             row = QHBoxLayout()
             cb = CheckBox(v)
             low = v.lower()
@@ -253,6 +260,11 @@ class VersionPage(QWidget):
                             "OptiFine" if "optifine" in low else (
                                 "LiteLoader" if "liteloader" in low else tr("原版"))))))
             row.addWidget(cb, 1)
+            st = stats.get(v) or {}
+            if st.get("last"):
+                played = CaptionLabel(f"{st.get('last_text', '')} · {st.get('seconds_text', '')}")
+                played.setStyleSheet("color: rgba(128,128,128,0.85); background: transparent;")
+                row.addWidget(played)
             row.addWidget(Pill(label, color))
             setup = TransparentToolButton(FIF.SETTING)
             setup.setToolTip(tr("版本设置"))

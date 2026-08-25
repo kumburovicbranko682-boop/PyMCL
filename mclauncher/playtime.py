@@ -112,6 +112,43 @@ def get_total_playtime() -> int:
     return total
 
 
+def version_stats(instance_name: str) -> dict:
+    """每版本统计（HMCL 游戏列表同款）：{版本id: {"seconds": 累计秒, "last": 最近一次游玩结束时间戳}}。
+
+    "last" 从会话记录推导（只保留最近 500 条，够覆盖「最近玩过什么」）；
+    累计秒数用 versions 总账，不受会话裁剪影响。
+    """
+    data = _load()
+    inst = data.get("instances", {}).get(instance_name) or {}
+    out = {}
+    for vid, secs in (inst.get("versions") or {}).items():
+        out[vid] = {"seconds": int(secs or 0), "last": 0}
+    for s in inst.get("sessions") or []:
+        vid = s.get("version") or "?"
+        end = int(s.get("start") or 0) + int(s.get("duration") or 0)
+        row = out.setdefault(vid, {"seconds": int(s.get("duration") or 0), "last": 0})
+        if end > row["last"]:
+            row["last"] = end
+    return out
+
+
+def format_last_played(epoch: int, now=None) -> str:
+    """上次游玩的相对时间：刚刚 / n 分钟前 / n 小时前 / n 天前 / 具体日期。"""
+    if not epoch or epoch <= 0:
+        return ""
+    now = time.time() if now is None else now
+    diff = max(0, int(now) - int(epoch))
+    if diff < 60:
+        return "刚刚"
+    if diff < 3600:
+        return f"{diff // 60} 分钟前"
+    if diff < 86400:
+        return f"{diff // 3600} 小时前"
+    if diff < 30 * 86400:
+        return f"{diff // 86400} 天前"
+    return time.strftime("%Y-%m-%d", time.localtime(int(epoch)))
+
+
 def format_duration(seconds: int) -> str:
     """将秒数格式化为人类可读的时长。"""
     if seconds < 0:
