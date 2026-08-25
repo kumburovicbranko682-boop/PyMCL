@@ -782,12 +782,12 @@ class PclCatalogPage(QWidget):
                 except TypeError:
                     fn(name)
             return
-        start = getattr(self.backend, "start_task", None)
-        if callable(start):
-            def _pending(progress, log, *_a, **_k):
-                log(tr("待后端对接"))
-                progress(1, 1, tr("待对接"))
-            start(f"{self.spec['task_prefix']} {name}".strip(), _pending)
+        # 后端没有这个安装方法：老代码在这里造一个「待后端对接」的任务，
+        # 进度直接拉满、状态报成功——什么都没装却看起来装完了。明确报错。
+        InfoBar.error(
+            tr("无法安装"),
+            tr("后端缺少方法 ") + str(self.spec.get("install") or ""),
+            parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
