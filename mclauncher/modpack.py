@@ -55,6 +55,190 @@ def cf_manifest_loaders(mf):
     return loaders if isinstance(loaders, list) else []
 
 
+# ================================================================ 整合包更新（文件清单 + 版本检查）
+
+PACK_FILES_NAME = "modpack.files.json"
+# 更新时只自动清理这些目录下的旧包文件；config 等可能被用户改过，不动。
+_MANAGED_PREFIXES = ("mods/", "resourcepacks/", "shaderpacks/", "datapacks/")
+
+
+def pack_files_path(instance: Instance) -> Path:
+    return Path(instance.path) / PACK_FILES_NAME
+
+
+def read_pack_files(instance: Instance) -> list[str]:
+    """读取整合包写入实例的文件清单（相对实例根的 posix 路径）。"""
+    data = utils.read_json(pack_files_path(instance), None)
+    if not isinstance(data, dict):
+        return []
+    files = data.get("files")
+    if not isinstance(files, list):
+        return []
+    return [str(x) for x in files if x]
+
+
+def write_pack_files(instance: Instance, paths):
+    """记录整合包本次安装写入的文件（下载文件 + overrides）。"""
+    uniq = sorted({str(p).replace("\\", "/").lstrip("/") for p in paths if p})
+    utils.write_json(pack_files_path(instance), {"files": uniq})
+
+
+def _tree_rel_paths(src: Path) -> list[str]:
+    out = []
+    for p in src.rglob("*"):
+        if p.is_file():
+            out.append(p.relative_to(src).as_posix())
+    return out
+
+
+def _merge_origin(pack_meta: dict, origin, keys):
+    """把安装来源标识（slug / addon_id / file_id / version_id）并进 pack_meta。"""
+    for k in keys:
+        v = (origin or {}).get(k)
+        if v not in (None, ""):
+            pack_meta[k] = v
+    return pack_meta
+
+
+def cleanup_stale_pack_files(instance: Instance, old_files) -> list[str]:
+    """删除旧整合包版本装入、且新版本清单里没有的文件。
+
+    只清理 mods / resourcepacks / shaderpacks / datapacks（旧版模组残留会和
+    新版模组一起加载导致崩溃）；存档、截图、config 与用户手动放入的文件
+    不在旧清单里，不受影响。被用户禁用的旧包模组（.disabled）一并清掉。
+    """
+    new = set(read_pack_files(instance))
+    root = Path(instance.path).resolve()
+    removed = []
+    for rel in old_files or []:
+        posix = str(rel).replace("\\", "/").lstrip("/")
+        if not posix or posix in new or not posix.startswith(_MANAGED_PREFIXES):
+            continue
+        target = root / posix
+        try:
+            rp = target.resolve()
+        except OSError:
+            continue
+        # 防路径穿越：清单可能来自损坏/恶意文件
+        if not str(rp).startswith(str(root) + os.sep):
+            continue
+        for cand, suffix in ((rp, ""), (rp.with_name(rp.name + ".disabled"), ".disabled")):
+            if not cand.is_file():
+                continue
+            try:
+                cand.unlink()
+                removed.append(posix + suffix)
+            except OSError:
+                pass
+    return removed
+
+
+_NO_ORIGIN_HINT = (
+    "该整合包安装时未记录来源信息（本地文件安装，或由旧版本 PyMCL 安装）。"
+    "从下载页重新安装一次同名整合包后即可在线检查更新。"
+)
+
+
+def check_modpack_update(dm: DownloadManager, instance: Instance, api_key=None) -> dict:
+    """检查实例整合包是否有新版本（Modrinth / CurseForge）。
+
+    返回 {source, name, slug, current, latest, current_id, latest_id,
+    update, url, mc_versions}。没有安装记录 / 来源不支持时抛 ModpackError。
+    """
+    meta = (instance.meta() or {}).get("modpack")
+    if not isinstance(meta, dict) or not meta.get("name"):
+        raise ModpackError("该实例没有整合包安装记录，无法检查更新")
+    source = str(meta.get("source") or "").lower()
+    name = str(meta.get("name") or "?")
+    current = str(meta.get("version") or "?")
+
+    if source == "modrinth":
+        slug = meta.get("slug")
+        if not slug:
+            raise ModpackError(_NO_ORIGIN_HINT)
+        versions = modrinth_versions(dm, slug)
+        f, v = _pick_mrpack_file(versions)
+        if not f or not v:
+            raise ModpackError(f"整合包 {slug} 在 Modrinth 上没有可下载的 .mrpack 版本")
+        latest_id = str(v.get("id") or "")
+        latest = str(v.get("version_number") or v.get("name") or latest_id)
+        cur_id = str(meta.get("version_id") or "")
+        if cur_id and latest_id:
+            update = latest_id != cur_id
+        else:
+            update = latest != current
+        return {
+            "source": "modrinth", "name": name, "slug": slug,
+            "current": current, "latest": latest,
+            "current_id": cur_id or None, "latest_id": latest_id or None,
+            "update": bool(update), "url": f.get("url"),
+            "mc_versions": v.get("game_versions") or [],
+        }
+
+    if source == "curseforge":
+        addon_id = meta.get("addon_id")
+        cur_id = meta.get("file_id")
+        if not addon_id or not cur_id:
+            raise ModpackError(_NO_ORIGIN_HINT)
+        info = resolve_cf_modpack_file(dm, addon_id, api_key=api_key,
+                                       cf_slug=meta.get("slug"))
+        latest_id = info.get("file_id")
+        latest = str(info.get("fileName") or latest_id or "?")
+        return {
+            "source": "curseforge", "name": info.get("name") or name,
+            "slug": info.get("slug") or meta.get("slug"),
+            "addon_id": info.get("addon_id") or addon_id,
+            "current": current, "latest": latest,
+            "current_id": cur_id, "latest_id": latest_id,
+            "update": str(latest_id) != str(cur_id), "url": None,
+            "mc_versions": [],
+        }
+
+    raise ModpackError(
+        f"整合包来源「{source or '未知'}」不支持在线检查更新"
+        "（本地 zip / MultiMC 实例包没有更新源）"
+    )
+
+
+def update_modpack(dm: DownloadManager, instance: Instance, on_progress=None,
+                   cancel=None, api_key=None, info=None) -> dict:
+    """把实例整合包升级到最新版本。
+
+    重装新版本的下载文件与 overrides，然后删除旧版本装入、新版本不再
+    包含的 mods / resourcepacks / shaderpacks / datapacks 文件。存档、
+    截图、options.txt 与用户手动加的模组不在整合包清单里，不受影响。
+    """
+    info = info or check_modpack_update(dm, instance, api_key=api_key)
+    if not info.get("update"):
+        _emit(on_progress, f"{info.get('name')} 已是最新版本 {info.get('current')}")
+        return {"updated": False, **info}
+    old_files = read_pack_files(instance)
+    if not old_files:
+        _emit(on_progress, "没有旧版本文件清单（由旧版 PyMCL 安装），更新后不会自动清理旧文件")
+    _emit(on_progress,
+          f"更新整合包 {info.get('name')}: {info.get('current')} -> {info.get('latest')}")
+    if info.get("source") == "modrinth":
+        if not info.get("url"):
+            raise ModpackError("最新版本没有可下载的 .mrpack 文件")
+        meta = install_mrpack(
+            dm, info["url"], instance, on_progress=on_progress, cancel=cancel,
+            origin={"slug": info.get("slug"), "version_id": info.get("latest_id")})
+    else:
+        meta = install_cf_modpack(
+            dm, info.get("addon_id"), instance, api_key=api_key,
+            on_progress=on_progress, cancel=cancel,
+            cf_slug=info.get("slug"), file_id=info.get("latest_id"))
+    removed = cleanup_stale_pack_files(instance, old_files)
+    if removed:
+        _emit(on_progress, f"已清理旧版本残留文件 {len(removed)} 个")
+    return {
+        "updated": True, "name": info.get("name"),
+        "from": info.get("current"),
+        "to": str((meta or {}).get("version") or info.get("latest") or "?"),
+        "removed": removed, "meta": meta,
+    }
+
+
 # ================================================================ CurseForge 搜索（BMCLAPI 镜像）
 
 def search_cf_modpacks(dm: DownloadManager, query, limit=25, api_key=None,
@@ -236,7 +420,9 @@ def install_cf_modpack(dm: DownloadManager, addon_id, instance: Instance,
     else:
         raise ModpackError(f"整合包下载失败: {last_err}")
     try:
-        return install_cf_zip(dm, tmp, instance, on_progress=on_progress, cancel=cancel)
+        return install_cf_zip(dm, tmp, instance, on_progress=on_progress, cancel=cancel,
+                              origin={"addon_id": addon_id, "file_id": file_id,
+                                      "slug": info.get("slug") or cf_slug})
     finally:
         try:
             tmp.unlink(missing_ok=True)
@@ -686,7 +872,9 @@ def install_mrpack_by_slug(dm: DownloadManager, slug, instance: Instance,
         try:
             return install_mrpack(dm, pack_file.get("url"), instance,
                                   on_progress=on_progress, cancel=cancel,
-                                  force=force, java=java)
+                                  force=force, java=java,
+                                  origin={"slug": proj.get("slug") or slug,
+                                          "version_id": v.get("id")})
         except (ModpackError, InstallError, manifest_mod.VersionNotFound) as e:
             last_err = e
             _emit(on_progress, f"{label} 安装失败: {e}")
@@ -711,8 +899,13 @@ def _fetch_mrpack(dm: DownloadManager, source):
 
 
 def install_mrpack(dm: DownloadManager, source, instance: Instance,
-                   on_progress=None, cancel=None, force=False, java=None):
-    """安装 .mrpack 整合包到指定实例。"""
+                   on_progress=None, cancel=None, force=False, java=None,
+                   origin=None):
+    """安装 .mrpack 整合包到指定实例。
+
+    origin: {"slug", "version_id"}，来自在线安装入口；记进 pack_meta
+    供后续检查更新用。
+    """
     downloaded = bool(re.match(r"^https?://", str(source)))
     _emit(on_progress, f"{'下载' if downloaded else '读取'}整合包: {source}")
     pack_path = _fetch_mrpack(dm, source)
@@ -796,6 +989,7 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
         from .mods import modrinth_download_urls
         tasks = []
         sha512_checks = []
+        pack_paths = []
         for f in idx.get("files", []):
             env = f.get("env") or {}
             if env.get("client") in ("unsupported", "server"):
@@ -808,6 +1002,7 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
             # 防路径穿越
             if not str(dest).startswith(str(instance.path.resolve()) + os.sep):
                 raise ModpackError(f"整合包文件路径非法: {rel}")
+            pack_paths.append(str(rel).replace("\\", "/").lstrip("/"))
             hashes = f.get("hashes") or {}
             tasks.append((
                 modrinth_download_urls(downloads), dest,
@@ -834,6 +1029,7 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
             if src.is_dir():
                 _emit(on_progress, f"复制 {overrides_dir}")
                 _copy_tree_over(src, instance.path)
+                pack_paths.extend(_tree_rel_paths(src))
                 break
 
         pack_meta = {
@@ -844,8 +1040,10 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
             "source": "modrinth",
             "instance": instance.name,
         }
+        _merge_origin(pack_meta, origin, ("slug", "version_id"))
         instance.set_meta("modpack", pack_meta)
         instance.set_meta("mc_version", loader_vid or mc_version)
+        write_pack_files(instance, pack_paths)
         _emit(on_progress, f"整合包 {pack_meta['name']} 安装完成 -> 实例 {instance.name}")
         return pack_meta
     finally:
@@ -1038,8 +1236,13 @@ def download_pack_mods_tolerant(dm: DownloadManager, tasks, raw_files, meta,
 
 
 def install_cf_zip(dm: DownloadManager, source, instance: Instance,
-                   on_progress=None, cancel=None, force=False, java=None):
-    """安装 CurseForge 整合包 zip（本地文件或直链）。"""
+                   on_progress=None, cancel=None, force=False, java=None,
+                   origin=None):
+    """安装 CurseForge 整合包 zip（本地文件或直链）。
+
+    origin: {"addon_id", "file_id", "slug"}，来自在线安装入口；记进
+    pack_meta 供后续检查更新用。
+    """
     downloaded = False
     if re.match(r"^https?://", str(source)):
         tmp = Path(tempfile.gettempdir()) / f"pymcl_cfpack_{abs(hash(str(source)))}.zip"
@@ -1128,6 +1331,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             except Exception as e:
                 utils.log.warning("批量查询整合包 Mod 元数据失败，将仅用 CDN 规则: %s", e)
         tasks = []
+        pack_paths = []
         for f in raw_files:
             pid, fid = f.get("projectID"), f.get("fileID")
             info = meta.get(int(fid), {}) if fid is not None else {}
@@ -1135,6 +1339,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             download_url = info.get("downloadUrl")
             dest_name = filename or f"mod-{pid}-{fid}.jar"
             dest = instance.path / "mods" / dest_name
+            pack_paths.append(f"mods/{dest_name}")
             sha1 = None
             for h in info.get("hashes") or []:
                 if h.get("algo") == 1 and h.get("value"):
@@ -1155,6 +1360,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             src = pack_root / overrides
             if src.is_dir():
                 _copy_tree_over(src, instance.path)
+                pack_paths.extend(_tree_rel_paths(src))
 
         pack_meta = {
             "name": mf.get("name", Path(pack_path).stem),
@@ -1166,8 +1372,10 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
         }
         if manual_mods:
             pack_meta["manual_mods"] = manual_mods
+        _merge_origin(pack_meta, origin, ("addon_id", "file_id", "slug"))
         instance.set_meta("modpack", pack_meta)
         instance.set_meta("mc_version", loader_vid or mc_version)
+        write_pack_files(instance, pack_paths)
         _emit(on_progress, f"整合包 {pack_meta['name']} 安装完成 -> 实例 {instance.name}")
         return pack_meta
     finally:

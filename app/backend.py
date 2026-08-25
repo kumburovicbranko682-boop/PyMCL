@@ -1265,6 +1265,16 @@ class BackendAPI(QObject):
         return self.start_task(
             f"导出整合包 {instance}", self._export_pack_impl, instance, dest, fmt)
 
+    def check_modpack_update(self, instance: str) -> dict:
+        """检查实例整合包是否有新版本（Modrinth / CurseForge）。"""
+        dm = DownloadManager(threads=2)
+        return modpack_mod.check_modpack_update(
+            dm, self._instance(instance), api_key=CONFIG.get("curseforge_api_key"))
+
+    def update_modpack(self, instance: str) -> str:
+        """把实例整合包升级到最新版本（重装文件并清理旧版残留 mods）。"""
+        return self.start_task(f"更新整合包 {instance}", self._update_modpack_impl, instance)
+
     def check_mod_updates(self, instance: str) -> list:
         from mclauncher.mod_update import check_updates
         return check_updates(self._instance(instance))
@@ -2283,6 +2293,25 @@ class BackendAPI(QObject):
             apply_update(inst, row, dm=dm)
             progress(i + 1, len(rows), row.get("name") or "")
         return f"已更新 {len(rows)} 个模组"
+
+    def _update_modpack_impl(self, progress, log, instance):
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        result = modpack_mod.update_modpack(
+            dm, inst, on_progress=dm.on_progress, cancel=dm.cancel,
+            api_key=CONFIG.get("curseforge_api_key"))
+        if not result.get("updated"):
+            return tr("已是最新版本：{v}").format(v=result.get("current") or "?")
+        removed = result.get("removed") or []
+        if removed:
+            log(tr("已清理旧版本残留 {n} 个文件").format(n=len(removed)))
+            for r in removed[:20]:
+                log(f"  - {r}")
+            if len(removed) > 20:
+                log(f"  … 共 {len(removed)} 个")
+        self._emit_ui_changed()
+        return tr("整合包已更新：{a} → {b}").format(
+            a=result.get("from") or "?", b=result.get("to") or "?")
 
     def _self_update_impl(self, progress, log):
         from mclauncher import updater as updater_mod

@@ -30,6 +30,11 @@ class InstanceCard(SimpleCardWidget):
         name_box.addWidget(StrongBodyLabel(info["name"]))
         name_box.addWidget(CaptionLabel(f'{info["versions"]} 个版本'))
         top.addLayout(name_box, 1)
+        if info.get("pack"):
+            update_btn = TransparentToolButton(getattr(FIF, "UPDATE", FIF.SYNC))
+            update_btn.setToolTip(tr("检查整合包更新"))
+            update_btn.clicked.connect(lambda: page.check_pack_update(info["name"]))
+            top.addWidget(update_btn)
         top.addWidget(Pill(tr("默认") if info["name"] == CONFIG.get("default_instance") else tr("实例"), "#4C8BF5"))
         layout.addLayout(top)
         layout.addWidget(CaptionLabel(str(info.get("mc") or "")))
@@ -171,6 +176,40 @@ class InstancePage(QWidget):
             except Exception as e:
                 MessageBox(tr("重命名失败"), str(e), self).exec()
             self.reload()
+
+    def check_pack_update(self, name: str):
+        def done(info):
+            info = info or {}
+            if not info.get("update"):
+                MessageBox(
+                    tr("整合包更新"),
+                    tr("「{name}」已是最新版本（{v}）").format(
+                        name=info.get("name") or name, v=info.get("current") or "?"),
+                    self.window(),
+                ).exec()
+                return
+            box = MessageBox(
+                tr("发现整合包新版本"),
+                tr("{name}：{a} → {b}\n\n更新会重新安装整合包文件并清理旧版本残留的模组；"
+                   "存档、截图与手动添加的模组不受影响。是否更新？").format(
+                    name=info.get("name") or name,
+                    a=info.get("current") or "?", b=info.get("latest") or "?"),
+                self.window(),
+            )
+            if box.exec():
+                self.backend.update_modpack(name)
+
+        def failed(msg):
+            MessageBox(tr("检查整合包更新失败"), str(msg or tr("未知错误")), self.window()).exec()
+
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(lambda: self.backend.check_modpack_update(name), done, failed)
+            return
+        try:
+            done(self.backend.check_modpack_update(name))
+        except Exception as e:
+            failed(e)
 
     def export_pack(self, name: str):
         items = [tr("Modrinth 整合包 (.mrpack)"), tr("CurseForge 整合包 (.zip)")]
