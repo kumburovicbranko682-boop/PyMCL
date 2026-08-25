@@ -373,6 +373,8 @@ class Installer:
         """安装任意版本（原版 / Fabric / Quilt / 带处理器的 Forge JSON）。"""
         inst = self.instance
         inst.ensure_standard_dirs()
+        from . import diskspace
+        diskspace.ensure_free(inst.path, what=f"安装版本 {version_id}")
         try:
             vjson = manifest.get_version_json(self.dm, version_id, force=force)
         except manifest.VersionNotFound:

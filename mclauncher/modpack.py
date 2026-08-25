@@ -906,6 +906,8 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
     origin: {"slug", "version_id"}，来自在线安装入口；记进 pack_meta
     供后续检查更新用。
     """
+    from . import diskspace
+    diskspace.ensure_free(instance.path, what="安装整合包")
     downloaded = bool(re.match(r"^https?://", str(source)))
     _emit(on_progress, f"{'下载' if downloaded else '读取'}整合包: {source}")
     pack_path = _fetch_mrpack(dm, source)
@@ -1243,6 +1245,8 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
     origin: {"addon_id", "file_id", "slug"}，来自在线安装入口；记进
     pack_meta 供后续检查更新用。
     """
+    from . import diskspace
+    diskspace.ensure_free(instance.path, what="安装整合包")
     downloaded = False
     if re.match(r"^https?://", str(source)):
         tmp = Path(tempfile.gettempdir()) / f"pymcl_cfpack_{abs(hash(str(source)))}.zip"
