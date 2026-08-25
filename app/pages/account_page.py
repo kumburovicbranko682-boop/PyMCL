@@ -59,6 +59,10 @@ class AccountPage(QWidget):
         self.reset_skin_btn = TransparentPushButton(tr("重置为默认皮肤"))
         self.reset_skin_btn.clicked.connect(self._reset_skin)
         sl.addWidget(self.reset_skin_btn)
+        self.mojang_skin_btn = TransparentPushButton(tr("使用正版玩家皮肤…"))
+        self.mojang_skin_btn.clicked.connect(self._use_mojang_skin)
+        self.mojang_skin_btn.setVisible(False)
+        sl.addWidget(self.mojang_skin_btn)
         cape_row = QHBoxLayout()
         cape_row.addWidget(CaptionLabel(tr("披风")))
         self.cape_box = ComboBox()
@@ -235,6 +239,10 @@ class AccountPage(QWidget):
                 else str(support.get("reason") or ""))
         self.skin_hint.setText(hint)
         self.skin_hint.setVisible(bool(hint))
+        # 「使用正版玩家皮肤」只对离线账号有意义
+        is_offline = support.get("kind") == "offline"
+        self.mojang_skin_btn.setVisible(is_offline)
+        self.mojang_skin_btn.setEnabled(is_offline and not self._skin_task)
         self._sync_cape_controls()
 
     def _set_cape_items(self, capes: list, active_idx: int):
@@ -395,6 +403,19 @@ class AccountPage(QWidget):
             return
         variant = "slim" if self.variant_box.currentIndex() == 1 else "classic"
         self._skin_task = self.backend.upload_skin(self._active_name, path, variant)
+        self._sync_skin_controls()
+
+    def _use_mojang_skin(self):
+        if self._skin_task:
+            return
+        from ..widgets import InputDialog
+        dlg = InputDialog(
+            tr("使用正版玩家皮肤"),
+            tr("输入正版玩家名，把他的皮肤用作这个离线账号的皮肤"),
+            placeholder=tr("例如：Notch"), parent=self.window() or self)
+        if not dlg.exec() or not dlg.value():
+            return
+        self._skin_task = self.backend.use_mojang_skin(self._active_name, dlg.value())
         self._sync_skin_controls()
 
     def _reset_skin(self):

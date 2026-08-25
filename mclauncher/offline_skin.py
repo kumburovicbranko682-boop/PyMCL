@@ -31,6 +31,9 @@ from .skin_ops import SkinError, load_skin_file, normalize_variant
 
 MODELS = ("classic", "slim")
 
+MOJANG_UUID_URL = "https://api.mojang.com/users/profiles/minecraft/{name}"
+MOJANG_PROFILE_URL = "https://sessionserver.mojang.com/session/minecraft/profile/{uuid}"
+
 
 def skins_dir() -> Path:
     return utils.ROOT / "offline_skins"
@@ -42,9 +45,8 @@ def _signing_key() -> dict:
 
 # ---------------------------------------------------------------- 账号字段
 
-def import_skin(path: str, variant: str = "classic") -> dict:
-    """校验并把皮肤 PNG 收进 offline_skins/（按内容寻址），返回账号字段。"""
-    data = load_skin_file(path, strict_mojang=False)
+def _store_skin_bytes(data: bytes) -> Path:
+    """把皮肤 PNG 收进 offline_skins/（按内容寻址）。"""
     digest = hashlib.sha256(data).hexdigest()
     dest = skins_dir() / f"{digest}.png"
     if not dest.is_file():
@@ -52,6 +54,13 @@ def import_skin(path: str, variant: str = "classic") -> dict:
         tmp = dest.with_suffix(".tmp")
         tmp.write_bytes(data)
         tmp.replace(dest)
+    return dest
+
+
+def import_skin(path: str, variant: str = "classic") -> dict:
+    """校验并收纳本地皮肤 PNG，返回账号字段。"""
+    data = load_skin_file(path, strict_mojang=False)
+    dest = _store_skin_bytes(data)
     return {"skin_file": str(dest), "skin_model": normalize_variant(variant)}
 
 
@@ -70,6 +79,63 @@ def clear_account(account: dict) -> str:
     account.pop("skin_file", None)
     account.pop("skin_model", None)
     return "已恢复默认皮肤（按离线 UUID 决定 Steve / Alex）"
+
+
+def fetch_mojang_skin(player: str, timeout: int = 20) -> dict:
+    """按正版用户名拉取皮肤。返回 {data, model, name, uuid}。"""
+    import requests
+    player = (player or "").strip()
+    if not player:
+        raise SkinError("请输入正版玩家名")
+    try:
+        resp = requests.get(MOJANG_UUID_URL.format(name=player), timeout=timeout)
+    except requests.RequestException as exc:
+        raise SkinError(f"查询正版玩家失败：无法连接 Mojang API: {exc}") from exc
+    if resp.status_code in (204, 404):
+        raise SkinError(f"正版玩家 {player} 不存在，请检查拼写")
+    if resp.status_code != 200:
+        raise SkinError(f"查询正版玩家失败（HTTP {resp.status_code}）")
+    info = resp.json()
+    uuid = str(info.get("id") or "")
+    real_name = str(info.get("name") or player)
+    try:
+        resp = requests.get(MOJANG_PROFILE_URL.format(uuid=uuid), timeout=timeout)
+    except requests.RequestException as exc:
+        raise SkinError(f"获取玩家档案失败：无法连接 Mojang API: {exc}") from exc
+    if resp.status_code != 200:
+        raise SkinError(f"获取玩家档案失败（HTTP {resp.status_code}）")
+    textures = {}
+    for prop in resp.json().get("properties") or []:
+        if prop.get("name") == "textures":
+            try:
+                payload = json.loads(base64.b64decode(prop.get("value") or ""))
+            except (ValueError, TypeError):
+                continue
+            textures = payload.get("textures") or {}
+    skin = textures.get("SKIN") or {}
+    url = skin.get("url")
+    if not url:
+        raise SkinError(f"玩家 {real_name} 使用默认皮肤，没有可下载的自定义皮肤")
+    try:
+        resp = requests.get(url, timeout=timeout)
+    except requests.RequestException as exc:
+        raise SkinError(f"下载皮肤失败: {exc}") from exc
+    if resp.status_code != 200 or not resp.content:
+        raise SkinError(f"下载皮肤失败（HTTP {resp.status_code}）")
+    model = "slim" if (skin.get("metadata") or {}).get("model") == "slim" else "classic"
+    return {"data": resp.content, "model": model, "name": real_name, "uuid": uuid}
+
+
+def apply_mojang_skin_to_account(account: dict, player: str) -> str:
+    """把正版玩家的皮肤设为离线账号皮肤（调用方负责 accounts.save()）。"""
+    if (account or {}).get("type") != "offline":
+        raise SkinError("只有离线账号支持本地皮肤文件")
+    info = fetch_mojang_skin(player)
+    dest = _store_skin_bytes(info["data"])
+    account.update({"skin_file": str(dest), "skin_model": info["model"]})
+    model = "纤细 (Alex)" if info["model"] == "slim" else "经典 (Steve)"
+    return (f"已使用正版玩家 {info['name']} 的皮肤（{model} 模型）。"
+            "皮肤由 PyMCL 启动时在本机提供，仅本机可见")
 
 
 def has_custom_skin(account: dict | None) -> bool:

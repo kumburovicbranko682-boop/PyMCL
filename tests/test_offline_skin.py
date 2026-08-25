@@ -257,6 +257,123 @@ class TestServer(unittest.TestCase):
         self.assertEqual(code, 404)
 
 
+class MojangMock:
+    """本地模拟 Mojang UUID 查询 / 档案 / 皮肤下载三个端点。"""
+
+    def __init__(self, model: str = "classic", has_skin: bool = True):
+        import http.server, threading
+        self.skin_png = make_png(marker=b"mojang")
+        self.model = model
+        self.has_skin = has_skin
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_a):
+                pass
+
+            def _json(self, obj, code=200):
+                body = json.dumps(obj).encode("utf-8")
+                self.send_response(code)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path.startswith("/uuid/"):
+                    name = self.path.rsplit("/", 1)[-1]
+                    if name.lower() != "notch":
+                        self.send_response(404)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
+                    return self._json({"id": "a" * 32, "name": "Notch"})
+                if self.path.startswith("/profile/"):
+                    textures = {}
+                    if outer.has_skin:
+                        skin = {"url": f"{outer.root}/skin.png"}
+                        if outer.model == "slim":
+                            skin["metadata"] = {"model": "slim"}
+                        textures["SKIN"] = skin
+                    payload = {"timestamp": 0, "profileId": "a" * 32,
+                               "profileName": "Notch", "textures": textures}
+                    value = base64.b64encode(
+                        json.dumps(payload).encode()).decode()
+                    return self._json({"id": "a" * 32, "name": "Notch",
+                                       "properties": [{"name": "textures",
+                                                       "value": value}]})
+                if self.path == "/skin.png":
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(outer.skin_png)))
+                    self.end_headers()
+                    self.wfile.write(outer.skin_png)
+                    return
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.root = f"http://127.0.0.1:{self.server.server_port}"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def patches(self):
+        return (
+            mock.patch.object(offline_skin, "MOJANG_UUID_URL",
+                              self.root + "/uuid/{name}"),
+            mock.patch.object(offline_skin, "MOJANG_PROFILE_URL",
+                              self.root + "/profile/{uuid}"),
+        )
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+class TestMojangSkin(RootSandbox):
+    def _fetch(self, player, **kw):
+        srv = MojangMock(**kw)
+        self.addCleanup(srv.close)
+        p1, p2 = srv.patches()
+        with p1, p2:
+            return offline_skin.fetch_mojang_skin(player), srv
+
+    def test_fetch_classic(self):
+        info, srv = self._fetch("Notch")
+        self.assertEqual(info["name"], "Notch")
+        self.assertEqual(info["model"], "classic")
+        self.assertEqual(info["data"], srv.skin_png)
+
+    def test_fetch_slim(self):
+        info, _srv = self._fetch("notch", model="slim")
+        self.assertEqual(info["model"], "slim")
+
+    def test_player_not_found(self):
+        with self.assertRaises(SkinError) as ctx:
+            self._fetch("NoSuchPlayer")
+        self.assertIn("不存在", str(ctx.exception))
+
+    def test_default_skin_player(self):
+        with self.assertRaises(SkinError) as ctx:
+            self._fetch("Notch", has_skin=False)
+        self.assertIn("默认皮肤", str(ctx.exception))
+
+    def test_empty_name(self):
+        with self.assertRaises(SkinError):
+            offline_skin.fetch_mojang_skin("")
+
+    def test_apply_to_account(self):
+        srv = MojangMock(model="slim")
+        self.addCleanup(srv.close)
+        p1, p2 = srv.patches()
+        acc = {"type": "offline", "name": "Me", "uuid": ""}
+        with p1, p2:
+            msg = offline_skin.apply_mojang_skin_to_account(acc, "Notch")
+        self.assertIn("Notch", msg)
+        self.assertEqual(acc["skin_model"], "slim")
+        self.assertEqual(Path(acc["skin_file"]).read_bytes(), srv.skin_png)
+        with self.assertRaises(SkinError):
+            offline_skin.apply_mojang_skin_to_account({"type": "microsoft"}, "Notch")
+
+
 class TestServeForAccount(RootSandbox):
     def test_offline_with_skin(self):
         src = Path(self.tmp.name) / "s.png"

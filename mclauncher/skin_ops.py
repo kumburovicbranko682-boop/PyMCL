@@ -74,20 +74,21 @@ def normalize_variant(variant: str) -> str:
 # ---------------------------------------------------------------- 能力判定
 
 def change_support(account: dict | None) -> dict:
-    """账号是否支持在启动器内更换皮肤。返回 {ok, reason, note}。"""
+    """账号是否支持在启动器内更换皮肤。返回 {ok, reason, note, kind}。"""
     acc = account or {}
     kind = acc.get("type") or ""
     if kind == "microsoft":
-        return {"ok": True, "reason": "", "note": ""}
+        return {"ok": True, "reason": "", "note": "", "kind": kind}
     if kind == "authlib":
-        return {"ok": True, "reason": "", "note": ""}
+        return {"ok": True, "reason": "", "note": "", "kind": kind}
     if kind == "nide8":
         return {"ok": False, "reason": "统一通行证账号请到对应服务器的通行证网站更换皮肤",
-                "note": ""}
+                "note": "", "kind": kind}
     if kind == "offline":
         return {"ok": True, "reason": "",
-                "note": "离线皮肤由 PyMCL 启动时在本机提供（authlib-injector），仅本机可见"}
-    return {"ok": False, "reason": "请先登录微软正版或皮肤站账号", "note": ""}
+                "note": "离线皮肤由 PyMCL 启动时在本机提供（authlib-injector），仅本机可见",
+                "kind": kind}
+    return {"ok": False, "reason": "请先登录微软正版或皮肤站账号", "note": "", "kind": kind}
 
 
 # ---------------------------------------------------------------- 请求

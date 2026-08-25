@@ -1382,6 +1382,11 @@ class BackendAPI(QObject):
                else self.accounts.get_active())
         return skin_ops.cape_support(acc)
 
+    def use_mojang_skin(self, account_name: str, player_name: str) -> str:
+        """离线账号使用某个正版玩家的皮肤（按用户名拉取）。"""
+        return self.start_task(tr("拉取正版皮肤"), self._use_mojang_skin_impl,
+                               account_name, player_name)
+
     def list_capes(self, account_name: str = "") -> list:
         """列出正版账号的披风（网络请求，UI 请用 call_async 包一层）。"""
         from mclauncher import skin_ops
@@ -2209,6 +2214,16 @@ class BackendAPI(QObject):
         acc = self._skin_account(account_name)
         progress(1, 2, tr("更换披风"))
         msg = skin_ops.set_cape(acc, cape_id)
+        log(msg)
+        return msg
+
+    def _use_mojang_skin_impl(self, progress, log, account_name, player_name):
+        from mclauncher import offline_skin
+        progress(0, 2, tr("查询正版玩家"))
+        acc = self._skin_account(account_name)
+        progress(1, 2, tr("下载皮肤"))
+        msg = offline_skin.apply_mojang_skin_to_account(acc, player_name)
+        self.accounts.save()
         log(msg)
         return msg
 

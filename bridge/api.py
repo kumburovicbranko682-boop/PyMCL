@@ -912,6 +912,10 @@ class BackendAPI:
     def set_cape(self, account_name: str, cape_id: str = "") -> str:
         return self.start_task("更换披风", self._set_cape_impl, account_name, cape_id)
 
+    def use_mojang_skin(self, account_name: str, player_name: str) -> str:
+        return self.start_task("拉取正版皮肤", self._use_mojang_skin_impl,
+                               account_name, player_name)
+
     def get_version_settings(self, instance: str, version: str) -> dict:
         from mclauncher import version_settings as vs
         return vs.load(self._instance(instance), version)
@@ -1791,6 +1795,16 @@ class BackendAPI:
         acc = self._skin_account(account_name)
         progress(1, 2, "更换披风")
         msg = skin_ops.set_cape(acc, cape_id)
+        log(msg)
+        return msg
+
+    def _use_mojang_skin_impl(self, progress, log, account_name, player_name):
+        from mclauncher import offline_skin
+        progress(0, 2, "查询正版玩家")
+        acc = self._skin_account(account_name)
+        progress(1, 2, "下载皮肤")
+        msg = offline_skin.apply_mojang_skin_to_account(acc, player_name)
+        self.accounts.save()
         log(msg)
         return msg
 
