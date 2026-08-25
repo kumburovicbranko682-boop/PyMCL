@@ -154,7 +154,9 @@ function render(container: HTMLElement) {
       ai_model: (document.getElementById('setting-ai-model') as HTMLInputElement).value,
     };
     try {
-      await bridge.call('save_settings', settings);
+      // Python 桥的 save_settings(data) 只认 data 键；平铺传参会被 _call_kwargs
+      // 全部丢弃，然后因缺少 data 直接报错。
+      await bridge.call('save_settings', { data: settings });
       // 合并而不是替换：本页只提交 13 个键，直接 setSettings 会让 store 变成残缺 dict，
       // 后面别的页面拿去用就会把缺的键当成「用户清空了」再发一次。
       store.setSettings({ ...(store.settings || {}), ...settings } as any);

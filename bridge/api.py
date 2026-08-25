@@ -695,9 +695,16 @@ class BackendAPI:
             "feedback_url": CONFIG.get("feedback_url") or DEFAULT_FEEDBACK_URL or "",
             "feedback_heartbeat": bool(CONFIG.get("feedback_heartbeat", True)),
             "feedback_consent": CONFIG.get("feedback_consent") is True,
+            "ui_fly_animation": bool(CONFIG.get("ui_fly_animation", True)),
+            "ui_motion": bool(CONFIG.get("ui_motion", True)),
+            "ui_fly_duration_ms": int(CONFIG.get("ui_fly_duration_ms", 620)),
             "default_isolation": CONFIG.get("default_isolation") or "none",
             "default_jvm_args": CONFIG.get("default_jvm_args") or "",
+            "default_priority": CONFIG.get("default_priority") or "normal",
             "update_url": CONFIG.get("update_url") or "",
+            "theme_color": CONFIG.get("theme_color") or "#2E9B6B",
+            "ui_background": CONFIG.get("ui_background") or "",
+            "global_mods_dir": CONFIG.get("global_mods_dir") or "",
             "download_source": CONFIG.get("download_source") or "auto",
             "community_source": CONFIG.get("community_source") or "auto",
             "use_system_proxy": bool(CONFIG.get("use_system_proxy", True)),
@@ -708,6 +715,11 @@ class BackendAPI:
             "custom_homepage": CONFIG.get("custom_homepage") or "",
             "homepage_mode": CONFIG.get("homepage_mode") or "news",
             "window_mode": CONFIG.get("window_mode") or "window",
+            "skip_assets": bool(CONFIG.get("skip_assets", False)),
+            "allow_multi_instance": bool(CONFIG.get("allow_multi_instance", False)),
+            "first_run": bool(CONFIG.get("first_run", True)),
+            "show_hidden_versions": bool(CONFIG.get("show_hidden_versions", False)),
+            "instances_dir": str(CONFIG.get("instances_dir") or ".minecraft"),
             "game_dir": str(CONFIG.instances_dir),
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
@@ -748,6 +760,32 @@ class BackendAPI:
             patch["ai_api_key"] = data.get("ai_api_key") or ""
         if "ai_model" in data:
             patch["ai_model"] = (data.get("ai_model") or CONFIG.get("ai_model") or "deepseek-v4-flash")
+        if "ai_confirm_writes" in data:
+            patch["ai_confirm_writes"] = bool(data.get("ai_confirm_writes"))
+        if "ai_permission_mode" in data:
+            perm_mode = data.get("ai_permission_mode")
+            patch["ai_permission_mode"] = perm_mode if perm_mode in ("standard", "full") else "standard"
+        if "ui_fly_animation" in data:
+            patch["ui_fly_animation"] = bool(data.get("ui_fly_animation"))
+        if "ui_motion" in data:
+            patch["ui_motion"] = bool(data.get("ui_motion"))
+        if "ui_fly_duration_ms" in data:
+            patch["ui_fly_duration_ms"] = int(data.get("ui_fly_duration_ms")
+                                              or CONFIG.get("ui_fly_duration_ms") or 620)
+        if "default_priority" in data:
+            patch["default_priority"] = data.get("default_priority") or "normal"
+        if "theme_color" in data:
+            patch["theme_color"] = data.get("theme_color") or "#2E9B6B"
+        if "ui_background" in data:
+            patch["ui_background"] = data.get("ui_background") or ""
+        if "global_mods_dir" in data:
+            patch["global_mods_dir"] = data.get("global_mods_dir") or ""
+        if "allow_multi_instance" in data:
+            patch["allow_multi_instance"] = bool(data.get("allow_multi_instance"))
+        if "first_run" in data:
+            patch["first_run"] = bool(data.get("first_run"))
+        if "show_hidden_versions" in data:
+            patch["show_hidden_versions"] = bool(data.get("show_hidden_versions"))
         if "feedback_url" in data:
             patch["feedback_url"] = (data.get("feedback_url") or "").strip()
         if "feedback_heartbeat" in data:
@@ -767,9 +805,12 @@ class BackendAPI:
         if "use_system_proxy" in data:
             patch["use_system_proxy"] = bool(data.get("use_system_proxy"))
         for key in ("launcher_visibility", "gc_preset", "custom_homepage", "homepage_mode",
-                    "window_mode", "offline_skin", "instances_dir", "default_java"):
+                    "window_mode", "offline_skin", "default_java"):
             if key in data:
                 patch[key] = data.get(key)
+        # 与 app 门面一致：空的 instances_dir 不落盘，避免把游戏目录写成空串。
+        if "instances_dir" in data and str(data.get("instances_dir") or "").strip():
+            patch["instances_dir"] = str(data.get("instances_dir")).strip()
         if "download_limit_kbps" in data:
             patch["download_limit_kbps"] = int(data.get("download_limit_kbps") or 0)
         if "auto_check_update" in data:
@@ -780,6 +821,12 @@ class BackendAPI:
             patch["ui_dark"] = bool(data.get("ui_dark"))
         CONFIG.update(patch)
         CONFIG.save()
+        # 与 app 门面一致：下载源/代理相关设置改了要立刻生效，而不是等重启。
+        from mclauncher.source import invalidate_probe, warmup_async
+        invalidate_probe()
+        from mclauncher.net import apply_proxy_policy
+        apply_proxy_policy()
+        warmup_async()
 
     def collect_sysinfo(self, force: bool = False, scan_system_java: bool = False) -> dict:
         from mclauncher import sysinfo as sysinfo_mod
