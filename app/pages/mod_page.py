@@ -6,8 +6,8 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
@@ -39,7 +39,7 @@ def _fmt_size(n) -> str:
 
 
 class _ModRow(QFrame):
-    """单个已安装模组：图标 + 文件名 + 大小 + 启用开关 + 删除。"""
+    """单个已安装模组：图标 + 模组名(中文译名) + 版本/文件名 + mcmod 链接 + 开关 + 删除。"""
 
     def __init__(self, entry: dict, page):
         super().__init__(page)
@@ -54,18 +54,37 @@ class _ModRow(QFrame):
         lay.setSpacing(12)
         lay.addWidget(IconTile(name, size=40))
 
+        # 标题：真实模组名优先；有中文译名显示「中文名 (English)」（HMCL 同款）
+        display = entry.get("mod_name") or name
+        name_cn = entry.get("name_cn") or ""
+        text = f"{name_cn} ({display})" if name_cn and name_cn != display else display
         info = QVBoxLayout()
         info.setSpacing(1)
-        title = QLabel(name)
+        title = QLabel(text)
         title.setStyleSheet(
             f"color: {Theme.title}; font-size: 13px; font-weight: 600; background: transparent;")
         info.addWidget(title)
-        meta = CaptionLabel(
-            f"{_fmt_size(entry.get('bytes'))}"
-            + (f"  ·  {tr('已禁用')}" if not entry.get("enabled") else ""))
+        bits = []
+        if entry.get("mod_version"):
+            bits.append(str(entry["mod_version"]))
+        if entry.get("loader"):
+            bits.append(str(entry["loader"]))
+        if entry.get("mod_name"):   # 标题已不是文件名时，补文件名方便对照磁盘
+            bits.append(name)
+        bits.append(_fmt_size(entry.get("bytes")))
+        if not entry.get("enabled"):
+            bits.append(tr("已禁用"))
+        meta = CaptionLabel("  ·  ".join(bits))
         meta.setStyleSheet(f"color: {Theme.muted}; font-size: 11px; background: transparent;")
         info.addWidget(meta)
         lay.addLayout(info, 1)
+
+        url = entry.get("mcmod_url") or ""
+        if url:
+            link = TransparentToolButton(FIF.GLOBE)
+            link.setToolTip(tr("mcmod 百科"))
+            link.clicked.connect(lambda _, u=url: QDesktopServices.openUrl(QUrl(u)))
+            lay.addWidget(link)
 
         self.switch = SwitchButton()
         self.switch.setChecked(bool(entry.get("enabled")))
@@ -200,7 +219,7 @@ class ModManagerPage(QWidget):
         self.target_box = ComboBox()
         self.target_box.setFixedWidth(190)
         self.search = LineEdit()
-        self.search.setPlaceholderText(tr("按文件名筛选…"))
+        self.search.setPlaceholderText(tr("按名称 / 文件名筛选…"))
         self.search.setFixedWidth(200)
         bar.addWidget(self.instance_box)
         bar.addWidget(self.target_box)
@@ -319,8 +338,14 @@ class ModManagerPage(QWidget):
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        rows = [r for r in self._entries
-                if not text or text in str(r.get("filename") or "").lower()]
+        def _match(r: dict) -> bool:
+            if not text:
+                return True
+            hay = " ".join(str(r.get(k) or "") for k in
+                           ("filename", "mod_name", "name_cn", "id")).lower()
+            return text in hay
+
+        rows = [r for r in self._entries if _match(r)]
         if not rows:
             if self._entries:
                 self.list_layout.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的模组")))

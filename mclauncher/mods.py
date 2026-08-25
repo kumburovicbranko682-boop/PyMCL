@@ -509,12 +509,19 @@ def list_instance_mods(instance: Instance):
     return [Path(r["path"]) for r in list_mod_entries_at(instance.path / "mods") if r.get("enabled")]
 
 
-def list_instance_mod_entries(instance: Instance) -> list:
+def list_instance_mod_entries(instance: Instance, detailed=False) -> list:
     """已装模组，含 .jar.disabled。"""
-    return list_mod_entries_at(instance.path / "mods")
+    return list_mod_entries_at(instance.path / "mods", detailed=detailed)
 
 
-def list_mod_entries_at(mods_dir) -> list:
+def list_mod_entries_at(mods_dir, detailed=False) -> list:
+    """列出 mods 目录条目。
+
+    detailed=True 时额外读取 jar 内元数据（fabric.mod.json / mods.toml 等），
+    补 id / mod_name / mod_version / loader，并注中文译名 name_cn / mcmod_url
+    （对标 HMCL 模组列表：显示真实模组名和 mcmod.cn 译名，而不是文件名）。
+    元数据按 (大小, mtime) 缓存，刷新列表不重复解包。
+    """
     folder = Path(mods_dir)
     if not folder.is_dir():
         return []
@@ -527,7 +534,43 @@ def list_mod_entries_at(mods_dir) -> list:
             rows.append({"filename": p.name, "enabled": True, "bytes": p.stat().st_size, "path": str(p)})
         elif low.endswith(".jar.disabled") or low.endswith(".disabled"):
             rows.append({"filename": p.name, "enabled": False, "bytes": p.stat().st_size, "path": str(p)})
+    if detailed and rows:
+        for r in rows:
+            r.update(_jar_meta(Path(r["path"]), r["bytes"]))
+        from . import mod_translations
+        mod_translations.annotate_local_mods(rows)
     return rows
+
+
+_jar_meta_cache: dict = {}   # path -> (size, mtime_ns, meta)
+
+
+def _jar_meta(path: Path, size: int) -> dict:
+    """读 jar 元数据（缓存）；解析失败回空字段，列表照常显示文件名。"""
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    hit = _jar_meta_cache.get(str(path))
+    if hit and hit[0] == size and hit[1] == mtime:
+        return hit[2]
+    from .ai.conflict import inspect_jar
+    info = inspect_jar(path)
+    meta = {}
+    # loader 仍是 unknown 说明没解析到元数据文件，id/name 只是文件名回退，不当真名展示
+    if not info.get("error") and (info.get("loader") or "unknown") != "unknown":
+        if info.get("id"):
+            meta["id"] = info["id"]
+        if info.get("name"):
+            meta["mod_name"] = info["name"]
+        ver = str(info.get("version") or "")
+        if ver and "${" not in ver:   # mods.toml 的 ${file.jarVersion} 占位符不展示
+            meta["mod_version"] = ver
+        meta["loader"] = info["loader"]
+    if len(_jar_meta_cache) > 4096:
+        _jar_meta_cache.clear()
+    _jar_meta_cache[str(path)] = (size, mtime, meta)
+    return meta
 
 
 def _mod_file_at(mods_dir, filename: str) -> Path:

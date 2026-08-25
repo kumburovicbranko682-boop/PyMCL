@@ -9,8 +9,9 @@
 cache/ 下，7 天刷新一次；刷新失败用旧缓存继续，完全拿不到就静默
 降级——内置别名目录（catalog.py）仍然可用。
 
-记录是 5 元组 (slug, mcmod_id, name_cn, name_en, abbr)，用元组存省
-内存；modids 字段暂不需要（本地模组译名匹配是后续切片）。
+记录是 6 元组 (slug, mcmod_id, name_cn, name_en, abbr, modids)，用元
+组存省内存；modids（逗号分隔的 modid 列表）用于本地已装模组的译名
+匹配（HMCL 模组列表同款：modid 与 subname 双重匹配）。
 """
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ _lock = threading.Lock()
 _records: list[tuple] | None = None   # 模组数据集，None=未加载
 _by_slug: dict[str, tuple] = {}
 _by_title: dict[str, tuple] = {}
+_by_modid: dict[str, tuple] = {}
 _load_failed = False
 
 _pack_records: list[tuple] | None = None   # 整合包数据集
@@ -56,7 +58,7 @@ def pack_cache_file() -> Path:
 
 
 def parse(text: str) -> list[tuple]:
-    """解析数据文件为 (slug, mcmod_id, name_cn, name_en, abbr) 列表。"""
+    """解析数据文件为 (slug, mcmod_id, name_cn, name_en, abbr, modids) 列表。"""
     out = []
     for line in (text or "").splitlines():
         line = line.strip()
@@ -67,25 +69,30 @@ def parse(text: str) -> list[tuple]:
             parts += [""] * (6 - len(parts))
         slug = parts[0].strip()
         mcmod_id = parts[1].strip()
+        modids = tuple(m.strip() for m in parts[2].split(",") if m.strip())
         name_cn = parts[3].strip()
         name_en = parts[4].strip()
         abbr = ";".join(parts[5:]).strip()
         if not (name_cn or name_en):
             continue
-        out.append((slug, mcmod_id, name_cn, name_en, abbr))
+        out.append((slug, mcmod_id, name_cn, name_en, abbr, modids))
     return out
 
 
-def _index(records: list[tuple]) -> tuple[dict, dict]:
-    by_slug, by_title = {}, {}
+def _index(records: list[tuple]) -> tuple[dict, dict, dict]:
+    by_slug, by_title, by_modid = {}, {}, {}
     for rec in records:
-        slug, _mid, _cn, name_en, _abbr = rec
+        slug, _mid, _cn, name_en, _abbr, modids = rec
         if slug and slug not in by_slug:
             by_slug[slug] = rec
         key = name_en.lower()
         if key and key not in by_title:
             by_title[key] = rec
-    return by_slug, by_title
+        for mid in modids:
+            mk = mid.lower()
+            if mk and mk not in by_modid:
+                by_modid[mk] = rec
+    return by_slug, by_title, by_modid
 
 
 def _read_cache(path: Path, min_bytes: int) -> str:
@@ -136,7 +143,7 @@ def _load_text(dm, url: str, path: Path, min_bytes: int, force: bool) -> str:
 
 def load(dm=None, force=False) -> bool:
     """确保模组数据集已加载；返回是否可用。加载失败本进程内不再重试。"""
-    global _load_failed, _records, _by_slug, _by_title
+    global _load_failed, _records, _by_slug, _by_title, _by_modid
     with _lock:
         if _records is not None and not force:
             return True
@@ -147,7 +154,7 @@ def load(dm=None, force=False) -> bool:
         if not records:
             _load_failed = True
             return False
-        _by_slug, _by_title = _index(records)
+        _by_slug, _by_title, _by_modid = _index(records)
         _records = records
         utils.log.info("模组译名数据已加载: %d 条", len(records))
         return True
@@ -191,6 +198,39 @@ def annotate_hits(hits) -> None:
     _annotate(hits, lookup, mcmod_url)
 
 
+def lookup_local(modid: str = "", name: str = "") -> dict | None:
+    """按本地 jar 元数据查模组记录（HMCL 同款：modid 与英文名双重匹配）。"""
+    if _records is None:
+        return None
+    rec = _by_modid.get(str(modid or "").strip().lower())
+    if rec is None:
+        rec = _by_title.get(str(name or "").strip().lower())
+    return _rec_dict(rec) if rec is not None else None
+
+
+def annotate_local_mods(rows) -> None:
+    """给已装模组条目就地补 name_cn / mcmod_url（对标 HMCL 模组列表译名）。
+
+    rows 是 list_mod_entries_at 的输出（含 id / mod_name）。
+    未加载时触发后台预热，下次刷新列表就有译名。
+    """
+    if _records is None:
+        load_async()
+        return
+    for r in rows or []:
+        if not isinstance(r, dict) or r.get("name_cn"):
+            continue
+        rec = lookup_local(modid=r.get("id") or "",
+                           name=r.get("mod_name") or r.get("name") or "")
+        if not rec:
+            continue
+        if has_cjk(rec["name_cn"]):
+            r["name_cn"] = rec["name_cn"]
+        url = mcmod_url(rec["mcmod_id"])
+        if url:
+            r["mcmod_url"] = url
+
+
 # ---------------------------------------------------------------- 整合包数据集
 
 def load_packs(dm=None, force=False) -> bool:
@@ -207,7 +247,7 @@ def load_packs(dm=None, force=False) -> bool:
         if not records:
             _pack_load_failed = True
             return False
-        _pack_by_slug, _pack_by_title = _index(records)
+        _pack_by_slug, _pack_by_title, _ = _index(records)
         _pack_records = records
         utils.log.info("整合包译名数据已加载: %d 条", len(records))
         return True
@@ -257,7 +297,7 @@ def _search(records, query: str, limit: int) -> list[dict]:
     ql = q.lower()
     scored = []
     for rec in records:
-        _slug, _mid, name_cn, _en, abbr = rec
+        name_cn, abbr = rec[2], rec[4]
         al = abbr.lower()
         if ql == name_cn.lower() or (al and ql == al):
             score = 0
@@ -299,37 +339,39 @@ def _annotate(hits, lookup_fn, url_fn) -> None:
 
 
 def _rec_dict(rec: tuple) -> dict:
-    slug, mcmod_id, name_cn, name_en, abbr = rec
+    slug, mcmod_id, name_cn, name_en, abbr, modids = rec
     return {
         "slug": slug,
         "mcmod_id": mcmod_id,
         "name_cn": name_cn,
         "name_en": name_en,
         "abbr": abbr,
+        "modids": list(modids),
     }
 
 
 def _build_index(records: list[tuple]):
     """测试辅助：直接建模组索引，绕过下载。"""
-    global _records, _by_slug, _by_title
-    _by_slug, _by_title = _index(records)
+    global _records, _by_slug, _by_title, _by_modid
+    _by_slug, _by_title, _by_modid = _index(records)
     _records = records
 
 
 def _build_pack_index(records: list[tuple]):
     """测试辅助：直接建整合包索引。"""
     global _pack_records, _pack_by_slug, _pack_by_title
-    _pack_by_slug, _pack_by_title = _index(records)
+    _pack_by_slug, _pack_by_title, _ = _index(records)
     _pack_records = records
 
 
 def _reset_for_tests():
-    global _records, _by_slug, _by_title, _load_failed
+    global _records, _by_slug, _by_title, _by_modid, _load_failed
     global _pack_records, _pack_by_slug, _pack_by_title, _pack_load_failed
     with _lock:
         _records = None
         _by_slug = {}
         _by_title = {}
+        _by_modid = {}
         _load_failed = False
         _pack_records = None
         _pack_by_slug = {}

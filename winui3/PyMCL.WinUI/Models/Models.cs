@@ -136,6 +136,11 @@ public sealed class ModEntry
 {
     public string Filename { get; set; } = "";
     public bool Enabled { get; set; } = true;
+    public string ModName { get; set; } = "";       // jar 元数据里的真实模组名
+    public string ModVersion { get; set; } = "";
+    public string Loader { get; set; } = "";
+    public string NameCn { get; set; } = "";        // mcmod.cn 中文译名
+    public string McmodUrl { get; set; } = "";
 }
 
 public sealed class AiStoreDto

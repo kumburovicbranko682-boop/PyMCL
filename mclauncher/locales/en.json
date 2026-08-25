@@ -456,6 +456,7 @@
   "把数据包装进所选存档": "Install datapack into selected save",
   "指向上报口，不要填看板端口": "Point to the report API, not the dashboard port",
   "按文件名筛选…": "Filter by filename…",
+  "按名称 / 文件名筛选…": "Filter by name / filename…",
   "排队中…": "Queued…",
   "接入方式": "Connection mode",
   "接口没返回具体原因": "API returned no reason",

@@ -893,10 +893,11 @@ class BackendAPI(QObject):
         return [r["filename"] for r in mods_mod.list_mod_entries_at(self._mods_folder(inst, version)) if r.get("enabled")]
 
     def get_installed_mod_entries(self, instance: str, version: str = "") -> list[dict]:
+        """已装模组列表，含 jar 元数据（模组名/版本/loader）与中文译名。"""
         inst = self._instance(instance)
         if version:
-            return mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
-        return mods_mod.list_instance_mod_entries(inst)
+            return mods_mod.list_mod_entries_at(self._mods_folder(inst, version), detailed=True)
+        return mods_mod.list_instance_mod_entries(inst, detailed=True)
 
     def scan_mod_conflicts(self, instance: str, version: str = "") -> dict:
         """扫描已装模组：重复安装 / 缺前置 / 加载器不匹配 / 声明不兼容。

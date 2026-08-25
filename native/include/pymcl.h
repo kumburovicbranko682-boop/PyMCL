@@ -244,6 +244,7 @@ int catalog_lookup_pack(const char *q, char *slug, size_t ns, long long *cf, cha
 cJSON *search_mods(const char *query, const char *source);
 cJSON *search_modpacks(const char *query, const char *source);
 cJSON *search_content(const char *kind, const char *query, const char *source);
+void mods_annotate_local(cJSON *rows);
 int install_mod(const char *instance, const char *name, cJSON *extra, pymcl_ctx *ctx);
 int install_content(const char *kind, const char *instance, const char *name, cJSON *extra, pymcl_ctx *ctx);
 int install_modpack(const char *name, const char *source, cJSON *extra, pymcl_ctx *ctx);

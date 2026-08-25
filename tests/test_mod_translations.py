@@ -39,12 +39,20 @@ class ParseTest(unittest.TestCase):
         recs = mt.parse(SAMPLE)
         # 注释、空行、六段全空的行都被跳过
         self.assertEqual(len(recs), 7)
-        slug, mcmod_id, name_cn, name_en, abbr = recs[0]
+        slug, mcmod_id, name_cn, name_en, abbr, modids = recs[0]
         self.assertEqual(slug, "create")
         self.assertEqual(mcmod_id, "2021")
         self.assertEqual(name_cn, "机械动力")
         self.assertEqual(name_en, "Create")
         self.assertEqual(abbr, "")
+        self.assertEqual(modids, ("create",))
+
+    def test_modids_split(self):
+        recs = mt.parse(SAMPLE)
+        jei = next(r for r in recs if r[0] == "jei")
+        self.assertEqual(jei[5], ("jei", "JEI"))
+        noid = next(r for r in recs if r[0] == "fake-eng")
+        self.assertEqual(noid[5], ())
 
     def test_empty_slug_entry_kept(self):
         recs = mt.parse(SAMPLE)
@@ -133,6 +141,124 @@ class AnnotateTest(unittest.TestCase):
         self.assertFalse(mt.has_cjk("Create"))
         self.assertFalse(mt.has_cjk(""))
         self.assertFalse(mt.has_cjk(None))
+
+
+class LocalModsTest(unittest.TestCase):
+    """本地已装模组译名（HMCL 模组列表同款：modid / 英文名双重匹配）。"""
+
+    def setUp(self):
+        _index_sample()
+
+    def tearDown(self):
+        mt._reset_for_tests()
+
+    def test_lookup_by_modid_case_insensitive(self):
+        self.assertEqual(mt.lookup_local(modid="JEI")["slug"], "jei")
+        self.assertEqual(mt.lookup_local(modid="mod_EE")["mcmod_id"], "9")
+
+    def test_lookup_falls_back_to_english_name(self):
+        rec = mt.lookup_local(modid="not-in-dataset", name="Sodium")
+        self.assertEqual(rec["slug"], "sodium")
+        self.assertIsNone(mt.lookup_local(modid="nope", name="Nope"))
+
+    def test_annotate_local_rows(self):
+        rows = [
+            {"filename": "jei-1.0.jar", "id": "jei", "mod_name": "Just Enough Items"},
+            {"filename": "unknown.jar", "id": "totally-unknown"},
+            {"filename": "plain.jar"},
+        ]
+        mt.annotate_local_mods(rows)
+        self.assertEqual(rows[0]["name_cn"], "JEI物品管理器")
+        self.assertEqual(rows[0]["mcmod_url"], "https://www.mcmod.cn/class/459.html")
+        self.assertNotIn("name_cn", rows[1])
+        self.assertNotIn("name_cn", rows[2])
+
+    def test_non_cjk_translation_link_only(self):
+        # Minecraft Forge 的「译名」没有中文 -> 不注 name_cn，百科链接照给
+        rows = [{"id": "forge", "filename": "forge.jar"}]
+        mt.annotate_local_mods(rows)
+        self.assertNotIn("name_cn", rows[0])
+        self.assertEqual(rows[0]["mcmod_url"], "https://www.mcmod.cn/class/30.html")
+
+    def test_unloaded_triggers_warmup_only(self):
+        mt._reset_for_tests()
+        rows = [{"id": "jei"}]
+        with mock.patch.object(mt, "load_async") as warm:
+            mt.annotate_local_mods(rows)
+        warm.assert_called_once()
+        self.assertNotIn("name_cn", rows[0])
+
+
+class DetailedListTest(unittest.TestCase):
+    """mods.list_mod_entries_at(detailed=True)：jar 元数据 + 译名注解。"""
+
+    def setUp(self):
+        _index_sample()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.dir = Path(self.tmp.name)
+        mods._jar_meta_cache.clear()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        mt._reset_for_tests()
+        mods._jar_meta_cache.clear()
+
+    def _fabric_jar(self, name, modid, title, version="1.2.3"):
+        import json
+        import zipfile
+        with zipfile.ZipFile(self.dir / name, "w") as zf:
+            zf.writestr("fabric.mod.json",
+                        json.dumps({"id": modid, "name": title, "version": version}))
+
+    def _forge_jar(self, name, modid, title, version="4.5.6"):
+        import zipfile
+        toml = ('modLoader="javafml"\n[[mods]]\n'
+                f'modId="{modid}"\ndisplayName="{title}"\nversion="{version}"\n')
+        with zipfile.ZipFile(self.dir / name, "w") as zf:
+            zf.writestr("META-INF/mods.toml", toml)
+
+    def test_detailed_fields_and_translation(self):
+        self._fabric_jar("jei-fabric.jar", "jei", "Just Enough Items")
+        self._forge_jar("create.jar.disabled", "create", "Create")
+        (self.dir / "plain.jar").write_bytes(b"not a zip")
+        rows = mods.list_mod_entries_at(self.dir, detailed=True)
+        by_name = {r["filename"]: r for r in rows}
+        jei = by_name["jei-fabric.jar"]
+        self.assertEqual(jei["id"], "jei")
+        self.assertEqual(jei["mod_name"], "Just Enough Items")
+        self.assertEqual(jei["mod_version"], "1.2.3")
+        self.assertEqual(jei["loader"], "fabric")
+        self.assertEqual(jei["name_cn"], "JEI物品管理器")
+        self.assertEqual(jei["mcmod_url"], "https://www.mcmod.cn/class/459.html")
+        create = by_name["create.jar.disabled"]
+        self.assertFalse(create["enabled"])
+        self.assertEqual(create["id"], "create")   # modid == 文件名主干也要保留
+        self.assertEqual(create["loader"], "forge")
+        self.assertEqual(create["name_cn"], "机械动力")
+        plain = by_name["plain.jar"]
+        self.assertNotIn("mod_name", plain)   # 解析失败静默退回文件名显示
+        self.assertNotIn("name_cn", plain)
+
+    def test_placeholder_version_hidden(self):
+        self._forge_jar("w.jar", "w", "W", version="${file.jarVersion}")
+        rows = mods.list_mod_entries_at(self.dir, detailed=True)
+        self.assertNotIn("mod_version", rows[0])
+        self.assertEqual(rows[0]["mod_name"], "W")
+
+    def test_meta_cached_by_size_mtime(self):
+        self._fabric_jar("jei-fabric.jar", "jei", "Just Enough Items")
+        mods.list_mod_entries_at(self.dir, detailed=True)
+        with mock.patch("mclauncher.ai.conflict.inspect_jar") as insp:
+            rows = mods.list_mod_entries_at(self.dir, detailed=True)
+        insp.assert_not_called()
+        self.assertEqual(rows[0]["mod_name"], "Just Enough Items")
+
+    def test_plain_listing_stays_cheap(self):
+        self._fabric_jar("jei-fabric.jar", "jei", "Just Enough Items")
+        with mock.patch("mclauncher.ai.conflict.inspect_jar") as insp:
+            rows = mods.list_mod_entries_at(self.dir)
+        insp.assert_not_called()
+        self.assertNotIn("mod_name", rows[0])
 
 
 class _FetchDM:

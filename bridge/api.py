@@ -1242,10 +1242,11 @@ class BackendAPI:
         return [{"name": a, "api": b} for a, b in PRESETS]
 
     def get_installed_mod_entries(self, instance: str, version: str = "") -> list:
+        """已装模组列表，含 jar 元数据（模组名/版本/loader）与中文译名。"""
         inst = self._instance(instance)
         if version:
-            return mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
-        return mods_mod.list_instance_mod_entries(inst)
+            return mods_mod.list_mod_entries_at(self._mods_folder(inst, version), detailed=True)
+        return mods_mod.list_instance_mod_entries(inst, detailed=True)
 
     def open_global_mods(self):
         from mclauncher import global_mods as gm

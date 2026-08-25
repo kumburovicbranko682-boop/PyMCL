@@ -1,4 +1,5 @@
 #include "pymcl.h"
+#include <pthread.h>
 
 static const char *cf_bases[] = {
     CF_OFFICIAL,
@@ -161,10 +162,12 @@ static int mod_data_fresh(const char *path) {
     return (long long)(b.QuadPart - a.QuadPart) < MOD_DATA_TTL_100NS;
 }
 
+static pthread_mutex_t g_data_mu = PTHREAD_MUTEX_INITIALIZER;
+
 /* min_bytes 是完整性下限，防代理半截响应；下载失败退过期缓存，
    全失败置 failed 本进程内不再重试 */
-static const char *dataset_get(const char *name, long long min_bytes,
-                               char **slot, int *failed) {
+static const char *dataset_get_unlocked(const char *name, long long min_bytes,
+                                        char **slot, int *failed) {
     if (*slot) return *slot;
     if (*failed) return NULL;
     char cache[PYMCL_PATH], path[PYMCL_PATH], url[512];
@@ -192,8 +195,36 @@ static const char *dataset_get(const char *name, long long min_bytes,
     return NULL;
 }
 
+static const char *dataset_get(const char *name, long long min_bytes,
+                               char **slot, int *failed) {
+    if (*slot) return *slot;   /* 已驻留就不抢锁（指针置位后不再变） */
+    pthread_mutex_lock(&g_data_mu);
+    const char *r = dataset_get_unlocked(name, min_bytes, slot, failed);
+    pthread_mutex_unlock(&g_data_mu);
+    return r;
+}
+
 static const char *mod_data_get(void) {
     return dataset_get("mod_data.txt", 100000, &g_mod_data, &g_mod_data_failed);
+}
+
+/* 不联网版：只用内存或磁盘缓存（过期也用）；正在下载时直接放弃本次 */
+static const char *mod_data_cached(void) {
+    if (g_mod_data) return g_mod_data;
+    if (g_mod_data_failed) return NULL;
+    if (pthread_mutex_trylock(&g_data_mu) != 0) return NULL;
+    const char *r = g_mod_data;
+    if (!r) {
+        char cache[PYMCL_PATH], path[PYMCL_PATH];
+        pymcl_cache_dir(cache, sizeof(cache));
+        pymcl_path_join(path, sizeof(path), cache, "mod_data.txt");
+        size_t len = 0;
+        if (pymcl_file_size(path) > 100000 &&
+            pymcl_read_file(path, &g_mod_data, &len) == 0)
+            r = g_mod_data;
+    }
+    pthread_mutex_unlock(&g_data_mu);
+    return r;
 }
 
 static const char *pack_data_get(void) {
@@ -301,6 +332,103 @@ static void mod_data_annotate(cJSON *row, const mod_data_hit *h, int is_pack) {
                  is_pack ? "modpack" : "class", h->mcmod);
         cJSON_AddStringToObject(row, "mcmod_url", url);
     }
+}
+
+/* csv 里是否含 tok（不区分大小写；数据集 modids 逗号分隔） */
+static int csv_has_i(const char *csv, const char *tok) {
+    if (!csv || !tok || !tok[0]) return 0;
+    size_t tl = strlen(tok);
+    const char *p = csv;
+    while (*p) {
+        const char *e = strchr(p, ',');
+        size_t l = e ? (size_t)(e - p) : strlen(p);
+        if (l == tl) {
+            size_t i = 0;
+            for (; i < l; i++) {
+                char a = p[i], b = tok[i];
+                if (a >= 'A' && a <= 'Z') a = (char)(a + 32);
+                if (b >= 'A' && b <= 'Z') b = (char)(b + 32);
+                if (a != b) break;
+            }
+            if (i == l) return 1;
+        }
+        if (!e) break;
+        p = e + 1;
+    }
+    return 0;
+}
+
+static void *mod_data_warm_th(void *arg) {
+    (void)arg;
+    mod_data_get();
+    return NULL;
+}
+
+/* 本地已装模组译名（HMCL 模组列表同款：modid 与英文名双重匹配）。
+   只用内存/磁盘缓存，不阻塞列表 RPC；没缓存时后台预热，下次刷新生效。 */
+void mods_annotate_local(cJSON *rows) {
+    typedef struct { cJSON *row; const char *id; const char *name; } pend_t;
+    int total = cJSON_GetArraySize(rows);
+    if (!cJSON_IsArray(rows) || total <= 0) return;
+    pend_t *pend = (pend_t *)calloc((size_t)total, sizeof(pend_t));
+    if (!pend) return;
+    int n = 0;
+    cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        if (!cJSON_IsObject(r) || cJSON_GetObjectItem(r, "name_cn")) continue;
+        const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(r, "id"));
+        const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(r, "mod_name"));
+        if ((id && id[0]) || (nm && nm[0])) {
+            pend[n].row = r;
+            pend[n].id = id;
+            pend[n].name = nm;
+            n++;
+        }
+    }
+    if (!n) { free(pend); return; }
+    const char *data = mod_data_cached();
+    if (!data) {
+        if (!g_mod_data_failed) {
+            static volatile LONG warming = 0;
+            if (InterlockedExchange(&warming, 1) == 0) {
+                pthread_t th;
+                if (pthread_create(&th, NULL, mod_data_warm_th, NULL) == 0)
+                    pthread_detach(th);
+            }
+        }
+        free(pend);
+        return;
+    }
+    const char *p = data;
+    while (*p && n > 0) {
+        const char *eol = strchr(p, '\n');
+        size_t ll = eol ? (size_t)(eol - p) : strlen(p);
+        if (ll > 8 && ll < 2048 && p[0] != '#') {
+            char line[2048];
+            memcpy(line, p, ll);
+            line[ll] = 0;
+            if (line[ll - 1] == '\r') line[ll - 1] = 0;
+            char *f[6] = {0};
+            if (mod_data_split(line, f) == 6) {
+                for (int i = 0; i < n; ) {
+                    if (!csv_has_i(f[2], pend[i].id) &&
+                        !(pend[i].name && f[4][0] && pymcl_ieq(f[4], pend[i].name))) {
+                        i++;
+                        continue;
+                    }
+                    mod_data_hit h;
+                    snprintf(h.slug, sizeof(h.slug), "%s", f[0]);
+                    snprintf(h.name_cn, sizeof(h.name_cn), "%s", f[3]);
+                    snprintf(h.mcmod, sizeof(h.mcmod), "%s", f[1]);
+                    mod_data_annotate(pend[i].row, &h, 0);
+                    pend[i] = pend[--n];   /* 命中即移除，换上来的继续在原位检查 */
+                }
+            }
+        }
+        if (!eol) break;
+        p = eol + 1;
+    }
+    free(pend);
 }
 
 /* 中文查询：数据集候选 → Modrinth 项目直查，miss 再按 slug 查 CurseForge（最多 3 次） */

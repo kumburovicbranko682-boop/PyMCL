@@ -327,7 +327,19 @@ public sealed partial class CatalogPage : UserControl
                     g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    g.Children.Add(new TextBlock { Text = row.Filename, VerticalAlignment = VerticalAlignment.Center });
+                    // 真实模组名优先；有中文译名显示「中文名 (English)」（HMCL 同款）
+                    var display = string.IsNullOrEmpty(row.ModName) ? row.Filename : row.ModName;
+                    if (!string.IsNullOrEmpty(row.NameCn) && row.NameCn != display)
+                        display = $"{row.NameCn} ({display})";
+                    var infoCol = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                    infoCol.Children.Add(new TextBlock { Text = display });
+                    var bits = new List<string>();
+                    if (!string.IsNullOrEmpty(row.ModVersion)) bits.Add(row.ModVersion);
+                    if (!string.IsNullOrEmpty(row.Loader)) bits.Add(row.Loader);
+                    if (!string.IsNullOrEmpty(row.ModName)) bits.Add(row.Filename);
+                    if (bits.Count > 0)
+                        infoCol.Children.Add(new TextBlock { Text = string.Join("  ·  ", bits), Opacity = 0.6, FontSize = 12 });
+                    g.Children.Add(infoCol);
                     var sw = new ToggleSwitch { IsOn = row.Enabled, OnContent = "开", OffContent = "关" };
                     var name = row.Filename;
                     sw.Toggled += async (_, _) =>
@@ -348,6 +360,14 @@ public sealed partial class CatalogPage : UserControl
                         try { await AppServices.Client.CallAsync("delete_mod", new { instance = inst, filename = name }); Installed_Click(sender, e); }
                         catch (Exception ex) { AppServices.Toast?.Invoke("删除失败", ex.Message, InfoBarSeverity.Error); }
                     };
+                    if (!string.IsNullOrEmpty(row.McmodUrl))
+                        infoCol.Children.Add(new HyperlinkButton
+                        {
+                            Content = "mcmod 百科",
+                            NavigateUri = new Uri(row.McmodUrl),
+                            FontSize = 12,
+                            Padding = new Thickness(0),
+                        });
                     Grid.SetColumn(sw, 1);
                     Grid.SetColumn(del, 2);
                     g.Children.Add(sw);
