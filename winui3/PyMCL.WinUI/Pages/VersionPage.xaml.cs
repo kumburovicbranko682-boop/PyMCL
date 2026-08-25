@@ -268,9 +268,13 @@ public sealed partial class VersionPage : UserControl
         var gcMap = new Dictionary<string, int> { ["auto"] = 1, ["g1"] = 2, ["g1_tuned"] = 3, ["zgc"] = 4, ["none"] = 5 };
         gc.SelectedIndex = data?.Gc != null && gcMap.TryGetValue(data.Gc, out var gi) ? gi : 0;
         var winMode = new ComboBox();
+        // 「跟随全局」= 存 ""（与 GC 下拉同一约定）。以前只有 窗口/全屏 两项，
+        // 保存必固化 "window"，设置里的全局全屏从此对该版本失效。
+        winMode.Items.Add("跟随全局");
         winMode.Items.Add("窗口");
         winMode.Items.Add("全屏");
-        winMode.SelectedIndex = data?.WindowMode == "maximize" ? 1 : 0;
+        winMode.SelectedIndex = data?.WindowMode is "maximize" or "fullscreen" ? 2
+            : string.IsNullOrEmpty(data?.WindowMode) ? 0 : 1;
         var wait = new CheckBox { Content = "等待启动前命令结束", IsChecked = data?.PreLaunchWait != false };
         box.Children.Add(new TextBlock { Text = "隔离" });
         box.Children.Add(iso);
@@ -317,7 +321,8 @@ public sealed partial class VersionPage : UserControl
                     post_launch = post.Text ?? "",
                     nide8_id = nide.Text ?? "",
                     gc = gcKey,
-                    window_mode = winMode.SelectedIndex == 1 ? "maximize" : "window",
+                    window_mode = winMode.SelectedIndex == 2 ? "maximize"
+                        : winMode.SelectedIndex == 1 ? "window" : "",
                     pre_launch_wait = wait.IsChecked == true,
                 },
             });

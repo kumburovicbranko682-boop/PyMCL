@@ -101,9 +101,12 @@ class VersionSetupDialog(MessageBoxBase):
         self.title.setPlaceholderText(tr("自定义窗口标题"))
         self.title.setText(data.get("window_title") or "")
         self.win_mode = ComboBox()
-        self.win_mode.addItems([tr("窗口"), tr("全屏")])
+        # 「跟随全局」= 存 ""（与 GC 下拉同一约定）。以前只有 窗口/全屏 两项，
+        # 保存必固化 "window"，设置页「默认游戏窗口=全屏」从此对该版本失效。
+        self.win_mode.addItems([tr("跟随全局"), tr("窗口"), tr("全屏")])
+        _wm = data.get("window_mode") or ""
         self.win_mode.setCurrentText(
-            tr("全屏") if data.get("window_mode") in FULLSCREEN_MODES else tr("窗口"))
+            tr("全屏") if _wm in FULLSCREEN_MODES else (tr("窗口") if _wm else tr("跟随全局")))
         self.win_w = LineEdit()
         self.win_w.setPlaceholderText(tr("留空则用设置页的全局分辨率"))
         self.win_w.setText(str(data.get("window_width") or ""))
@@ -202,7 +205,8 @@ class VersionSetupDialog(MessageBoxBase):
             "auth_server": self.auth_server.text().strip(),
             "gc": gc_inv.get(self.gc.currentText(), ""),
             "window_title": self.title.text().strip(),
-            "window_mode": "maximize" if self.win_mode.currentText() == tr("全屏") else "window",
+            "window_mode": ("maximize" if self.win_mode.currentText() == tr("全屏")
+                            else "window" if self.win_mode.currentText() == tr("窗口") else ""),
             "window_width": size_of(self.win_w),
             "window_height": size_of(self.win_h),
             "offline_skin": skin,

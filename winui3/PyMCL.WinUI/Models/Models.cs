@@ -91,7 +91,8 @@ public sealed class VersionSettingsDto
     [JsonPropertyName("nide8_id")] public string Nide8Id { get; set; } = "";
     public string Gc { get; set; } = "";
     [JsonPropertyName("window_title")] public string WindowTitle { get; set; } = "";
-    [JsonPropertyName("window_mode")] public string WindowMode { get; set; } = "window";
+    // 空串 = 跟随全局 window_mode（version_settings.DEFAULTS 同约定）
+    [JsonPropertyName("window_mode")] public string WindowMode { get; set; } = "";
     [JsonPropertyName("pre_launch_wait")] public bool PreLaunchWait { get; set; } = true;
     [JsonPropertyName("offline_skin")] public string OfflineSkin { get; set; } = "default";
 }
