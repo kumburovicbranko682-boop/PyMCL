@@ -150,7 +150,7 @@ cJSON *search_mods(const char *query, const char *source, const char *game_versi
     const char *gv = game_version ? game_version : "";
     int want_cf = 0, want_mr = 1;
     if (source && (pymcl_ieq(source, "全部") || pymcl_ieq(source, "all") || !source[0])) { want_cf = 1; want_mr = 1; }
-    else if (source && pymcl_startswith(source, "curse")) { want_cf = 1; want_mr = 0; }
+    else if (source && pymcl_istartswith(source, "curse")) { want_cf = 1; want_mr = 0; }
     else { want_mr = 1; want_cf = 0; }
     if (!q[0]) return catalog_popular_mods(source);
     cJSON *out = cJSON_CreateArray();
@@ -207,7 +207,7 @@ cJSON *search_modpacks(const char *query, const char *source, const char *game_v
     const char *gv = game_version ? game_version : "";
     if (!q[0]) return catalog_popular_packs(source);
     int want_cf = 1, want_mr = 1;
-    if (source && pymcl_startswith(source, "curse")) want_mr = 0;
+    if (source && pymcl_istartswith(source, "curse")) want_mr = 0;
     if (source && pymcl_ieq(source, "modrinth")) want_cf = 0;
     cJSON *out = cJSON_CreateArray();
     char slug[128] = {0}; long long cf = 0; char title[128] = {0};
@@ -263,7 +263,7 @@ cJSON *search_content(const char *kind, const char *query, const char *source, c
     else if (strcmp(kind, "resourcepack") == 0) { mr = "resourcepack"; cf = CF_CLASS_RESOURCEPACK; }
     else if (strcmp(kind, "datapack") == 0) { mr = "datapack"; cf = CF_CLASS_DATAPACK; }
     int want_mr = 1, want_cf = 1;
-    if (source && pymcl_startswith(source, "curse")) want_mr = 0;
+    if (source && pymcl_istartswith(source, "curse")) want_mr = 0;
     if (source && pymcl_ieq(source, "modrinth")) want_cf = 0;
     cJSON *out = cJSON_CreateArray();
     if (want_mr) {

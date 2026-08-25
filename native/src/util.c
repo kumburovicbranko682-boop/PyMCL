@@ -74,6 +74,10 @@ int pymcl_startswith(const char *s, const char *pre) {
     if (!s || !pre) return 0;
     return strncmp(s, pre, strlen(pre)) == 0;
 }
+int pymcl_istartswith(const char *s, const char *pre) {
+    if (!s || !pre) return 0;
+    return _strnicmp(s, pre, strlen(pre)) == 0;
+}
 int pymcl_ieq(const char *a, const char *b) {
     if (!a || !b) return a == b;
     return _stricmp(a, b) == 0;

@@ -76,6 +76,7 @@ const char *pymcl_basename(const char *p);
 void pymcl_parent(const char *p, char *out, size_t n);
 int pymcl_endswith(const char *s, const char *suf);
 int pymcl_startswith(const char *s, const char *pre);
+int pymcl_istartswith(const char *s, const char *pre);
 int pymcl_ieq(const char *a, const char *b);
 int pymcl_icontains(const char *hay, const char *needle);
 void pymcl_replace_char(char *s, char a, char b);

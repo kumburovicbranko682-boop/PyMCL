@@ -78,10 +78,10 @@ cJSON *catalog_popular_mods(const char *source) {
     cJSON *src = cJSON_GetObjectItem(g_cat, "popular_mods");
     cJSON *out = cJSON_CreateArray();
     if (!cJSON_IsArray(src)) return out;
-    int want_cf = source && (pymcl_ieq(source, "curseforge") || pymcl_startswith(source, "curse"));
+    int want_cf = source && (pymcl_ieq(source, "curseforge") || pymcl_istartswith(source, "curse"));
     int want_mr = !source || !source[0] || pymcl_ieq(source, "全部") || pymcl_ieq(source, "all") || pymcl_ieq(source, "modrinth");
-    if (want_cf) want_mr = source && pymcl_ieq(source, "全部") ? 1 : (pymcl_startswith(source, "curse") ? 0 : want_mr);
-    if (source && pymcl_startswith(source, "curse")) { want_cf = 1; want_mr = 0; }
+    if (want_cf) want_mr = source && pymcl_ieq(source, "全部") ? 1 : (pymcl_istartswith(source, "curse") ? 0 : want_mr);
+    if (source && pymcl_istartswith(source, "curse")) { want_cf = 1; want_mr = 0; }
     if (source && pymcl_ieq(source, "modrinth")) { want_mr = 1; want_cf = 0; }
     cJSON *it;
     cJSON_ArrayForEach(it, src) {
@@ -110,7 +110,7 @@ cJSON *catalog_popular_packs(const char *source) {
     cJSON *out = cJSON_CreateArray();
     if (!cJSON_IsArray(src)) return out;
     int want_cf = 1, want_mr = 1;
-    if (source && pymcl_startswith(source, "curse")) { want_mr = 0; want_cf = 1; }
+    if (source && pymcl_istartswith(source, "curse")) { want_mr = 0; want_cf = 1; }
     if (source && pymcl_ieq(source, "modrinth")) { want_mr = 1; want_cf = 0; }
     cJSON *it;
     cJSON_ArrayForEach(it, src) {

@@ -295,7 +295,7 @@ int install_modpack(const char *name, const char *source, cJSON *extra, pymcl_ct
         pymcl_set_error("找不到整合包文件: %s", path ? path : "");
         return -1;
     }
-    if (source && pymcl_startswith(source, "curse")) {
+    if (source && pymcl_istartswith(source, "curse")) {
         long long id = extra && cJSON_IsNumber(cJSON_GetObjectItem(extra, "id"))
             ? (long long)cJSON_GetObjectItem(extra, "id")->valuedouble : 0;
         const char *slug = extra ? cJSON_GetStringValue(cJSON_GetObjectItem(extra, "slug")) : NULL;
