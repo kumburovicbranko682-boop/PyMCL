@@ -18,7 +18,7 @@ from mclauncher.i18n import tr
 
 
 class VersionCard(SimpleCardWidget):
-    def __init__(self, info: dict, on_install, parent=None):
+    def __init__(self, info: dict, on_install, parent=None, on_notes=None):
         super().__init__(parent)
         self.info = info
         self.setFixedSize(216, 132)
@@ -37,12 +37,45 @@ class VersionCard(SimpleCardWidget):
         layout.addStretch(1)
 
         row = QHBoxLayout()
+        # 官方更新日志只覆盖正式版与近代快照，远古版本不显示入口
+        if on_notes is not None and vtype in ("release", "snapshot"):
+            notes_btn = TransparentToolButton(FIF.INFO)
+            notes_btn.setToolTip(tr("更新日志"))
+            notes_btn.clicked.connect(lambda: on_notes(info, notes_btn))
+            row.addWidget(notes_btn)
         row.addStretch(1)
         install_btn = PushButton(FIF.DOWNLOAD, tr("安装"))
         install_btn.setFixedHeight(30)
         install_btn.clicked.connect(lambda: on_install(info, self))
         row.addWidget(install_btn)
         layout.addLayout(row)
+
+
+class PatchNoteDialog(MessageBoxBase):
+    """Minecraft 官方版本更新日志（对标 HMCL 下载页 patch notes）。"""
+
+    def __init__(self, note: dict, parent=None):
+        super().__init__(parent)
+        note = note or {}
+        head = QHBoxLayout()
+        head.addWidget(SubtitleLabel(note.get("title") or "?", self), 1)
+        vtype = str(note.get("type") or "")
+        if vtype:
+            label = {"release": tr("正式版"), "snapshot": tr("快照")}.get(vtype, vtype)
+            color = "#2FA36B" if vtype == "release" else "#E8862E"
+            head.addWidget(Pill(label, color))
+        self.viewLayout.addLayout(head)
+
+        from PySide6.QtWidgets import QTextBrowser
+        body = QTextBrowser(self)
+        body.setOpenExternalLinks(True)
+        body.setHtml(note.get("body_html") or tr("（官方正文为空）"))
+        body.setMinimumSize(620, 380)
+        self.viewLayout.addWidget(body, 1)
+
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(680)
 
 
 class ExportPackDialog(MessageBoxBase):
@@ -325,7 +358,9 @@ class VersionPage(QWidget):
         self._cols = cols
         shown = rows[: self._limit]
         for i, v in enumerate(shown):
-            self.grid.addWidget(VersionCard(v, self._install), i // cols, i % cols)
+            self.grid.addWidget(
+                VersionCard(v, self._install, on_notes=self._show_patch_note),
+                i // cols, i % cols)
         if len(rows) > self._limit:
             more = PushButton(f"加载更多（还有 {len(rows) - self._limit}）")
             more.clicked.connect(self._more)
@@ -381,6 +416,31 @@ class VersionPage(QWidget):
         CONFIG.set("show_hidden_versions", self._show_hidden)
         CONFIG.save()
         self._reload_installed()
+
+    def _show_patch_note(self, info: dict, btn=None):
+        """取官方更新日志并弹窗（对标 HMCL 下载页 patch notes）。"""
+        version = str(info.get("version") or "")
+        if not version:
+            return
+        if btn is not None:
+            btn.setEnabled(False)
+
+        def restore():
+            import shiboken6
+            if btn is not None and shiboken6.isValid(btn):
+                btn.setEnabled(True)
+
+        def ok(note):
+            restore()
+            PatchNoteDialog(note, self.window()).exec()
+
+        def err(message):
+            restore()
+            InfoBar.warning(tr("暂无更新日志"), str(message), parent=self,
+                            position=InfoBarPosition.TOP, duration=4000)
+
+        self.backend.call_async(
+            lambda: self.backend.get_version_patch_note(version), ok, err)
 
     def _install(self, info: dict, source=None):
         instance = self.instance_box.currentText() or "default"

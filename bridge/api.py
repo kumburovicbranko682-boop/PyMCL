@@ -1272,6 +1272,14 @@ class BackendAPI:
         versions = manifest_mod.list_remote_versions(dm) or {}
         return self._version_rows(versions)
 
+    def get_version_patch_note(self, version: str) -> dict:
+        """Minecraft 官方版本更新日志（HMCL 下载页同款数据源）。
+
+        返回 {version, title, type, image, body_html}；官方没写的版本抛错。
+        """
+        from mclauncher import patch_notes
+        return patch_notes.patch_note(DownloadManager(threads=2), version)
+
     def _version_rows(self, versions) -> list[dict]:
         rows = []
         for vid, v in (versions or {}).items():
