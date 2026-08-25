@@ -1367,6 +1367,30 @@ class BackendAPI(QObject):
         acc = self._skin_account(account_name)
         return skin_mod.fetch_skin_texture(acc)
 
+    def lookup_player(self, name: str) -> dict:
+        """正版玩家查询（对标 PCL 百宝箱）：ID → UUID / 皮肤 / 披风。"""
+        from mclauncher import skin as skin_mod
+        return skin_mod.lookup_player(name)
+
+    def fetch_player_skin(self, name: str) -> dict:
+        """下载正版玩家皮肤。有自定义皮肤时带 png 字节，UI 本地渲染预览。"""
+        from mclauncher import skin as skin_mod
+        return skin_mod.fetch_player_skin(name)
+
+    def save_player_skin(self, name: str, dest: str = "") -> str:
+        """把正版玩家皮肤保存为 PNG 文件，返回路径。"""
+        from mclauncher import skin as skin_mod
+        info = skin_mod.fetch_player_skin(name)
+        if not info.get("png"):
+            raise skin_mod.SkinError(
+                tr("玩家 {n} 用的是默认皮肤，没有自定义皮肤可下载").format(n=info["name"]))
+        if not dest:
+            dest = str(utils.ROOT / "exports" / f"skin-{info['name']}.png")
+        p = Path(dest)
+        utils.ensure_dir(p.parent)
+        p.write_bytes(info["png"])
+        return str(p)
+
     def upload_skin(self, account_name: str, file_path: str,
                     variant: str = "classic") -> str:
         return self.start_task(

@@ -9,6 +9,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 from mclauncher import skin
 
@@ -109,6 +110,38 @@ class _Handler(BaseHTTPRequestHandler):
                 self._reply(405)
             else:
                 self._reply(204)
+        elif method == "GET" and path.startswith("/mojang/users/"):
+            who = path.rsplit("/", 1)[-1]
+            if who == "Tester":
+                self._reply(200, {"id": "1111aaaa1111aaaa1111aaaa1111aaaa",
+                                  "name": "Tester"})
+            elif who == "Plain":
+                self._reply(200, {"id": "2222bbbb2222bbbb2222bbbb2222bbbb",
+                                  "name": "Plain"})
+            elif who == "Throttle":
+                self._reply(429, {"error": "TooManyRequests"})
+            else:
+                self._reply(404, {"errorMessage": "Couldn't find any profile"})
+        elif method == "GET" and path.startswith("/mojang/session/"):
+            import base64 as b64
+            uuid = path.rsplit("/", 1)[-1]
+            if uuid.startswith("1111"):
+                textures = {"textures": {
+                    "SKIN": {
+                        "url": f"http://{self.headers.get('Host')}/textures/skin.png",
+                        "metadata": {"model": "slim"},
+                    },
+                    "CAPE": {
+                        "url": f"http://{self.headers.get('Host')}/textures/cape.png",
+                    },
+                }}
+                payload = b64.b64encode(json.dumps(textures).encode()).decode()
+                self._reply(200, {"id": uuid, "name": "Tester",
+                                  "properties": [{"name": "textures",
+                                                  "value": payload}]})
+            else:
+                # 默认皮肤玩家：没有 textures 属性
+                self._reply(200, {"id": uuid, "name": "Plain", "properties": []})
         else:
             self._reply(404, {"error": "NotFound"})
 
@@ -290,6 +323,69 @@ class SkinServiceTests(unittest.TestCase):
     def test_fetch_skin_texture_offline_rejected(self):
         with self.assertRaises(skin.SkinError):
             skin.fetch_skin_texture({"type": "offline", "name": "Player"})
+
+
+class PlayerLookupTests(unittest.TestCase):
+    """正版玩家查询（对标 PCL 百宝箱皮肤下载）。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        host, port = cls.server.server_address
+        cls.base = f"http://{host}:{port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        _Handler.requests = []
+        self._p1 = mock.patch.object(
+            skin, "MOJANG_UUID_API", self.base + "/mojang/users")
+        self._p2 = mock.patch.object(
+            skin, "MOJANG_SESSION_API", self.base + "/mojang/session")
+        self._p1.start()
+        self._p2.start()
+        self.addCleanup(self._p1.stop)
+        self.addCleanup(self._p2.stop)
+
+    def test_lookup_slim_with_cape(self):
+        info = skin.lookup_player("Tester")
+        self.assertEqual(info["name"], "Tester")
+        self.assertEqual(info["uuid"], "1111aaaa1111aaaa1111aaaa1111aaaa")
+        self.assertEqual(info["variant"], "slim")
+        self.assertTrue(info["skin_url"].endswith("/textures/skin.png"))
+        self.assertTrue(info["cape_url"].endswith("/textures/cape.png"))
+
+    def test_lookup_missing_player(self):
+        with self.assertRaises(skin.SkinError) as ctx:
+            skin.lookup_player("Nobody")
+        self.assertIn("不存在", str(ctx.exception))
+
+    def test_lookup_throttled(self):
+        with self.assertRaises(skin.SkinError) as ctx:
+            skin.lookup_player("Throttle")
+        self.assertIn("频繁", str(ctx.exception))
+
+    def test_invalid_name_rejected_locally(self):
+        with self.assertRaises(skin.SkinError):
+            skin.lookup_player("bad name!")
+        with self.assertRaises(skin.SkinError):
+            skin.lookup_player("x" * 17)
+        self.assertEqual(_Handler.requests, [])
+
+    def test_fetch_player_skin_downloads_png(self):
+        info = skin.fetch_player_skin("Tester")
+        self.assertTrue(info["png"].startswith(b"\x89PNG"))
+        self.assertEqual(info["variant"], "slim")
+
+    def test_default_skin_has_no_png(self):
+        info = skin.fetch_player_skin("Plain")
+        self.assertNotIn("png", info)
+        self.assertEqual(info["uuid"], "2222bbbb2222bbbb2222bbbb2222bbbb")
+        self.assertEqual(info["skin_url"], "")
 
 
 if __name__ == "__main__":

@@ -1035,5 +1035,17 @@
   "完成后文件在 exports 目录，进度见下载任务。": "The file will appear in the exports folder; see the download tasks for progress.",
   "反查模组下载地址": "Resolving mod download links",
   "整合包已导出: {p}（{m}/{n} 个模组反查到下载地址）": "Modpack exported: {p} ({m}/{n} mods resolved to download links)",
-  "未指定版本，按最近改动导出 {v}": "No version given; exporting most recently modified {v}"
+  "未指定版本，按最近改动导出 {v}": "No version given; exporting most recently modified {v}",
+  "正版玩家查询": "Player lookup",
+  "正版玩家查询…": "Player lookup…",
+  "输入正版玩家 ID，如 jeb_": "Enter a Mojang player name, e.g. jeb_",
+  "查询": "Look up",
+  "皮肤预览": "Skin preview",
+  "默认皮肤": "Default skin",
+  "该玩家使用默认皮肤": "This player uses the default skin",
+  "模型: {v}": "Model: {v}",
+  "披风: {c}": "Cape: {c}",
+  "有": "Yes",
+  "保存皮肤 PNG…": "Save skin PNG…",
+  "玩家 {n} 用的是默认皮肤，没有自定义皮肤可下载": "Player {n} uses the default skin; there is no custom skin to download"
 }

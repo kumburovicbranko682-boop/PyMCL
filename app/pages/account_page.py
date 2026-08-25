@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """账号页：微软 / 离线 / 皮肤站，带皮肤预览与皮肤 / 披风更换。"""
+from pathlib import Path
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
@@ -64,6 +66,97 @@ class CapeDialog(MessageBoxBase):
         return self.cape_box.currentData() or ""
 
 
+class PlayerLookupDialog(MessageBoxBase):
+    """正版玩家查询：ID → UUID / 皮肤预览 / 保存 PNG（对标 PCL 百宝箱）。"""
+
+    def __init__(self, backend, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self._info = None
+        self.viewLayout.addWidget(SubtitleLabel(tr("正版玩家查询"), self))
+        row = QHBoxLayout()
+        self.name_edit = LineEdit(self)
+        self.name_edit.setPlaceholderText(tr("输入正版玩家 ID，如 jeb_"))
+        self.name_edit.returnPressed.connect(self._query)
+        self.query_btn = PushButton(tr("查询"), self)
+        self.query_btn.clicked.connect(self._query)
+        row.addWidget(self.name_edit, 1)
+        row.addWidget(self.query_btn)
+        self.viewLayout.addLayout(row)
+        self.preview = BodyLabel(tr("皮肤预览"), self)
+        self.preview.setFixedSize(140, 220)
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
+        self.viewLayout.addWidget(self.preview, 0, Qt.AlignHCenter)
+        self.meta = CaptionLabel("", self)
+        self.meta.setWordWrap(True)
+        self.viewLayout.addWidget(self.meta)
+        self.save_btn = PushButton(FIF.SAVE, tr("保存皮肤 PNG…"), self)
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self._save)
+        self.viewLayout.addWidget(self.save_btn)
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(380)
+
+    def _query(self):
+        name = self.name_edit.text().strip()
+        if not name or not self.query_btn.isEnabled():
+            return
+        self.query_btn.setEnabled(False)
+        self.save_btn.setEnabled(False)
+        self._info = None
+        self.meta.setText(tr("查询中…"))
+
+        def ok(info):
+            self.query_btn.setEnabled(True)
+            self._info = info
+            bits = [info.get("name") or name, f"UUID: {info.get('uuid')}"]
+            if info.get("png"):
+                from ..skin_render import render_front
+                pix = render_front(info["png"], info.get("variant") or "classic",
+                                   height=200)
+                if not pix.isNull():
+                    self.preview.setPixmap(pix)
+                bits.append(tr("模型: {v}").format(
+                    v=tr("纤细（Alex，细臂）") if info.get("variant") == "slim"
+                    else tr("经典（Steve，粗臂）")))
+                self.save_btn.setEnabled(True)
+            else:
+                self.preview.setPixmap(QPixmap())
+                self.preview.setText(tr("默认皮肤"))
+                bits.append(tr("该玩家使用默认皮肤"))
+            bits.append(tr("披风: {c}").format(
+                c=tr("有") if info.get("cape_url") else tr("无")))
+            self.meta.setText("\n".join(bits))
+
+        def fail(message):
+            self.query_btn.setEnabled(True)
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText(tr("皮肤预览"))
+            self.meta.setText(str(message))
+
+        self.backend.call_async(
+            lambda: self.backend.fetch_player_skin(name), ok, fail)
+
+    def _save(self):
+        info = self._info or {}
+        if not info.get("png"):
+            return
+        dest, _ = QFileDialog.getSaveFileName(
+            self, tr("保存皮肤 PNG…"),
+            f"skin-{info.get('name') or 'player'}.png", "PNG (*.png)")
+        if not dest:
+            return
+        try:
+            Path(dest).write_bytes(info["png"])
+        except OSError as e:
+            self.meta.setText(str(e))
+            return
+        InfoBar.success(tr("已保存"), dest, parent=self,
+                        position=InfoBarPosition.TOP, duration=3000)
+
+
 class AccountPage(QWidget):
     def __init__(self, backend, parent=None):
         super().__init__(parent)
@@ -105,6 +198,10 @@ class AccountPage(QWidget):
         skin_ops.addWidget(self.skin_reset_btn)
         skin_ops.addWidget(self.cape_btn)
         sl.addLayout(skin_ops)
+        lookup_btn = TransparentPushButton(tr("正版玩家查询…"))
+        lookup_btn.clicked.connect(
+            lambda: PlayerLookupDialog(self.backend, self.window()).exec())
+        sl.addWidget(lookup_btn)
         top.addWidget(skin_card)
 
         list_card = SimpleCardWidget(self)

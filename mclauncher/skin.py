@@ -2,6 +2,7 @@
 """皮肤：头像 / 全身预览 URL + 正版与皮肤站的皮肤上传、重置、披风管理。"""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -12,6 +13,12 @@ BODY = "https://mc-heads.net/body/{}/180"
 
 # 微软正版皮肤 / 披风管理端点（可注入 base 便于测试）
 MS_PROFILE_API = "https://api.minecraftservices.com/minecraft/profile"
+
+# 正版玩家公开查询端点（可注入便于测试）
+MOJANG_UUID_API = "https://api.mojang.com/users/profiles/minecraft"
+MOJANG_SESSION_API = "https://sessionserver.mojang.com/session/minecraft/profile"
+
+_NAME_RE = re.compile(r"^[A-Za-z0-9_]{1,16}$")
 
 # 皮肤文件宽松上限：官方皮肤 64x64 PNG 通常只有几 KB
 _MAX_SKIN_BYTES = 512 * 1024
@@ -319,3 +326,62 @@ def fetch_skin_texture(account: dict, timeout: int = 15) -> dict:
     if width != 64 or height not in (32, 64):
         raise SkinError(f"皮肤纹理尺寸异常: {width}×{height}")
     return {"png": png, "variant": variant}
+
+
+# ---------------------------------------------------------------- 正版玩家查询（对标 PCL 百宝箱）
+
+def lookup_player(name: str, timeout: int = 15) -> dict:
+    """按玩家 ID 查正版档案：UUID、皮肤 URL / 模型、披风 URL。"""
+    import base64 as b64
+    import json as json_mod
+    import requests
+    ident = str(name or "").strip()
+    if not _NAME_RE.match(ident):
+        raise SkinError("玩家名只能是 1–16 位字母、数字或下划线")
+    resp = requests.get(f"{MOJANG_UUID_API}/{quote(ident)}", timeout=timeout)
+    if resp.status_code in (204, 404):
+        raise SkinError(f"正版玩家不存在: {ident}")
+    if resp.status_code == 429:
+        raise SkinError("请求过于频繁，Mojang 暂时限流了，请稍等几分钟再试")
+    if resp.status_code != 200:
+        raise SkinError(f"查询玩家失败（HTTP {resp.status_code}）")
+    body = resp.json() or {}
+    uuid = body.get("id") or ""
+    real_name = body.get("name") or ident
+    if not uuid:
+        raise SkinError(f"正版玩家不存在: {ident}")
+    resp = requests.get(f"{MOJANG_SESSION_API}/{uuid}", timeout=timeout)
+    if resp.status_code != 200:
+        raise SkinError(f"查询皮肤信息失败（HTTP {resp.status_code}）")
+    data = resp.json() or {}
+    payload = next((p.get("value") for p in (data.get("properties") or [])
+                    if p.get("name") == "textures"), "")
+    skin_url = cape_url = ""
+    variant = "classic"
+    if payload:
+        textures = (json_mod.loads(b64.b64decode(payload).decode("utf-8", "replace"))
+                    .get("textures") or {})
+        skin = textures.get("SKIN") or {}
+        skin_url = skin.get("url") or ""
+        model = ((skin.get("metadata") or {}).get("model") or "").lower()
+        variant = "slim" if model == "slim" else "classic"
+        cape_url = (textures.get("CAPE") or {}).get("url") or ""
+    return {"name": real_name, "uuid": uuid, "skin_url": skin_url,
+            "variant": variant, "cape_url": cape_url}
+
+
+def fetch_player_skin(name: str, timeout: int = 15) -> dict:
+    """下载正版玩家皮肤。有自定义皮肤时结果带 "png" 字节；默认皮肤则没有。"""
+    import requests
+    info = lookup_player(name, timeout=timeout)
+    if not info.get("skin_url"):
+        return info
+    resp = requests.get(info["skin_url"], timeout=timeout)
+    if resp.status_code != 200:
+        raise SkinError(f"下载皮肤失败（HTTP {resp.status_code}）")
+    png = resp.content
+    width, height = png_size(png)
+    if width != 64 or height not in (32, 64):
+        raise SkinError(f"皮肤纹理尺寸异常: {width}×{height}")
+    info["png"] = png
+    return info
