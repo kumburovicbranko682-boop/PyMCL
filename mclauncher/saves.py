@@ -36,6 +36,59 @@ def _safe_child(folder: Path, name: str, what: str = "存档") -> Path:
     return target
 
 
+GAME_MODES = {0: "生存", 1: "创造", 2: "冒险", 3: "旁观"}
+DIFFICULTIES = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
+
+
+def level_summary(save_dir) -> dict:
+    """解析 level.dat（NBT）：世界名、版本、模式、难度、种子、上次游玩。
+
+    存档损坏 / 格式不认识时返回 {}，不影响列表其余字段。
+    """
+    from pathlib import Path as _P
+
+    from . import nbt
+    f = _P(save_dir) / "level.dat"
+    if not f.is_file():
+        return {}
+    try:
+        data = (nbt.read_file(f) or {}).get("Data") or {}
+    except Exception as e:
+        utils.log.debug("level.dat 解析失败 %s: %s", f, e)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    version = data.get("Version") if isinstance(data.get("Version"), dict) else {}
+    # 1.16+ 种子在 WorldGenSettings.seed，更早在 RandomSeed
+    wgs = data.get("WorldGenSettings") if isinstance(data.get("WorldGenSettings"), dict) else {}
+    seed = wgs.get("seed", data.get("RandomSeed"))
+    mode_code = data.get("GameType")
+    try:
+        mode_code = int(mode_code)
+    except (TypeError, ValueError):
+        mode_code = None
+    diff_code = data.get("Difficulty")
+    try:
+        diff_code = int(diff_code)
+    except (TypeError, ValueError):
+        diff_code = None
+    out = {
+        "level_name": str(data.get("LevelName") or ""),
+        "mc_version": str(version.get("Name") or ""),
+        "game_mode": GAME_MODES.get(mode_code, ""),
+        "game_mode_code": mode_code,
+        "difficulty": DIFFICULTIES.get(diff_code, ""),
+        "hardcore": bool(data.get("hardcore")),
+        "cheats": bool(data.get("allowCommands")),
+        "seed": str(seed) if seed is not None else "",
+    }
+    try:
+        out["last_played"] = int(int(data.get("LastPlayed") or 0) / 1000)
+    except (TypeError, ValueError):
+        out["last_played"] = 0
+    return out
+
+
 def list_saves(instance: Instance, version_id: str = "") -> list[dict]:
     folder = _game_dir(instance, version_id) / "saves"
     if not folder.is_dir():
@@ -45,13 +98,15 @@ def list_saves(instance: Instance, version_id: str = "") -> list[dict]:
         if not p.is_dir() or p.name.startswith("."):
             continue
         icon = p / "icon.png"
-        rows.append({
+        row = {
             "name": p.name,
             "path": str(p),
             "icon": str(icon) if icon.is_file() else "",
             "bytes": _dir_size(p),
             "mtime": int(p.stat().st_mtime),
-        })
+        }
+        row.update(level_summary(p))
+        rows.append(row)
     return rows
 
 

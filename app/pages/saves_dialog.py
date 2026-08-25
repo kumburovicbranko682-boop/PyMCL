@@ -15,6 +15,32 @@ from mclauncher.utils import format_size
 from mclauncher.i18n import tr
 
 
+def _save_details(row: dict) -> str:
+    """level.dat 摘要行：模式 · 版本 · 难度 · 上次游玩。"""
+    parts = []
+    mode = row.get("game_mode") or ""
+    if mode:
+        if row.get("hardcore"):
+            mode = tr("极限")
+        parts.append(tr(mode) if mode in ("生存", "创造", "冒险", "旁观") else mode)
+    if row.get("mc_version"):
+        parts.append(str(row["mc_version"]))
+    if row.get("difficulty"):
+        d = str(row["difficulty"])
+        parts.append(tr(d) if d in ("和平", "简单", "普通", "困难") else d)
+    if row.get("cheats"):
+        parts.append(tr("作弊已开"))
+    last = row.get("last_played") or 0
+    if last:
+        from datetime import datetime
+        try:
+            parts.append(tr("上次游玩 {t}").format(
+                t=datetime.fromtimestamp(int(last)).strftime("%Y-%m-%d %H:%M")))
+        except (ValueError, OSError, OverflowError):
+            pass
+    return " · ".join(parts)
+
+
 class SavesDialog(MessageBoxBase):
     def __init__(self, backend, instance: str, version: str = "", parent=None):
         super().__init__(parent)
@@ -94,7 +120,15 @@ class SavesDialog(MessageBoxBase):
                             pix = pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                     except Exception:
                         pix = None
-                item = QListWidgetItem(f"{r['name']}  ({format_size(r.get('bytes') or 0)})")
+                text = f"{r['name']}  ({format_size(r.get('bytes') or 0)})"
+                details = _save_details(r)
+                if details:
+                    text += f"\n{details}"
+                item = QListWidgetItem(text)
+                item.setData(Qt.UserRole, r["name"])
+                seed = r.get("seed") or ""
+                if seed:
+                    item.setToolTip(tr("种子：{seed}").format(seed=seed))
                 if pix:
                     item.setIcon(QIcon(pix))
                 self.list.addItem(item)
@@ -120,6 +154,9 @@ class SavesDialog(MessageBoxBase):
         item = self.list.currentItem()
         if not item:
             return ""
+        stored = item.data(Qt.UserRole)
+        if stored:
+            return str(stored)
         return item.text().split("  (")[0]
 
     def _open(self):
