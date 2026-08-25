@@ -803,8 +803,12 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         }
         if (strcmp(method, "test_ai_connection") == 0)
             return cJSON_CreateString("AI 需要 Python 桥（未找到可用 Python）");
-        if (strcmp(method, "submit_feedback") == 0)
-            return cJSON_CreateTrue();
+        /* submit_feedback 以前假成功返回 true：用户的反馈正文被 UI 清空、
+         * 实际哪儿都没送到。诚实报错，让表单留在原地。 */
+        if (strcmp(method, "submit_feedback") == 0) {
+            pymcl_set_error("反馈上传需要 Python 后端（未找到可用 Python），内容未发送");
+            return NULL;
+        }
         if (strcmp(method, "terracotta_allow_firewall") == 0)
             return cJSON_CreateString("请手动放行防火墙，或安装 Python 后端");
         /* async-looking methods: return fake task id string won't work — return error */
