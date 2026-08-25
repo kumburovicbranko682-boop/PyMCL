@@ -498,11 +498,19 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
 
     /* ---- playtime ---- */
     if (strcmp(method, "get_all_playtime") == 0) {
+        /* 对齐 mclauncher/playtime.py：返回解包后的 instances 映射
+         * （{实例: {total, versions}}）。以前原样返回整个文件
+         * （{"instances": {...}}），WinUI 按前者遍历，时长页永远是空的。 */
         char path[PYMCL_PATH];
         playtime_path(path, sizeof(path));
         cJSON *j = pymcl_read_json(path);
-        if (!j) j = cJSON_Parse("{\"instances\":{}}");
-        return j;
+        cJSON *insts = j ? cJSON_DetachItemFromObject(j, "instances") : NULL;
+        cJSON_Delete(j);
+        if (!cJSON_IsObject(insts)) {
+            cJSON_Delete(insts);
+            insts = cJSON_CreateObject();
+        }
+        return insts;
     }
     if (strcmp(method, "format_playtime") == 0) {
         long long sec = 0;
