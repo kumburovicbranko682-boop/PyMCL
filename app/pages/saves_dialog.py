@@ -41,6 +41,87 @@ def _save_details(row: dict) -> str:
     return " · ".join(parts)
 
 
+class WorldDatapacksDialog(MessageBoxBase):
+    """世界内数据包管理（对标 HMCL 世界管理的数据包页）：查看 / 删除。
+
+    启用状态从 level.dat 的 DataPacks 段读出（file/<名> 条目）；
+    老存档没有这段就不显示状态。
+    """
+
+    def __init__(self, backend, instance: str, save_name: str, version: str = "",
+                 parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.instance = instance
+        self.save_name = save_name
+        self.version = version
+        self.viewLayout.addWidget(
+            SubtitleLabel(tr("数据包 · {name}").format(name=save_name), self))
+        self.list = ListWidget()
+        self.list.setMinimumHeight(240)
+        self.list.setSpacing(4)
+        self.viewLayout.addWidget(self.list)
+        host = QWidget(self)
+        row = QHBoxLayout(host)
+        row.setContentsMargins(0, 0, 0, 0)
+        self.del_btn = PushButton(tr("删除所选数据包"))
+        self.del_btn.clicked.connect(self._delete)
+        row.addWidget(self.del_btn)
+        self.viewLayout.addWidget(host)
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(560)
+        self.reload()
+
+    def reload(self):
+        self.list.clear()
+        try:
+            rows = self.backend.list_world_datapacks(
+                self.instance, self.save_name, self.version) or []
+        except Exception as e:
+            MessageBox(tr("读取失败"), str(e), self).exec()
+            rows = []
+        self._rows = rows
+        for r in rows:
+            state = r.get("enabled")
+            bits = [format_size(r.get("bytes") or 0)]
+            if state is True:
+                bits.append(tr("已启用"))
+            elif state is False:
+                bits.append(tr("已禁用"))
+            text = f"{r['name']}  ({' · '.join(bits)})"
+            desc = (r.get("description") or "").strip()
+            if desc:
+                text += f"\n{desc}"
+            item = QListWidgetItem(text)
+            item.setData(Qt.UserRole, r["name"])
+            self.list.addItem(item)
+        self.del_btn.setEnabled(bool(rows))
+        if not rows:
+            self.list.addItem(tr("这个世界还没有数据包。可在存档列表用「把数据包装进所选存档」安装。"))
+
+    def _selected(self) -> str:
+        item = self.list.currentItem()
+        return str(item.data(Qt.UserRole) or "") if item else ""
+
+    def _delete(self):
+        name = self._selected()
+        if not name:
+            return
+        box = MessageBox(
+            tr("删除数据包"),
+            tr("确定删除「{name}」？（会尽量移入系统回收站，可找回）").format(name=name), self)
+        if not box.exec():
+            return
+        try:
+            self.backend.delete_world_datapack(
+                self.instance, self.save_name, name, self.version)
+        except Exception as e:
+            MessageBox(tr("删除失败"), str(e), self).exec()
+            return
+        self.reload()
+
+
 class SavesDialog(MessageBoxBase):
     def __init__(self, backend, instance: str, version: str = "", parent=None):
         super().__init__(parent)
@@ -70,9 +151,11 @@ class SavesDialog(MessageBoxBase):
         self.backup_btn = PushButton(tr("备份存档"))
         self.restore_btn = PushButton(tr("还原备份"))
         self.export_btn = PushButton(tr("导出为 zip"))
+        self.wdp_btn = PushButton(tr("存档数据包"))
         row2.addWidget(self.backup_btn)
         row2.addWidget(self.restore_btn)
         row2.addWidget(self.export_btn)
+        row2.addWidget(self.wdp_btn)
         rows.addLayout(row)
         rows.addLayout(row2)
         self.viewLayout.addWidget(host)
@@ -86,6 +169,7 @@ class SavesDialog(MessageBoxBase):
         self.backup_btn.clicked.connect(self._backup)
         self.restore_btn.clicked.connect(self._restore)
         self.export_btn.clicked.connect(self._export)
+        self.wdp_btn.clicked.connect(self._world_datapacks)
         self.reload()
 
     def _set_actions(self, kind: str):
@@ -96,6 +180,7 @@ class SavesDialog(MessageBoxBase):
         self.dp_btn.setEnabled(is_save)
         self.backup_btn.setEnabled(is_save)
         self.export_btn.setEnabled(is_save)
+        self.wdp_btn.setEnabled(is_save)
         self.restore_btn.setEnabled(is_backup)
 
     def reload(self):
@@ -242,6 +327,13 @@ class SavesDialog(MessageBoxBase):
             MessageBox(tr("导出失败"), str(e), self).exec()
             return
         MessageBox(tr("导出完成"), f"已导出到：\n{out}", self).exec()
+
+    def _world_datapacks(self):
+        name = self._selected_name()
+        if not name:
+            MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
+            return
+        WorldDatapacksDialog(self.backend, self.instance, name, self.version, self).exec()
 
     def _datapack(self):
         name = self._selected_name()

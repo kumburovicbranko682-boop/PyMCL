@@ -467,6 +467,18 @@ class BackendAPI:
         from mclauncher import saves as saves_mod
         return saves_mod.install_datapack_into_save(self._instance(instance), filename, save_name, version)
 
+    def list_world_datapacks(self, instance: str, save_name: str, version: str = "") -> list:
+        """某个世界里已装的数据包（名称/大小/描述/启用状态）。"""
+        from mclauncher import saves as saves_mod
+        return saves_mod.list_world_datapacks(self._instance(instance), save_name, version)
+
+    def delete_world_datapack(self, instance: str, save_name: str, filename: str,
+                              version: str = ""):
+        """从世界里删除一个数据包（尽量移入回收站）。"""
+        from mclauncher import saves as saves_mod
+        saves_mod.delete_world_datapack(self._instance(instance), save_name, filename, version)
+        self._emit("ui_changed", {})
+
     def list_media(self, instance: str, kind: str, version: str = "") -> list[dict]:
         from mclauncher import saves as saves_mod
         return saves_mod.list_media(self._instance(instance), kind, version)

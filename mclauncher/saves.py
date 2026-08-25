@@ -126,6 +126,118 @@ def open_save(instance: Instance, name: str, version_id: str = "") -> str:
     return str(folder)
 
 
+def _mcmeta_description(raw) -> str:
+    """pack.mcmeta 的 description：可能是字符串 / 文本组件 / 组件列表。"""
+    if isinstance(raw, str):
+        return raw.strip()
+    if isinstance(raw, dict):
+        return str(raw.get("text") or "").strip()
+    if isinstance(raw, list):
+        bits = []
+        for item in raw:
+            if isinstance(item, str):
+                bits.append(item)
+            elif isinstance(item, dict):
+                bits.append(str(item.get("text") or ""))
+        return "".join(bits).strip()
+    return ""
+
+
+def _read_pack_mcmeta(path: Path) -> dict:
+    """读数据包的 pack.mcmeta（zip 或文件夹包）。坏包返回 {}。"""
+    import json
+    try:
+        if path.is_dir():
+            f = path / "pack.mcmeta"
+            if not f.is_file():
+                return {}
+            data = json.loads(f.read_text("utf-8", errors="replace"))
+        else:
+            with zipfile.ZipFile(path) as zf:
+                data = json.loads(zf.read("pack.mcmeta").decode("utf-8", errors="replace"))
+    except (OSError, ValueError, KeyError, zipfile.BadZipFile):
+        return {}
+    pack = data.get("pack") if isinstance(data, dict) else None
+    if not isinstance(pack, dict):
+        return {}
+    fmt = pack.get("pack_format")
+    return {
+        "description": _mcmeta_description(pack.get("description")),
+        "pack_format": int(fmt) if isinstance(fmt, (int, float)) else 0,
+    }
+
+
+def _datapack_states(save_dir: Path) -> dict:
+    """level.dat 里 Data.DataPacks 的启用状态：{名: True/False}。
+
+    条目形如 "file/foo.zip"。level.dat 缺失或没有 DataPacks 段返回 {}，
+    调用方把状态标为未知。
+    """
+    from . import nbt
+    f = save_dir / "level.dat"
+    if not f.is_file():
+        return {}
+    try:
+        data = (nbt.read_file(f) or {}).get("Data") or {}
+    except Exception:
+        return {}
+    packs = data.get("DataPacks") if isinstance(data, dict) else None
+    if not isinstance(packs, dict):
+        return {}
+    out = {}
+    for key, flag in (("Enabled", True), ("Disabled", False)):
+        for entry in packs.get(key) or []:
+            s = str(entry)
+            if s.startswith("file/"):
+                out[s[len("file/"):]] = flag
+    return out
+
+
+def list_world_datapacks(instance: Instance, save_name: str,
+                         version_id: str = "") -> list[dict]:
+    """某个世界里已装的数据包（对标 HMCL 世界管理的数据包页）。
+
+    返回 [{name, is_dir, bytes, description, pack_format, enabled}]；
+    enabled 从 level.dat 的 DataPacks 段读，读不到为 None（未知）。
+    """
+    world = _safe_child(_game_dir(instance, version_id) / "saves", save_name)
+    if not world.is_dir():
+        raise SaveError(f"存档不存在: {save_name}")
+    dp_dir = world / "datapacks"
+    if not dp_dir.is_dir():
+        return []
+    states = _datapack_states(world)
+    rows = []
+    for p in sorted(dp_dir.iterdir(), key=lambda x: x.name.lower()):
+        if p.is_file() and p.suffix.lower() != ".zip":
+            continue
+        meta = _read_pack_mcmeta(p)
+        if p.is_dir():
+            size = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+        else:
+            size = p.stat().st_size
+        rows.append({
+            "name": p.name,
+            "is_dir": p.is_dir(),
+            "bytes": size,
+            "description": meta.get("description") or "",
+            "pack_format": meta.get("pack_format") or 0,
+            "enabled": states.get(p.name),
+        })
+    return rows
+
+
+def delete_world_datapack(instance: Instance, save_name: str, filename: str,
+                          version_id: str = ""):
+    """从世界里删除一个数据包（尽量移入回收站）。"""
+    world = _safe_child(_game_dir(instance, version_id) / "saves", save_name)
+    target = _safe_child(world / "datapacks", filename, "数据包")
+    if not target.exists():
+        raise SaveError(f"数据包不存在: {filename}")
+    from . import trash
+    trash.trash_or_delete(target)
+
+
 def install_datapack_into_save(instance: Instance, filename: str, save_name: str,
                                version_id: str = "") -> str:
     src = (instance.path / "datapacks" / filename).resolve()
