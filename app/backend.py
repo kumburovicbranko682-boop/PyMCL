@@ -1456,6 +1456,14 @@ class BackendAPI(QObject):
         from mclauncher import lan as lan_mod
         return lan_mod.local_ips()
 
+    def discover_lan_worlds(self, timeout: float = 3.0) -> list[dict]:
+        """扫描「对局域网开放」的世界（官方组播广播 224.0.2.60:4445）。
+
+        同步阻塞 timeout 秒，UI 侧用 call_async 包装。
+        """
+        from mclauncher import lan as lan_mod
+        return lan_mod.discover_lan_worlds(timeout)
+
     def authlib_presets(self) -> list:
         from mclauncher.authlib import PRESETS
         return [{"name": a, "api": b} for a, b in PRESETS]

@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import re
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QGuiApplication
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QHeaderView, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, ComboBox, FluentIcon as FIF, InfoBar, MessageBox, PushButton,
-    StrongBodyLabel, TransparentPushButton,
+    BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, MessageBox,
+    MessageBoxBase, PushButton, StrongBodyLabel, SubtitleLabel,
+    TransparentPushButton,
 )
 
 from mclauncher.config import CONFIG
@@ -25,6 +26,47 @@ _GLOBE_ICON = (getattr(FIF, "GLOBE", None) or getattr(FIF, "WORLD", None)
                or FIF.CLOUD_DOWNLOAD)
 
 _PORT_RE = re.compile(r"^\d{1,5}$")
+
+
+class _LanWorldsDialog(MessageBoxBase):
+    """局域网扫描结果：复制地址发朋友，或填到启动页「直连服务器」。"""
+
+    def __init__(self, worlds: list, parent=None):
+        super().__init__(parent)
+        self.viewLayout.addWidget(SubtitleLabel(tr("局域网世界"), self))
+        if not worlds:
+            self.viewLayout.addWidget(BodyLabel(tr("没有发现开放的局域网世界。"), self))
+            hint = CaptionLabel(
+                tr("请让房主进入世界后按 Esc →「对局域网开放」，并确认双方连着同一"
+                   "路由器、防火墙放行了 Java。"), self)
+            hint.setWordWrap(True)
+            hint.setStyleSheet(f"color: {Theme.muted};")
+            self.viewLayout.addWidget(hint)
+        else:
+            tip = CaptionLabel(
+                tr("把地址发给同一局域网的朋友，或复制到启动页的「直连服务器」。"), self)
+            tip.setWordWrap(True)
+            tip.setStyleSheet(f"color: {Theme.muted};")
+            self.viewLayout.addWidget(tip)
+            for w in worlds:
+                row = QHBoxLayout()
+                label = BodyLabel(f"{w.get('motd') or '?'}  ·  {w.get('address') or ''}", self)
+                label.setWordWrap(True)
+                copy_b = TransparentPushButton(FIF.COPY, tr("复制地址"))
+                copy_b.clicked.connect(
+                    lambda _, a=w.get("address", ""), b=None: self._copy(a))
+                row.addWidget(label, 1)
+                row.addWidget(copy_b)
+                self.viewLayout.addLayout(row)
+        self.yesButton.setText(tr("知道了"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(460)
+
+    def _copy(self, addr: str):
+        QGuiApplication.clipboard().setText(addr)
+        btn = self.sender()
+        if btn is not None:
+            btn.setText(tr("已复制"))
 
 
 class ServerPage(QWidget):
@@ -69,6 +111,11 @@ class ServerPage(QWidget):
         self.status_btn.setToolTip(tr("查询每个服务器的在线状态、延迟与在线人数"))
         self.status_btn.clicked.connect(self._refresh_status)
         tl.addWidget(self.status_btn)
+        self.lan_btn = PushButton(tr("发现局域网"))
+        self.lan_btn.setIcon(FIF.WIFI)
+        self.lan_btn.setToolTip(tr("扫描本局域网里「对局域网开放」的世界"))
+        self.lan_btn.clicked.connect(self._discover_lan)
+        tl.addWidget(self.lan_btn)
         import_btn = PushButton(tr("导入"))
         import_btn.clicked.connect(self._on_import)
         tl.addWidget(import_btn)
@@ -175,6 +222,31 @@ class ServerPage(QWidget):
             btn_l.addWidget(edit_b)
             btn_l.addWidget(del_b)
             self.table.setCellWidget(i, 5, btn_w)
+
+    # ------------------------------------------------------------ 局域网发现
+
+    def _discover_lan(self):
+        if getattr(self, "_lan_scanning", False):
+            return
+        self._lan_scanning = True
+        self.lan_btn.setEnabled(False)
+        self.lan_btn.setText(tr("扫描中…"))
+
+        def _reset():
+            self._lan_scanning = False
+            self.lan_btn.setEnabled(True)
+            self.lan_btn.setText(tr("发现局域网"))
+
+        def done(worlds):
+            _reset()
+            _LanWorldsDialog(worlds or [], self.window()).exec()
+
+        def err(msg):
+            _reset()
+            InfoBar.error(tr("扫描失败"), str(msg), duration=3000, parent=self)
+
+        self.backend.call_async(
+            lambda: self.backend.discover_lan_worlds(3.0), done, err)
 
     # ------------------------------------------------------------ 状态查询
 

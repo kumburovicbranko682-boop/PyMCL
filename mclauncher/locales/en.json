@@ -1051,5 +1051,13 @@
   "完成后回到本页可看到 I18nUpdateMod": "When it finishes, I18nUpdateMod will show up on this page",
   "需要先安装模组加载器（Fabric / Forge / Quilt / NeoForge）": "Install a mod loader first (Fabric / Forge / Quilt / NeoForge)",
   "已安装汉化模组: {name}": "Translation mod already installed: {name}",
-  "已开始安装": "Install started"
+  "已开始安装": "Install started",
+  "局域网世界": "LAN worlds",
+  "没有发现开放的局域网世界。": "No open LAN world was found.",
+  "请让房主进入世界后按 Esc →「对局域网开放」，并确认双方连着同一路由器、防火墙放行了 Java。": "Ask the host to press Esc in their world and choose \"Open to LAN\", and make sure both of you are on the same router with Java allowed through the firewall.",
+  "把地址发给同一局域网的朋友，或复制到启动页的「直连服务器」。": "Send the address to a friend on the same LAN, or paste it into \"Direct connect\" on the Launch page.",
+  "复制地址": "Copy address",
+  "发现局域网": "Discover LAN",
+  "扫描本局域网里「对局域网开放」的世界": "Scan this LAN for worlds opened via \"Open to LAN\"",
+  "扫描失败": "Scan failed"
 }

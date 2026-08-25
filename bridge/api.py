@@ -1122,6 +1122,11 @@ class BackendAPI:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)
 
+    def discover_lan_worlds(self, timeout: float = 3.0) -> list[dict]:
+        """扫描「对局域网开放」的世界（官方组播广播 224.0.2.60:4445）。"""
+        from mclauncher import lan as lan_mod
+        return lan_mod.discover_lan_worlds(timeout)
+
     def authlib_presets(self) -> list:
         from mclauncher.authlib import PRESETS
         return [{"name": a, "api": b} for a, b in PRESETS]
