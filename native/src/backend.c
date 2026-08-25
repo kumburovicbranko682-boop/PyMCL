@@ -180,6 +180,31 @@ static cJSON *load_version_settings(const char *inst, const char *ver) {
     return j;
 }
 
+/* 对齐 app/backend.py::_install_game_impl：全局「默认版本隔离」在安装时写进
+ * 版本 pymcl.json。以前 C 原生安装完全不落盘，Python 启动链只认文件，同一
+ * 版本在 Qt 下不隔离、在 C 桥下才隔离，两边 game_dir 分裂、存档像凭空消失。 */
+static void install_apply_default_isolation(task_t *t, const char *inst, const char *vid) {
+    const char *iso = config_str("default_isolation", "none");
+    if (strcmp(iso, "saves") && strcmp(iso, "mods") && strcmp(iso, "all")) return;
+    char vd[PYMCL_PATH], sp[PYMCL_PATH], parent[PYMCL_PATH];
+    instance_versions_dir(inst, vd, sizeof(vd));
+    pymcl_path_join3(sp, sizeof(sp), vd, vid, "pymcl.json");
+    cJSON *j = pymcl_read_json(sp);
+    if (!cJSON_IsObject(j)) {
+        cJSON_Delete(j);
+        j = cJSON_CreateObject();
+    }
+    cJSON_DeleteItemFromObject(j, "isolation");
+    cJSON_AddStringToObject(j, "isolation", iso);
+    pymcl_parent(sp, parent, sizeof(parent));
+    pymcl_ensure_dir(parent);
+    pymcl_write_json(sp, j);
+    cJSON_Delete(j);
+    char lb[300];
+    snprintf(lb, sizeof(lb), "已套用默认隔离: %s", iso);
+    ctx_log(t, lb);
+}
+
 /* 对齐 version_settings._junction：已有非空目录不动；空目录/旧链接先删再建。 */
 static void vs_junction(const char *link, const char *target) {
     wchar_t *wl = pymcl_u8_to_wide(link);
@@ -342,10 +367,16 @@ static void *task_run(void *p) {
         } else if (loader && loader[0] && strcmp(loader, "无") != 0) {
             char vid[256];
             ok = install_loader(inst, loader, lv[0] ? lv : NULL, ver, &ctx, vid, sizeof(vid)) == 0;
-            if (ok) snprintf(msg, sizeof(msg), "加载器安装完成: %s", vid);
+            if (ok) {
+                snprintf(msg, sizeof(msg), "加载器安装完成: %s", vid);
+                install_apply_default_isolation(t, inst, vid);
+            }
         } else {
             ok = install_version(inst, ver, &ctx) == 0;
-            if (ok) snprintf(msg, sizeof(msg), "版本 %s 安装完成", ver);
+            if (ok) {
+                snprintf(msg, sizeof(msg), "版本 %s 安装完成", ver);
+                install_apply_default_isolation(t, inst, ver);
+            }
         }
     } else if (strcmp(t->method, "download_java") == 0) {
         int maj = pint(t->args, "major", 17);
@@ -453,10 +484,13 @@ static void *task_run(void *p) {
                 if (jprobe != vj) cJSON_Delete(jprobe);
                 if (vj) cJSON_Delete(vj);
                 char **argv = NULL; int argc = 0; char natives[PYMCL_PATH];
-                /* 版本隔离：游戏目录可能是 versions/<ver> 而非实例根。 */
+                /* 版本隔离：游戏目录可能是 versions/<ver> 而非实例根。
+                 * 只认版本文件里的 isolation（对齐 version_settings.load 的
+                 * 启动语义）；全局 default_isolation 是安装时写入的模板，
+                 * 启动期再回退会让同一版本在 C/Python 桥下 game_dir 分裂。 */
                 char gdir[PYMCL_PATH];
                 const char *iso = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "isolation"));
-                if (!iso || !iso[0]) iso = config_str("default_isolation", "none");
+                if (!iso || !iso[0]) iso = "none";
                 vs_apply_isolation(inst, ver, iso, gdir, sizeof(gdir));
                 /* GC 预设 + 版本 JVM 参数（gc.apply 语义）。 */
                 const char *gck = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "gc"));
