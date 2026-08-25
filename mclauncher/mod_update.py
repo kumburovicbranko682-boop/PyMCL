@@ -86,42 +86,10 @@ def _modrinth_update(dm, path: Path, digest: str, mc_version: str, loader: str, 
     }
 
 
-def _murmur2(data: bytes, seed=1) -> int:
-    m = 0x5bd1e995
-    r = 24
-    length = len(data)
-    h = (seed ^ length) & 0xFFFFFFFF
-    n = length // 4
-    for i in range(n):
-        k = int.from_bytes(data[i * 4:i * 4 + 4], "little")
-        k = (k * m) & 0xFFFFFFFF
-        k ^= k >> r
-        k = (k * m) & 0xFFFFFFFF
-        h = (h * m) & 0xFFFFFFFF
-        h ^= k
-    rest = data[n * 4:]
-    if len(rest) >= 3:
-        h ^= rest[2] << 16
-    if len(rest) >= 2:
-        h ^= rest[1] << 8
-    if len(rest) >= 1:
-        h ^= rest[0]
-        h = (h * m) & 0xFFFFFFFF
-    h ^= h >> 13
-    h = (h * m) & 0xFFFFFFFF
-    h ^= h >> 15
-    return h & 0xFFFFFFFF
-
-
-def _cf_fingerprint(path: Path) -> int:
-    raw = path.read_bytes()
-    cleaned = bytes(b for b in raw if b not in (9, 10, 13, 32))
-    return _murmur2(cleaned, 1)
-
-
 def _curseforge_update(dm, path: Path, mc_version: str, loader: str, info: dict):
+    from .mods import cf_fingerprint
     try:
-        fp = _cf_fingerprint(path)
+        fp = cf_fingerprint(path)
     except OSError:
         return None
     from .mods import _cf_post, cf_detail, cf_files, cf_mod_download_urls

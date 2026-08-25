@@ -173,7 +173,13 @@ class InstancePage(QWidget):
             self.reload()
 
     def export_pack(self, name: str):
-        self.backend.export_modpack(name)
+        items = [tr("Modrinth 整合包 (.mrpack)"), tr("CurseForge 整合包 (.zip)")]
+        dlg = ComboDialog(tr("导出整合包"), tr("选择导出格式"), items=items,
+                          current=items[0], parent=self.window())
+        if not dlg.exec():
+            return
+        fmt = "curseforge" if dlg.value() == items[1] else "mrpack"
+        self.backend.export_modpack(name, fmt=fmt)
 
     def pick_java(self, name: str):
         if self._picking_java:

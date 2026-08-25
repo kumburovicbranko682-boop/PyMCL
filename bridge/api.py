@@ -1088,8 +1088,10 @@ class BackendAPI:
 
         return {"ok": False, "message": f"未知动作: {aid}"}
 
-    def export_modpack(self, instance: str, dest: str = "") -> str:
-        return self.start_task(f"导出整合包 {instance}", self._export_pack_impl, instance, dest)
+    def export_modpack(self, instance: str, dest: str = "", fmt: str = "mrpack") -> str:
+        """导出整合包。fmt: "mrpack"（Modrinth）或 "curseforge"（manifest.json zip）。"""
+        return self.start_task(
+            f"导出整合包 {instance}", self._export_pack_impl, instance, dest, fmt)
 
     def start_mod_updates(self, instance: str) -> str:
         return self.start_task(f"检查模组更新 {instance}", self._mod_update_impl, instance)
@@ -1822,12 +1824,16 @@ class BackendAPI:
         installer = Installer(inst, dm, on_progress=dm.on_progress, cancel=dm.cancel)
         return repair(installer, version)
 
-    def _export_pack_impl(self, progress, log, instance, dest):
-        from mclauncher.export_pack import export_mrpack
+    def _export_pack_impl(self, progress, log, instance, dest, fmt="mrpack"):
+        from mclauncher.export_pack import export_cf_zip, export_mrpack
         inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        if str(fmt or "mrpack").lower() in ("curseforge", "cf", "zip"):
+            if not dest:
+                dest = str(utils.ROOT / "exports" / f"{inst.name}-curseforge.zip")
+            return export_cf_zip(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))
         if not dest:
             dest = str(utils.ROOT / "exports" / f"{inst.name}.mrpack")
-        dm = self._dm(progress, log)
         return export_mrpack(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))
 
     def _mod_update_impl(self, progress, log, instance):

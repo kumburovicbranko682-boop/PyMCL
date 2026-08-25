@@ -624,6 +624,76 @@ def _cf_post(dm: DownloadManager, path, body, api_key=None, timeout=60):
     raise ModError(f"CurseForge POST 失败 {path}: {last_err}")
 
 
+def murmur2_hash(data: bytes, seed: int = 1) -> int:
+    """CurseForge 使用的 MurmurHash2（32 位）。"""
+    m = 0x5bd1e995
+    r = 24
+    length = len(data)
+    h = (seed ^ length) & 0xFFFFFFFF
+    n = length // 4
+    for i in range(n):
+        k = int.from_bytes(data[i * 4:i * 4 + 4], "little")
+        k = (k * m) & 0xFFFFFFFF
+        k ^= k >> r
+        k = (k * m) & 0xFFFFFFFF
+        h = (h * m) & 0xFFFFFFFF
+        h ^= k
+    rest = data[n * 4:]
+    if len(rest) >= 3:
+        h ^= rest[2] << 16
+    if len(rest) >= 2:
+        h ^= rest[1] << 8
+    if len(rest) >= 1:
+        h ^= rest[0]
+        h = (h * m) & 0xFFFFFFFF
+    h ^= h >> 13
+    h = (h * m) & 0xFFFFFFFF
+    h ^= h >> 15
+    return h & 0xFFFFFFFF
+
+
+def cf_fingerprint(path) -> int:
+    """CurseForge 文件指纹：剔除空白字节后的 MurmurHash2。"""
+    raw = Path(path).read_bytes()
+    cleaned = bytes(b for b in raw if b not in (9, 10, 13, 32))
+    return murmur2_hash(cleaned, 1)
+
+
+def cf_match_fingerprints(dm: DownloadManager, fingerprints, api_key=None) -> dict:
+    """批量指纹匹配 POST /v1/fingerprints。
+
+    返回 {fingerprint: {"projectID", "fileID", "fileName"}}；请求失败的
+    分片记日志后跳过（对应文件按未匹配处理）。
+    """
+    fps = []
+    for f in fingerprints or []:
+        try:
+            fps.append(int(f))
+        except (TypeError, ValueError):
+            continue
+    out = {}
+    for i in range(0, len(fps), 100):
+        chunk = fps[i:i + 100]
+        try:
+            data = _cf_post(dm, "/fingerprints", {"fingerprints": chunk}, api_key=api_key)
+        except Exception as e:
+            utils.log.warning("CurseForge 指纹匹配失败: %s", e)
+            continue
+        matches = ((data or {}).get("data") or {}).get("exactMatches") or []
+        for hit in matches:
+            f = hit.get("file") or {}
+            fp = f.get("fileFingerprint")
+            pid = f.get("modId") or hit.get("id")
+            fid = f.get("id")
+            if fp and pid and fid:
+                out[int(fp)] = {
+                    "projectID": int(pid),
+                    "fileID": int(fid),
+                    "fileName": f.get("fileName") or "",
+                }
+    return out
+
+
 def cf_files_by_ids(dm: DownloadManager, file_ids, api_key=None):
     """批量查询文件元数据 POST /v1/mods/files，返回 {fileId: file}。"""
     ids = []

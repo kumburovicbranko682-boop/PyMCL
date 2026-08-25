@@ -772,8 +772,15 @@ class SettingsPage(QWidget):
 
     def _export(self):
         from mclauncher.config import CONFIG
+        from ..widgets import ComboDialog
         name = CONFIG.get("default_instance") or "default"
-        self.backend.export_modpack(name)
+        items = [tr("Modrinth 整合包 (.mrpack)"), tr("CurseForge 整合包 (.zip)")]
+        dlg = ComboDialog(tr("导出整合包"), tr("选择导出格式"), items=items,
+                          current=items[0], parent=self.window())
+        if not dlg.exec():
+            return
+        fmt = "curseforge" if dlg.value() == items[1] else "mrpack"
+        self.backend.export_modpack(name, fmt=fmt)
         InfoBar.success(tr("开始导出"), f"实例 {name} → exports/", parent=self,
                         position=InfoBarPosition.TOP, duration=3000)
 
