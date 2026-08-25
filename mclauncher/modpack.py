@@ -908,6 +908,16 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                 manifest_file = nested / "manifest.json"
                 _emit(on_progress, f"manifest.json 位于子目录 {nested.name}/，按该层作为包根安装")
         if not manifest_file.is_file():
+            # MultiMC / Prism 实例包（mmc-pack.json）
+            mmc_file = tmpdir / "mmc-pack.json"
+            if not mmc_file.is_file():
+                nested = _nested_marker_root(tmpdir, "mmc-pack.json")
+                if nested is not None:
+                    mmc_file = nested / "mmc-pack.json"
+            if mmc_file.is_file():
+                return _install_multimc_zip(dm, tmpdir, instance, pack_path,
+                                            mmc_file, on_progress=on_progress,
+                                            cancel=cancel, force=force, java=java)
             # 没有 manifest.json：按“直接压缩的 .minecraft 目录”整合包安装
             return _install_plain_zip(dm, tmpdir, instance, pack_path,
                                       on_progress=on_progress, cancel=cancel,
@@ -1054,8 +1064,9 @@ def _install_plain_zip(dm: DownloadManager, tmpdir: Path, instance: Instance, pa
         raise ModpackError(
             "整合包缺少 manifest.json，也不是 .minecraft 目录结构。\n"
             f"zip 顶层内容: {top or '(空)'}\n"
-            "支持三种格式：CurseForge 导出的 zip（内含 manifest.json）、"
-            "Modrinth 的 .mrpack、直接压缩的 .minecraft 目录（含 mods / versions 等）。"
+            "支持四种格式：CurseForge 导出的 zip（内含 manifest.json）、"
+            "Modrinth 的 .mrpack、MultiMC/Prism 实例包（内含 mmc-pack.json）、"
+            "直接压缩的 .minecraft 目录（含 mods / versions 等）。"
         )
     rel = root.relative_to(tmpdir)
     where = f"（位于 {rel} 子目录）" if str(rel) != "." else ""
@@ -1105,6 +1116,102 @@ def _install_plain_zip(dm: DownloadManager, tmpdir: Path, instance: Instance, pa
     instance.set_meta("modpack", pack_meta)
     instance.set_meta("mc_version", loader_vid or mc_version or "")
     _emit(on_progress, f"整合包 {pack_meta['name']} 安装完成 -> 实例 {instance.name}")
+    return pack_meta
+
+
+# ================================================================ MultiMC / Prism
+
+_MMC_LOADER_UIDS = {
+    "net.minecraftforge": "forge",
+    "net.neoforged": "neoforge",
+    "net.fabricmc.fabric-loader": "fabric-loader",
+    "org.quiltmc.quilt-loader": "quilt-loader",
+}
+
+
+def parse_mmc_pack(data: dict) -> dict:
+    """解析 mmc-pack.json 的 components → {mc, loader, loader_version}。"""
+    mc = ""
+    loader = None
+    loader_version = ""
+    for comp in (data or {}).get("components") or []:
+        uid = str(comp.get("uid") or "")
+        ver = str(comp.get("version") or "")
+        if uid == "net.minecraft":
+            mc = ver
+        elif uid in _MMC_LOADER_UIDS:
+            loader = _MMC_LOADER_UIDS[uid]
+            loader_version = ver
+    return {"mc": mc, "loader": loader, "loader_version": loader_version}
+
+
+def parse_instance_cfg(text: str) -> dict:
+    """instance.cfg 是简单 key=value；Prism 新版带 [General] 段头。"""
+    out = {}
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", ";", "[")):
+            continue
+        if "=" in line:
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _install_multimc_zip(dm: DownloadManager, tmpdir: Path, instance: Instance,
+                         pack_path, mmc_file: Path, on_progress=None,
+                         cancel=None, force=False, java=None):
+    """导入 MultiMC / Prism / PolyMC 导出的实例 zip。"""
+    root = mmc_file.parent
+    ver = parse_mmc_pack(utils.read_json(mmc_file, None) or {})
+    cfg = {}
+    cfg_file = root / "instance.cfg"
+    if cfg_file.is_file():
+        cfg = parse_instance_cfg(
+            cfg_file.read_text(encoding="utf-8", errors="replace"))
+    name = cfg.get("name") or Path(pack_path).stem
+    mc_version = ver["mc"]
+    if not mc_version:
+        raise ModpackError("mmc-pack.json 里没有 net.minecraft 组件，无法确定游戏版本")
+    tail = f" + {ver['loader']} {ver['loader_version']}" if ver["loader"] else ""
+    _emit(on_progress, f"识别为 MultiMC/Prism 实例包「{name}」: MC {mc_version}{tail}")
+
+    if instance.path.is_dir():
+        instance.ensure_standard_dirs()
+    else:
+        instance.create()
+    _emit(on_progress, f"安装到实例 {instance.name} ({instance.path})")
+    installer = Installer(instance, dm, on_progress=on_progress or dm.on_progress,
+                          cancel=cancel)
+    resolved = _resolve_pack_minecraft(dm, mc_version, on_progress) or mc_version
+    _emit(on_progress, f"安装 Minecraft {resolved}")
+    installer.install_version(resolved, force=force, java=java)
+    loader_vid = None
+    if ver["loader"]:
+        _emit(on_progress, f"安装加载器 {ver['loader']} {ver['loader_version']} (Minecraft {resolved})")
+        loader_vid = install_loader(installer, ver["loader"],
+                                    ver["loader_version"], resolved, force=force)
+
+    gdir = next((root / d for d in (".minecraft", "minecraft")
+                 if (root / d).is_dir()), None)
+    if gdir:
+        _emit(on_progress, "复制实例数据（mods / config / saves …）")
+        _copy_tree_over(gdir, instance.path)
+    else:
+        _emit(on_progress, "包里没有 .minecraft 目录，只安装了游戏版本")
+
+    pack_meta = {
+        "name": name,
+        "version": "?",
+        "mc_version": mc_version,
+        "loader": (f"{ver['loader']}-{ver['loader_version']}"
+                   if ver["loader"] else "vanilla"),
+        "source": "multimc",
+        "instance": instance.name,
+    }
+    instance.set_meta("modpack", pack_meta)
+    instance.set_meta("mc_version", loader_vid or mc_version)
+    _emit(on_progress, f"MultiMC 实例「{name}」导入完成 -> 实例 {instance.name}")
     return pack_meta
 
 
