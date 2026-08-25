@@ -167,6 +167,7 @@ class BackendAPI(QObject):
         self._game_proc = None
         self._game_lock = threading.Lock()
         self._pending_login = None
+        self._manual_downloads = None
         self._launch_task_id = None
         self._pack_cache: list[dict] = []
         self._mod_cache: list[dict] = []
@@ -2038,7 +2039,29 @@ class BackendAPI(QObject):
         if isinstance(meta, dict) and meta.get("instance"):
             CONFIG.set("default_instance", meta["instance"])
             CONFIG.save()
+        manual = (meta or {}).get("manual_files") or []
+        if manual:
+            log(tr("以下 Mod 作者禁止第三方下载（CurseForge 403），请在浏览器打开链接手动下载，放入实例 mods 文件夹："))
+            for m in manual:
+                log(f"  · {m.get('project') or m.get('filename')}: {m.get('url')}")
+            log(tr("清单已写入 mods/需要手动下载的Mod.txt，放好文件后即可启动。"))
+            self._manual_downloads = {
+                "instance": (meta or {}).get("instance") or inst.name,
+                "items": list(manual),
+            }
         log(f"整合包安装完成: {(meta or {}).get('name') or name}")
+        if manual:
+            return tr("整合包安装完成，但 {n} 个 Mod 需手动下载（见提示）").replace(
+                "{n}", str(len(manual)))
+
+    def pop_manual_downloads(self) -> dict:
+        """取走最近一次整合包安装留下的手动下载清单（取走即清空）。
+
+        返回 {"instance": 名称, "items": [{filename, project, url}]}；没有则 {}。
+        """
+        out = self._manual_downloads or {}
+        self._manual_downloads = None
+        return out
 
     def _install_mod_impl(self, progress, log, name, instance, extra=None):
         extra = extra or {}

@@ -666,6 +666,31 @@ def cf_files_by_ids(dm: DownloadManager, file_ids, api_key=None):
     return out
 
 
+def cf_mods_by_ids(dm: DownloadManager, mod_ids, api_key=None):
+    """批量查询项目元数据 POST /v1/mods，返回 {modId: mod}（含 links.websiteUrl）。"""
+    ids = []
+    for x in mod_ids or []:
+        try:
+            ids.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return {}
+    out = {}
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i + 50]
+        try:
+            data = _cf_post(dm, "/mods", {"modIds": chunk}, api_key=api_key)
+        except Exception as e:
+            utils.log.warning("批量查询 CurseForge 项目失败: %s", e)
+            continue
+        for m in _cf_items(data):
+            mid = m.get("id")
+            if mid is not None:
+                out[int(mid)] = m
+    return out
+
+
 def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
                       class_id=CF_CLASS_MOD, slug=None, game_version=None,
                       categories=None, offset=0):

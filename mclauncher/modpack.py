@@ -976,6 +976,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             except Exception as e:
                 utils.log.warning("批量查询整合包 Mod 元数据失败，将仅用 CDN 规则: %s", e)
         tasks = []
+        file_infos = []
         for f in raw_files:
             pid, fid = f.get("projectID"), f.get("fileID")
             info = meta.get(int(fid), {}) if fid is not None else {}
@@ -991,10 +992,16 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             size = info.get("fileLength")
             urls = cf_mod_download_urls(pid, fid, filename=filename, download_url=download_url)
             tasks.append((urls, dest, sha1, size))
+            file_infos.append({"pid": pid, "fid": fid, "dest": dest, "name": dest_name})
+        manual = []
         if tasks:
             _emit(on_progress, f"开始下载整合包 Mod（{len(tasks)} 个）")
-            dm.download_all(tasks, message="下载整合包 Mod")
-            _emit(on_progress, "整合包 Mod 下载完成")
+            try:
+                dm.download_all(tasks, message="下载整合包 Mod")
+                _emit(on_progress, "整合包 Mod 下载完成")
+            except DownloadError as e:
+                manual = _handle_mod_download_failure(
+                    dm, e, file_infos, instance, cancel, on_progress)
 
         # overrides
         overrides = mf.get("overrides")
@@ -1011,6 +1018,8 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             "source": "curseforge",
             "instance": instance.name,
         }
+        if manual:
+            pack_meta["manual_files"] = manual
         if source_meta:
             pack_meta.update({k: v for k, v in source_meta.items() if v})
         instance.set_meta("modpack", pack_meta)
@@ -1024,6 +1033,73 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                 pack_path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def _handle_mod_download_failure(dm, err, file_infos, instance, cancel, on_progress) -> list:
+    """整合包 Mod 批量下载部分失败时的处理，返回手动下载清单。
+
+    用户取消或全军覆没（多半断网/镜像全挂）原样抛出——装出一个
+    空 mods 的实例比失败更坑人；部分失败（多为作者禁止第三方分发的
+    403）则生成清单继续安装，对标 PCL2 / HMCL。
+    """
+    if (cancel and cancel()) or "用户取消" in str(err):
+        raise err
+    missing = [fi for fi in file_infos if not fi["dest"].is_file()]
+    if not missing or len(missing) == len(file_infos):
+        raise err
+    manual = _cf_manual_downloads(dm, missing)
+    write_manual_download_list(instance, manual)
+    _emit(on_progress,
+          f"{len(missing)}/{len(file_infos)} 个 Mod 下载失败"
+          "（多为作者禁止第三方分发），已生成手动下载清单，继续安装其余文件")
+    return manual
+
+
+def _cf_manual_downloads(dm: DownloadManager, missing) -> list:
+    """给下载失败（多为作者禁止第三方分发、CDN 403）的 Mod 生成手动下载清单。
+
+    对标 PCL2 / HMCL：列出 CurseForge 文件页链接，让玩家浏览器下载后
+    放进实例 mods 文件夹，而不是让整包安装原地失败。
+    """
+    from .mods import cf_mods_by_ids
+    meta = {}
+    try:
+        meta = cf_mods_by_ids(dm, [m.get("pid") for m in missing])
+    except Exception as e:
+        utils.log.warning("查询被禁 Mod 项目信息失败: %s", e)
+    out = []
+    for m in missing:
+        try:
+            info = meta.get(int(m.get("pid"))) or {}
+        except (TypeError, ValueError):
+            info = {}
+        site = str(((info.get("links") or {}).get("websiteUrl")) or "").rstrip("/")
+        if not site:
+            site = f"https://www.curseforge.com/projects/{m.get('pid')}"
+        out.append({
+            "filename": m.get("name") or "",
+            "project": info.get("name") or str(m.get("pid")),
+            "url": f"{site}/files/{m.get('fid')}",
+        })
+    return out
+
+
+def write_manual_download_list(instance: Instance, manual) -> Path:
+    """把手动下载清单写进实例 mods 目录（.txt 不会被游戏加载）。"""
+    dest = instance.path / "mods" / "需要手动下载的Mod.txt"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "以下 Mod 的作者禁止第三方启动器下载（CurseForge 403）。",
+        "请在浏览器打开链接下载 jar 文件，放进本文件夹后删除本清单。",
+        "",
+    ]
+    for m in manual:
+        lines.append(f"{m.get('project') or m.get('filename')}")
+        lines.append(f"  文件: {m.get('filename') or '?'}")
+        lines.append(f"  链接: {m.get('url')}")
+        lines.append("")
+    dest.write_text("\n".join(lines), encoding="utf-8")
+    return dest
 
 
 def _copy_tree_over(src: Path, dest: Path):
