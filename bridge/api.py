@@ -539,6 +539,48 @@ class BackendAPI:
     def terracotta_shutdown(self):
         terracotta_mod.stop()
 
+    def terracotta_enter_world(self):
+        info = self.terracotta_snapshot()
+        url = str(info.get("url") or "")
+        if info.get("state") != "guest-ok" or not url:
+            raise terracotta_mod.TerracottaError("还没连上房间。请先输入邀请码加入。")
+        return self._launch_into_server(url, "请到游戏「多人游戏」双击「陶瓦联机大厅」。")
+
+    def terracotta_direct_connect(self, address: str):
+        host, port = terracotta_mod.split_join_url(address)
+        if not host or host in ("127.0.0.1", "localhost"):
+            raise terracotta_mod.TerracottaError("请输入房主的公网地址，例如 1.2.3.4:25565")
+        return self._launch_into_server(f"{host}:{port}", "请到游戏「多人游戏」双击「陶瓦联机大厅」。")
+
+    def _launch_into_server(self, url: str, already_msg: str):
+        inst = self._instance()
+        terracotta_mod.remember_lobby(url, inst.path)
+        info = self.terracotta_snapshot()
+        if info.get("game_running"):
+            return already_msg
+        ids = inst.installed_ids()
+        if not ids:
+            raise LaunchError("请先到「启动」页安装一个版本。")
+        version = max(ids, key=lambda vid: (inst.versions_dir() / vid).stat().st_mtime)
+        host, port = terracotta_mod.split_join_url(url)
+        acc = self.accounts.get_active()
+        if acc and acc.get("type") == "microsoft":
+            account = acc.get("name") or "离线模式"
+            username = acc.get("name") or "Player"
+        else:
+            account = "离线模式"
+            username = (acc or {}).get("name") or self.terracotta_player()
+        return self.launch_game(
+            instance=inst.name,
+            version=version,
+            account=account,
+            username=username,
+            memory_mb=int(CONFIG.get("memory_mb") or 4096),
+            width=int(CONFIG.get("width") or 854),
+            height=int(CONFIG.get("height") or 480),
+            extra_game_args=["--server", host, "--port", str(port)],
+        )
+
     def launch_game(self, instance: str, version: str, account: str,
                     username: str, memory_mb: int, width: int, height: int,
                     java: str = "自动选择", extra_game_args=None) -> str:
