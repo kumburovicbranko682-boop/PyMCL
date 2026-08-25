@@ -205,11 +205,14 @@ class SavesDialog(MessageBoxBase):
         row2 = QHBoxLayout()
         self.edit_btn = PushButton(tr("编辑世界"))
         self.edit_btn.setToolTip(tr("改世界名 / 游戏模式 / 难度 / 允许作弊（写入 level.dat）"))
+        self.nbt_btn = PushButton(tr("NBT 编辑"))
+        self.nbt_btn.setToolTip(tr("以标签树形式直接编辑 level.dat（进阶，保存前自动备份）"))
         self.backup_btn = PushButton(tr("备份存档"))
         self.restore_btn = PushButton(tr("还原备份"))
         self.export_btn = PushButton(tr("导出为 zip"))
         self.wdp_btn = PushButton(tr("存档数据包"))
         row2.addWidget(self.edit_btn)
+        row2.addWidget(self.nbt_btn)
         row2.addWidget(self.backup_btn)
         row2.addWidget(self.restore_btn)
         row2.addWidget(self.export_btn)
@@ -226,6 +229,7 @@ class SavesDialog(MessageBoxBase):
         self.del_btn.clicked.connect(self._delete)
         self.dp_btn.clicked.connect(self._datapack)
         self.edit_btn.clicked.connect(self._edit_world)
+        self.nbt_btn.clicked.connect(self._nbt_edit)
         self.backup_btn.clicked.connect(self._backup)
         self.restore_btn.clicked.connect(self._restore)
         self.export_btn.clicked.connect(self._export)
@@ -240,6 +244,7 @@ class SavesDialog(MessageBoxBase):
         self.del_btn.setText(tr("删除备份") if is_backup else tr("删除存档"))
         self.dp_btn.setEnabled(is_save)
         self.edit_btn.setEnabled(is_save)
+        self.nbt_btn.setEnabled(is_save)
         self.backup_btn.setEnabled(is_save)
         self.export_btn.setEnabled(is_save)
         self.wdp_btn.setEnabled(is_save)
@@ -429,6 +434,27 @@ class SavesDialog(MessageBoxBase):
             MessageBox(tr("编辑失败"), str(e), self).exec()
             return
         self.reload()
+
+    def _nbt_edit(self):
+        name = self._selected_name()
+        if not name:
+            MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
+            return
+        rows = self.backend.list_saves(self.instance, self.version)
+        row = next((r for r in rows if r.get("name") == name), None)
+        if row is None or not row.get("path"):
+            MessageBox(tr("存档不存在"), name, self).exec()
+            return
+        from pathlib import Path
+        level = Path(row["path"]) / "level.dat"
+        from .nbt_editor_dialog import NbtEditorDialog
+        try:
+            dlg = NbtEditorDialog(self.backend, str(level), self)
+        except Exception as e:
+            MessageBox(tr("读取失败"), str(e), self).exec()
+            return
+        if dlg.exec():
+            self.reload()
 
     def _datapack(self):
         name = self._selected_name()

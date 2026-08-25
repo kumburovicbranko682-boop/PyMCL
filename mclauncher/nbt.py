@@ -113,7 +113,7 @@ def loads(data: bytes) -> dict:
     if data[:2] == b"\x1f\x8b":
         try:
             data = gzip.decompress(data)
-        except OSError as e:
+        except (OSError, EOFError) as e:  # 截断的 gzip 抛 EOFError，不是 OSError
             raise NBTError(f"gzip 解压失败: {e}") from e
     if len(data) > MAX_NBT_BYTES:
         raise NBTError("NBT 数据过大")
@@ -160,7 +160,7 @@ def loads_typed(data: bytes) -> tuple:
     if data[:2] == b"\x1f\x8b":
         try:
             data = gzip.decompress(data)
-        except OSError as e:
+        except (OSError, EOFError) as e:  # 截断的 gzip 抛 EOFError，不是 OSError
             raise NBTError(f"gzip 解压失败: {e}") from e
     if len(data) > MAX_NBT_BYTES:
         raise NBTError("NBT 数据过大")

@@ -628,6 +628,16 @@ class BackendAPI(QObject):
         self._emit_ui_changed()
         return out
 
+    def read_nbt_file(self, path: str) -> dict:
+        """读 NBT 文件为可编辑的 JSON 树（HMCL「NBT 编辑」同款）。"""
+        from mclauncher import nbt_edit
+        return nbt_edit.load_file(path)
+
+    def write_nbt_file(self, path: str, tree: dict) -> str:
+        """校验 JSON 树并写回 NBT 文件，写前刷 .pymcl_bak 备份。返回备份路径。"""
+        from mclauncher import nbt_edit
+        return nbt_edit.save_file(path, tree)
+
     def backup_save(self, instance: str, name: str, version: str = "") -> str:
         return self.start_task(f"备份存档 {name}", self._backup_save_impl, instance, name, version)
 

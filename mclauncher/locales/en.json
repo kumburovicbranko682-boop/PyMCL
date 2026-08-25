@@ -1201,5 +1201,22 @@
   "可选。代理不要账号密码就留空": "Optional. Leave empty if the proxy needs no credentials",
   "代理可用": "Proxy OK",
   "连通，延迟 {ms} 毫秒": "Connected, latency {ms} ms",
-  "代理不可用": "Proxy failed"
+  "代理不可用": "Proxy failed",
+  "NBT 编辑": "NBT editor",
+  "以标签树形式直接编辑 level.dat（进阶，保存前自动备份）": "Edit level.dat directly as a tag tree (advanced; auto-backup before saving)",
+  "NBT 编辑 · {name}": "NBT editor · {name}",
+  "双击编辑值；右键增删标签。保存前会自动备份为 .pymcl_bak": "Double-click to edit values; right-click to add/remove tags. A .pymcl_bak backup is made before saving",
+  "值": "Value",
+  "整数用逗号或空格分隔": "Integers separated by commas or spaces",
+  "编辑 {name}": "Edit {name}",
+  "重命名 {name}": "Rename {name}",
+  "名字不能为空": "Name cannot be empty",
+  "同级已存在「{name}」": "\"{name}\" already exists at this level",
+  "新标签名（{kind}）": "New tag name ({kind})",
+  "类型不符": "Type mismatch",
+  "这个列表只能装 {kind} 元素": "This list only holds {kind} elements",
+  "添加子标签": "Add child tag",
+  "添加元素": "Add element",
+  "添加元素（{kind}）": "Add element ({kind})",
+  "编辑值": "Edit value"
 }
