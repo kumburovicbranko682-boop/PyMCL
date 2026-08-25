@@ -84,6 +84,24 @@ class _Handler(BaseHTTPRequestHandler):
             self._reply(200, PROFILE_BODY)
         elif method == "DELETE" and path == "/minecraft/profile/capes/active":
             self._reply(204)
+        elif method == "GET" and path.startswith(
+                "/ygg/sessionserver/session/minecraft/profile/"):
+            import base64 as b64
+            textures = {"textures": {"SKIN": {
+                "url": f"http://{self.headers.get('Host')}/textures/skin.png",
+                "metadata": {"model": "slim"},
+            }}}
+            payload = b64.b64encode(json.dumps(textures).encode()).decode()
+            self._reply(200, {"id": "u", "name": "Tester",
+                              "properties": [{"name": "textures",
+                                              "value": payload}]})
+        elif method == "GET" and path == "/textures/skin.png":
+            data = fake_png(64, 64)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         elif method == "PUT" and path.startswith("/ygg/api/user/profile/"):
             self._reply(204)
         elif method == "DELETE" and path.startswith("/ygg/api/user/profile/"):
@@ -242,6 +260,36 @@ class SkinServiceTests(unittest.TestCase):
     def test_ygg_missing_api(self):
         with self.assertRaises(skin.SkinError):
             skin.upload_ygg_skin("", "tok", "u", self.skin_path)
+
+    # ---- 皮肤纹理获取（本地渲染用）
+
+    def test_ygg_texture_info(self):
+        info = skin.fetch_ygg_texture_info(
+            self.ygg_api, "11111111222233334444555555555555")
+        self.assertTrue(info["url"].endswith("/textures/skin.png"))
+        self.assertEqual(info["variant"], "slim")
+
+    def test_fetch_skin_texture_authlib(self):
+        acc = {"type": "authlib", "api": self.ygg_api,
+               "uuid": "11111111222233334444555555555555"}
+        data = skin.fetch_skin_texture(acc)
+        self.assertEqual(data["variant"], "slim")
+        self.assertTrue(data["png"].startswith(b"\x89PNG"))
+
+    def test_fetch_skin_texture_microsoft(self):
+        from unittest import mock
+        profile = {"skins": [
+            {"active": True, "url": self.base + "/textures/skin.png",
+             "variant": "classic"}]}
+        with mock.patch.object(skin, "fetch_ms_profile", return_value=profile):
+            data = skin.fetch_skin_texture(
+                {"type": "microsoft", "access_token": "tok"})
+        self.assertEqual(data["variant"], "classic")
+        self.assertTrue(data["png"].startswith(b"\x89PNG"))
+
+    def test_fetch_skin_texture_offline_rejected(self):
+        with self.assertRaises(skin.SkinError):
+            skin.fetch_skin_texture({"type": "offline", "name": "Player"})
 
 
 if __name__ == "__main__":

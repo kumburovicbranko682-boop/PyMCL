@@ -257,3 +257,65 @@ def reset_ygg_skin(api: str, access_token: str, uuid: str, timeout: int = 30):
         timeout=timeout,
     )
     _raise_ygg(resp, "重置皮肤")
+
+
+# ---------------------------------------------------------------- 皮肤纹理获取（本地渲染用）
+
+def fetch_ygg_texture_info(api: str, uuid: str, timeout: int = 15) -> dict:
+    """从 Yggdrasil sessionserver 拿皮肤纹理 URL 与模型。"""
+    import base64 as b64
+    import json as json_mod
+    import requests
+    root = str(api or "").rstrip("/")
+    plain = utils.dashed_uuid(uuid or "").replace("-", "")
+    if not root or not plain:
+        raise SkinError("缺少皮肤站 API 地址或 UUID")
+    resp = requests.get(
+        f"{root}/sessionserver/session/minecraft/profile/{plain}",
+        timeout=timeout)
+    if resp.status_code != 200:
+        raise SkinError(f"查询皮肤纹理失败（HTTP {resp.status_code}）")
+    props = (resp.json() or {}).get("properties") or []
+    payload = next((p.get("value") for p in props
+                    if p.get("name") == "textures"), "")
+    if not payload:
+        raise SkinError("该角色没有皮肤纹理")
+    data = json_mod.loads(b64.b64decode(payload).decode("utf-8", "replace"))
+    skin_info = (data.get("textures") or {}).get("SKIN") or {}
+    url = skin_info.get("url") or ""
+    if not url:
+        raise SkinError("该角色没有皮肤纹理")
+    model = ((skin_info.get("metadata") or {}).get("model") or "").lower()
+    return {"url": url, "variant": "slim" if model == "slim" else "classic"}
+
+
+def fetch_skin_texture(account: dict, timeout: int = 15) -> dict:
+    """下载账号当前皮肤的原始 64x64 PNG，供本地渲染预览。
+
+    返回 {"png": bytes, "variant": "classic"/"slim"}。
+    只支持微软 / 皮肤站账号；其它类型抛 SkinError（调用方回退第三方渲染）。
+    """
+    import requests
+    acc = account or {}
+    kind = acc.get("type") or "offline"
+    if kind == "microsoft":
+        profile = fetch_ms_profile(acc.get("access_token") or "", timeout=timeout)
+        active = next((s for s in profile["skins"] if s.get("active")),
+                      profile["skins"][0] if profile["skins"] else None)
+        if not active or not active.get("url"):
+            raise SkinError("该账号没有皮肤")
+        url, variant = active["url"], active.get("variant") or "classic"
+    elif kind == "authlib":
+        info = fetch_ygg_texture_info(acc.get("api") or "", acc.get("uuid") or "",
+                                      timeout=timeout)
+        url, variant = info["url"], info["variant"]
+    else:
+        raise SkinError("离线 / 通行证账号没有云端皮肤纹理")
+    resp = requests.get(url, timeout=timeout)
+    if resp.status_code != 200:
+        raise SkinError(f"下载皮肤纹理失败（HTTP {resp.status_code}）")
+    png = resp.content
+    width, height = png_size(png)
+    if width != 64 or height not in (32, 64):
+        raise SkinError(f"皮肤纹理尺寸异常: {width}×{height}")
+    return {"png": png, "variant": variant}

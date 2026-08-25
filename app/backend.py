@@ -1328,6 +1328,12 @@ class BackendAPI(QObject):
             raise skin_mod.SkinError(tr("只有微软正版账号能查询皮肤与披风清单"))
         return skin_mod.fetch_ms_profile(acc.get("access_token") or "")
 
+    def fetch_skin_texture(self, account_name: str = "") -> dict:
+        """当前皮肤原始纹理 {png: bytes, variant}，供本地渲染预览。"""
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        return skin_mod.fetch_skin_texture(acc)
+
     def upload_skin(self, account_name: str, file_path: str,
                     variant: str = "classic") -> str:
         return self.start_task(

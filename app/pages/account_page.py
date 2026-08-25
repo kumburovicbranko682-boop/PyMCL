@@ -254,7 +254,7 @@ class AccountPage(QWidget):
             self.list_box.addWidget(card)
         active = next((r for r in rows if r.get("active")), None) or (rows[0] if rows else None)
         self.skin_name.setText(active["name"] if active else "Steve")
-        self._load_skin(active["body"] if active else "")
+        self._load_skin(active)
         self._active_name = active["name"] if active else ""
         caps = self.backend.skin_capabilities(self._active_name) if active else {
             "can_upload": False, "can_reset": False, "can_cape": False,
@@ -271,24 +271,45 @@ class AccountPage(QWidget):
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
         self.reload()
 
-    def _load_skin(self, url: str):
-        if not url:
+    def _load_skin(self, row: dict | None):
+        if not row:
             return
         self._pix_token += 1
         token = self._pix_token
+        name = row.get("name") or ""
+        kind = row.get("type") or "offline"
+        body_url = row.get("body") or ""
 
         def fetch():
+            # 正版 / 皮肤站优先本地渲染原始纹理，不依赖第三方渲染站
+            if kind in ("microsoft", "authlib"):
+                try:
+                    return ("texture", self.backend.fetch_skin_texture(name))
+                except Exception:
+                    pass
+            if not body_url:
+                raise RuntimeError("no skin url")
             import requests
-            resp = requests.get(url, timeout=12)
+            resp = requests.get(body_url, timeout=12)
             resp.raise_for_status()
-            return resp.content
+            return ("image", resp.content)
 
-        def ok(data):
+        def ok(result):
             if token != self._pix_token:
                 return
-            pix = QPixmap()
-            if pix.loadFromData(data):
-                self.skin.setPixmap(pix.scaled(140, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            what, payload = result
+            if what == "texture":
+                from ..skin_render import render_front
+                pix = render_front(payload.get("png") or b"",
+                                   payload.get("variant") or "classic", height=256)
+                if not pix.isNull():
+                    self.skin.setPixmap(pix)
+                    return
+            else:
+                pix = QPixmap()
+                if pix.loadFromData(payload):
+                    self.skin.setPixmap(pix.scaled(
+                        140, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         self.backend.call_async(fetch, ok, lambda *_: None)
 
