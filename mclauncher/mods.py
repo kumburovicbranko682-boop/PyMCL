@@ -61,6 +61,7 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         version = _pick_version(dm, slug, mc_version, loader)
 
     seen = set()
+    seen_projects = set()
     downloaded = []
 
     def _download(v, depth=0):
@@ -68,6 +69,8 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         if not vid or vid in seen or depth > 3:
             return
         seen.add(vid)
+        if v.get("project_id"):
+            seen_projects.add(str(v["project_id"]))
         f = _primary_file(v)
         if not f or not f.get("url"):
             return
@@ -79,19 +82,24 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         dm.download(tried[0], dest, sha1=f.get("sha1"), size=f.get("size"),
                     sha512=f.get("sha512"), urls=tried)
         downloaded.append(dest)
-        # 必需依赖（如 Fabric API）递归下载
+        # 必需依赖（如 Fabric API）递归下载。Modrinth 的依赖通常只带
+        # project_id（version_id 为 null），此时按实例 MC 版本/加载器解析。
         for dep in v.get("dependencies") or []:
             if dep.get("dependency_type") != "required":
                 continue
             dep_vid = dep.get("version_id")
-            if not dep_vid:
-                continue
+            dep_pid = str(dep.get("project_id") or "")
             try:
-                dep_version = dm.fetch_json(f"{MODRINTH_API}/version/{dep_vid}", timeout=60)
+                if dep_vid:
+                    dep_version = dm.fetch_json(f"{MODRINTH_API}/version/{dep_vid}", timeout=60)
+                elif dep_pid and dep_pid not in seen_projects:
+                    dep_version = _pick_version(dm, dep_pid, mc_version, loader)
+                else:
+                    continue
                 _download(dep_version, depth + 1)
             except Exception as e:
                 utils.log.warning("下载依赖 %s 失败: %s",
-                                  dep.get("file_name") or dep_vid, e)
+                                  dep.get("file_name") or dep_vid or dep_pid, e)
 
     _download(version)
     if not downloaded:
@@ -765,53 +773,27 @@ def _resolve_mods_dir(instance: Instance, mods_dir=None) -> Path:
     return folder
 
 
-def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
-                           mc_version=None, loader=None, api_key=None, on_progress=None,
-                           file_id=None, mods_dir=None):
-    """安装 CurseForge 模组：自动匹配实例 MC 版本与加载器。"""
-    inst = instance
-    inst.ensure_standard_dirs()
-    dest_dir = _resolve_mods_dir(inst, mods_dir)
-    if not mc_version:
-        mc_version = detect_mc_version(inst)
-    if loader is None:
-        loader = detect_loader(inst)
+# CurseForge 依赖类型（docs.curseforge.com）：3 = RequiredDependency
+CF_REQUIRED_DEPENDENCY = 3
 
-    mod = cf_detail(dm, addon_id, api_key=api_key)
-    # 优先 latestFiles（官方 API 详情自带），兜底调 cf_files
-    files = mod.get("latestFiles") or []
-    if not files:
-        try:
-            files = cf_files(dm, addon_id, api_key=api_key, page_size=100)
-        except Exception as e:
-            utils.log.warning("cf_files 兜底也失败: %s", e)
-    if file_id:
-        hit = next((x for x in files if str(x.get("id")) == str(file_id)), None)
-        if not hit:
-            try:
-                files = cf_files(dm, addon_id, api_key=api_key, page_size=100)
-            except Exception:
-                files = files or []
-            hit = next((x for x in files if str(x.get("id")) == str(file_id)), None)
-        if not hit:
-            raise ModError(f"找不到 CurseForge 文件 {file_id}")
-        f = hit
-    else:
-        if not files:
-            raise ModError("该模组没有可下载的文件")
 
-        candidates = [f for f in files
-                      if not mc_version or mc_version in (f.get("gameVersions") or [])]
-        if loader:
-            pref = [f for f in candidates
-                    if any(loader.lower() in (gv or "").lower() for gv in (f.get("gameVersions") or []))]
-            if pref:
-                candidates = pref
-        if not candidates:
-            utils.log.warning("没有与 MC %s 完全匹配的文件，使用最新文件", mc_version)
-            candidates = files
+def _cf_pick_file(files, mc_version, loader):
+    """从文件列表里挑最匹配 MC 版本与加载器的一个。"""
+    candidates = [f for f in files
+                  if not mc_version or mc_version in (f.get("gameVersions") or [])]
+    if loader:
+        pref = [f for f in candidates
+                if any(loader.lower() in (gv or "").lower() for gv in (f.get("gameVersions") or []))]
+        if pref:
+            candidates = pref
+    if not candidates:
+        utils.log.warning("没有与 MC %s 完全匹配的文件，使用最新文件", mc_version)
+        candidates = files
+    return candidates[0]
 
-        f = candidates[0]
+
+def _cf_download_file(dm, addon_id, f, dest_dir, on_progress=None):
+    """按候选 URL 依次尝试下载单个 CurseForge 文件，返回 dest。"""
     file_id = f.get("id")
     if file_id is None:
         raise ModError("模组文件信息缺失")
@@ -837,11 +819,76 @@ def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
                 if on_progress:
                     on_progress(f"下载 CurseForge 模组 {filename}", 0, 1)
                 dm.download(url, dest, timeout=900)
-                return {"source": "curseforge", "title": mod.get("name"), "files": [dest.name]}
+                return dest
             except Exception as e:
                 last_err = e
                 utils.remove_tree(dest)
     raise ModError(f"CurseForge 模组下载失败: {last_err}")
+
+
+def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
+                           mc_version=None, loader=None, api_key=None, on_progress=None,
+                           file_id=None, mods_dir=None):
+    """安装 CurseForge 模组：自动匹配实例 MC 版本与加载器，含必需前置（与 HMCL/PCL 一致）。"""
+    inst = instance
+    inst.ensure_standard_dirs()
+    dest_dir = _resolve_mods_dir(inst, mods_dir)
+    if not mc_version:
+        mc_version = detect_mc_version(inst)
+    if loader is None:
+        loader = detect_loader(inst)
+
+    seen = set()
+    installed = []
+    title_box = []
+
+    def _install(aid, fid, depth):
+        seen.add(str(aid))
+        mod = cf_detail(dm, aid, api_key=api_key)
+        if not title_box:
+            title_box.append(mod.get("name"))
+        # 优先 latestFiles（官方 API 详情自带），兜底调 cf_files
+        files = mod.get("latestFiles") or []
+        if not files:
+            try:
+                files = cf_files(dm, aid, api_key=api_key, page_size=100)
+            except Exception as e:
+                utils.log.warning("cf_files 兜底也失败: %s", e)
+        if fid:
+            hit = next((x for x in files if str(x.get("id")) == str(fid)), None)
+            if not hit:
+                try:
+                    files = cf_files(dm, aid, api_key=api_key, page_size=100)
+                except Exception:
+                    files = files or []
+                hit = next((x for x in files if str(x.get("id")) == str(fid)), None)
+            if not hit:
+                raise ModError(f"找不到 CurseForge 文件 {fid}")
+            f = hit
+        else:
+            if not files:
+                raise ModError("该模组没有可下载的文件")
+            f = _cf_pick_file(files, mc_version, loader)
+
+        dest = _cf_download_file(dm, aid, f, dest_dir, on_progress=on_progress)
+        installed.append(dest.name)
+        # 必需前置递归下载（relationType=3）；单个前置失败只警告，不拖垮主模组
+        for dep in f.get("dependencies") or []:
+            if dep.get("relationType") != CF_REQUIRED_DEPENDENCY:
+                continue
+            dep_id = dep.get("modId")
+            if not dep_id or str(dep_id) in seen or depth >= 3:
+                continue
+            try:
+                if on_progress:
+                    on_progress(f"下载前置模组 {dep_id}", 0, 1)
+                _install(dep_id, None, depth + 1)
+            except Exception as e:
+                utils.log.warning("下载 CurseForge 前置 %s 失败: %s", dep_id, e)
+
+    _install(addon_id, file_id, 0)
+    return {"source": "curseforge", "title": title_box[0] if title_box else "",
+            "files": installed}
 
 
 def install_cf_mod(dm: DownloadManager, url, instance: Instance, on_progress=None, mods_dir=None):
