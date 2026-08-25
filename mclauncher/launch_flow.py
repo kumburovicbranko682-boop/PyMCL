@@ -24,8 +24,11 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     extras = [str(a) for a in (extra_game_args or []) if a not in (None, "")]
     extras += split_args(settings.get("game_args"))
     if settings.get("server") and "--server" not in extras:
-        extras += ["--server", str(settings["server"])]
-        extras += ["--port", str(settings.get("port") or 25565)]
+        # 用户可能直接填 host:port，拆开传，避免 --server host:port 连不上
+        srv = str(settings["server"]).strip()
+        host, _, port = srv.partition(":")
+        extras += ["--server", host or srv]
+        extras += ["--port", str(port.strip() or settings.get("port") or 25565)]
     mode = settings.get("window_mode") or CONFIG.get("window_mode") or "window"
     if mode in version_settings.FULLSCREEN_MODES and "--fullscreen" not in extras:
         extras.append("--fullscreen")
