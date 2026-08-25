@@ -907,6 +907,12 @@ class BackendAPI(QObject):
             return mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
         return mods_mod.list_instance_mod_entries(inst)
 
+    def get_mod_details(self, instance: str, version: str = "") -> list[dict]:
+        """已装模组 + 展示元数据（模组名/版本/加载器/描述/作者/图标），带缓存。"""
+        from mclauncher import mod_info
+        inst = self._instance(instance)
+        return mod_info.describe_mods_at(self._mods_folder(inst, version))
+
     def get_mods_targets(self, instance: str) -> list[dict]:
         """Mod 安装目标列表：实例共享 mods + 开了版本隔离的版本各自目录。"""
         from mclauncher import version_settings as vs

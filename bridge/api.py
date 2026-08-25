@@ -1196,6 +1196,12 @@ class BackendAPI:
             return mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
         return mods_mod.list_instance_mod_entries(inst)
 
+    def get_mod_details(self, instance: str, version: str = "") -> list:
+        """已装模组 + 展示元数据（模组名/版本/加载器/描述/作者/图标），带缓存。"""
+        from mclauncher import mod_info
+        inst = self._instance(instance)
+        return mod_info.describe_mods_at(self._mods_folder(inst, version))
+
     def open_global_mods(self):
         from mclauncher import global_mods as gm
         path = gm.root()

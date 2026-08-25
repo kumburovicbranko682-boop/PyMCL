@@ -4,10 +4,11 @@
 侧边栏一级入口。目录选择与安装目标一致：实例共享 mods + 开了版本隔离的版本。
 """
 
+import html
 from pathlib import Path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
@@ -40,7 +41,11 @@ def _fmt_size(n) -> str:
 
 
 class _ModRow(QFrame):
-    """单个已安装模组：图标 + 文件名 + 大小 + 启用开关 + 删除。"""
+    """单个已安装模组：图标 + 模组名/版本/描述 + 启用开关 + 删除。
+
+    元数据（get_mod_details）还没回来时 entry 只有文件名，先按文件名显示，
+    异步补齐后整个列表重填。
+    """
 
     def __init__(self, entry: dict, page):
         super().__init__(page)
@@ -48,37 +53,71 @@ class _ModRow(QFrame):
         self.setObjectName("modMgrRow")
         self.setStyleSheet(row_qss("modMgrRow"))
         self.setFixedHeight(60)
-        name = entry.get("filename") or "?"
+        filename = entry.get("filename") or "?"
+        display = str(entry.get("name") or "").strip() or filename
+        version = str(entry.get("version") or "").strip()
+        loader = str(entry.get("loader") or "").strip()
+        desc = str(entry.get("description") or "").strip()
 
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8)
         lay.setSpacing(12)
-        lay.addWidget(IconTile(name, size=40))
+        lay.addWidget(self._icon(entry.get("icon"), display))
 
         info = QVBoxLayout()
         info.setSpacing(1)
-        title = QLabel(name)
+        title = QLabel(display)
         title.setStyleSheet(
             f"color: {Theme.title}; font-size: 13px; font-weight: 600; background: transparent;")
         info.addWidget(title)
-        meta = CaptionLabel(
-            f"{_fmt_size(entry.get('bytes'))}"
-            + (f"  ·  {tr('已禁用')}" if not entry.get("enabled") else ""))
+        bits = [version, _fmt_size(entry.get("bytes"))]
+        if display != filename:
+            bits.append(filename)
+        if not entry.get("enabled"):
+            bits.append(tr("已禁用"))
+        meta = CaptionLabel("  ·  ".join(b for b in bits if b))
         meta.setStyleSheet(f"color: {Theme.muted}; font-size: 11px; background: transparent;")
         info.addWidget(meta)
         lay.addLayout(info, 1)
+
+        tip_head = html.escape(display) + (f" {html.escape(version)}" if version else "")
+        tip_bits = [f"<b>{tip_head}</b>"]
+        sub = " · ".join(x for x in (
+            loader if loader not in ("", "unknown") else "",
+            ", ".join(entry.get("authors") or [])) if x)
+        if sub:
+            tip_bits.append(html.escape(sub))
+        if desc:
+            tip_bits.append(html.escape(desc))
+        tip_bits.append(html.escape(filename))
+        self.setToolTip("<p style='white-space:normal; max-width: 420px;'>"
+                        + "<br/>".join(tip_bits) + "</p>")
 
         self.switch = SwitchButton()
         self.switch.setChecked(bool(entry.get("enabled")))
         self.switch.setOnText(tr("启用"))
         self.switch.setOffText(tr("禁用"))
-        self.switch.checkedChanged.connect(lambda on, n=name: page._toggle(n, on, self))
+        self.switch.checkedChanged.connect(lambda on, n=filename: page._toggle(n, on, self))
         lay.addWidget(self.switch)
 
         btn = TransparentToolButton(FIF.DELETE)
         btn.setToolTip(tr("删除"))
-        btn.clicked.connect(lambda _, n=name: page._delete(n))
+        btn.clicked.connect(lambda _, n=filename: page._delete(n))
         lay.addWidget(btn)
+
+    @staticmethod
+    def _icon(icon_path, display: str) -> QWidget:
+        """jar 里带图标就显示真图标，否则回退首字母磁贴。"""
+        if icon_path and Path(icon_path).is_file():
+            pm = QPixmap(str(icon_path))
+            if not pm.isNull():
+                lab = QLabel()
+                lab.setFixedSize(40, 40)
+                lab.setAlignment(Qt.AlignCenter)
+                lab.setStyleSheet("background: transparent;")
+                lab.setPixmap(pm.scaled(40, 40, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                return lab
+        return IconTile(display, size=40)
 
 
 class ConflictReportDialog(MessageBoxBase):
@@ -192,7 +231,7 @@ class ModManagerPage(QWidget):
         self.target_box = ComboBox()
         self.target_box.setFixedWidth(190)
         self.search = LineEdit()
-        self.search.setPlaceholderText(tr("按文件名筛选…"))
+        self.search.setPlaceholderText(tr("按名称或文件名筛选…"))
         self.search.setFixedWidth(200)
         bar.addWidget(self.instance_box)
         bar.addWidget(self.target_box)
@@ -294,6 +333,27 @@ class ModManagerPage(QWidget):
                           position=InfoBarPosition.TOP, duration=4000)
         self._apply_subtitle()
         self._refill()
+        self._load_details(inst, ver)
+
+    def _load_details(self, inst: str, ver: str):
+        """后台解析 jar 元数据（有缓存），回来后把文件名列表换成模组名列表。"""
+        if not self._entries:
+            return
+        self._detail_gen = getattr(self, "_detail_gen", 0) + 1
+        gen = self._detail_gen
+
+        def _done(rows):
+            if gen != self._detail_gen or not rows:
+                return
+            if inst != self._current_instance() or ver != self._current_version():
+                return
+            self._entries = rows
+            self._apply_subtitle()
+            self._refill()
+
+        self.backend.call_async(
+            lambda i=inst, v=ver: self.backend.get_mod_details(i, v),
+            guard(self, _done))
 
     def _apply_subtitle(self):
         total = len(self._entries)
@@ -312,7 +372,8 @@ class ModManagerPage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         rows = [r for r in self._entries
-                if not text or text in str(r.get("filename") or "").lower()]
+                if not text or text in str(r.get("filename") or "").lower()
+                or text in str(r.get("name") or "").lower()]
         if not rows:
             if self._entries:
                 self.list_layout.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的模组")))

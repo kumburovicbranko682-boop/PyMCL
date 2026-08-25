@@ -154,6 +154,11 @@ public sealed class ModEntry
 {
     public string Filename { get; set; } = "";
     public bool Enabled { get; set; } = true;
+    // get_mod_details 附带的展示元数据（get_installed_mod_entries 没有这些字段）
+    public string Name { get; set; } = "";
+    public string Version { get; set; } = "";
+    public string Loader { get; set; } = "";
+    public string Description { get; set; } = "";
 }
 
 public sealed class AiStoreDto

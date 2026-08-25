@@ -35,6 +35,40 @@ def _load_toml(text: str):
     return None
 
 
+def _authors_list(val) -> list:
+    """把各种写法的作者字段统一成 list[str]。
+
+    fabric: ["a", {"name": "b"}]；forge: "a, b"；quilt: {"a": "role"}。
+    """
+    out = []
+    if isinstance(val, str):
+        out = [s.strip() for s in val.replace(" and ", ",").split(",")]
+    elif isinstance(val, dict):
+        out = [str(k) for k in val.keys()]
+    elif isinstance(val, (list, tuple)):
+        for item in val:
+            if isinstance(item, dict):
+                name = item.get("name")
+                if name:
+                    out.append(str(name))
+            elif item:
+                out.append(str(item))
+    return [s for s in (str(x).strip() for x in out) if s][:10]
+
+
+def _icon_entry(val) -> str:
+    """icon 字段：字符串直接用；fabric 允许 {尺寸: 路径}，取最大尺寸。"""
+    if isinstance(val, str):
+        return val.strip()
+    if isinstance(val, dict) and val:
+        try:
+            key = max(val.keys(), key=lambda k: int(k))
+        except (TypeError, ValueError):
+            key = next(iter(val.keys()))
+        return str(val.get(key) or "").strip()
+    return ""
+
+
 def _kv_line(line: str):
     if "=" not in line:
         return None, None
@@ -52,6 +86,7 @@ def _parse_mods_toml_fallback(text: str) -> dict:
     mode = None
     cur = None
     loader = ""
+    logo = ""
     for raw in text.splitlines():
         s = raw.strip()
         if not s or s.startswith("#"):
@@ -75,13 +110,15 @@ def _parse_mods_toml_fallback(text: str) -> dict:
             continue
         if k == "modLoader" and mode != "dep":
             loader = str(v)
+        if k == "logoFile" and mode is None:
+            logo = str(v)
         if mode == "mod" and cur is not None:
             cur[k] = v
         elif mode == "dep" and deps:
             deps[-1][k] = v
     if cur and mode == "mod":
         mods.append(cur)
-    return {"modLoader": loader, "mods": mods, "deps": deps}
+    return {"modLoader": loader, "mods": mods, "deps": deps, "logoFile": logo}
 
 
 def _from_forge_toml(text: str, flavor: str) -> dict:
@@ -89,8 +126,10 @@ def _from_forge_toml(text: str, flavor: str) -> dict:
     mods = []
     deps = []
     loader = flavor
+    top_logo = ""
     if data:
         loader = data.get("modLoader") or flavor
+        top_logo = str(data.get("logoFile") or "")
         for m in data.get("mods") or []:
             if isinstance(m, dict):
                 mods.append(m)
@@ -109,6 +148,7 @@ def _from_forge_toml(text: str, flavor: str) -> dict:
         loader = fb.get("modLoader") or flavor
         mods = fb.get("mods") or []
         deps = fb.get("deps") or []
+        top_logo = str(fb.get("logoFile") or "")
     primary = mods[0] if mods else {}
     depends = []
     breaks = []
@@ -128,6 +168,7 @@ def _from_forge_toml(text: str, flavor: str) -> dict:
             continue
         if rec["mandatory"]:
             depends.append(rec)
+    logo = primary.get("logoFile") or top_logo or ""
     return {
         "id": str(primary.get("modId") or ""),
         "name": str(primary.get("displayName") or primary.get("modId") or ""),
@@ -137,6 +178,9 @@ def _from_forge_toml(text: str, flavor: str) -> dict:
         "breaks": breaks,
         "conflicts": [],
         "provides": [],
+        "description": str(primary.get("description") or "").strip(),
+        "authors": _authors_list(primary.get("authors")),
+        "icon": str(logo).strip(),
     }
 
 
@@ -164,6 +208,9 @@ def _from_fabric(data: dict, loader: str) -> dict:
         "breaks": _as_map(data.get("breaks") or {}),
         "conflicts": _as_map(data.get("conflicts") or {}),
         "provides": list(data.get("provides") or []),
+        "description": str(data.get("description") or "").strip(),
+        "authors": _authors_list(data.get("authors")),
+        "icon": _icon_entry(data.get("icon")),
     }
 
 
@@ -178,15 +225,19 @@ def _from_quilt(data: dict) -> dict:
     for item in ql.get("breaks") or []:
         if isinstance(item, dict):
             breaks.append({"id": str(item.get("id") or ""), "version": str(item.get("versions") or "*")})
+    meta = ql.get("metadata") if isinstance(ql.get("metadata"), dict) else {}
     return {
         "id": str(ql.get("id") or data.get("id") or ""),
-        "name": str((ql.get("metadata") or {}).get("name") or ql.get("id") or ""),
+        "name": str(meta.get("name") or ql.get("id") or ""),
         "version": str(ql.get("version") or ""),
         "loader": "quilt",
         "depends": depends,
         "breaks": breaks,
         "conflicts": conflicts,
         "provides": list(ql.get("provides") or []),
+        "description": str(meta.get("description") or "").strip(),
+        "authors": _authors_list(meta.get("contributors")),
+        "icon": _icon_entry(meta.get("icon")),
     }
 
 
@@ -201,6 +252,9 @@ def inspect_jar(path: Path) -> dict:
         "breaks": [],
         "conflicts": [],
         "provides": [],
+        "description": "",
+        "authors": [],
+        "icon": "",
         "enabled": not path.name.lower().endswith(".disabled"),
     }
     try:
@@ -225,6 +279,9 @@ def inspect_jar(path: Path) -> dict:
                     "version": str(row.get("version") or ""),
                     "loader": "forge",
                     "depends": [{"id": str(x), "version": "*"} for x in (row.get("requiredMods") or [])],
+                    "description": str(row.get("description") or "").strip(),
+                    "authors": _authors_list(row.get("authorList") or row.get("authors")),
+                    "icon": str(row.get("logoFile") or "").strip(),
                 })
     except Exception as exc:
         info["error"] = str(exc)

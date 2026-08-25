@@ -315,7 +315,8 @@ public sealed partial class CatalogPage : UserControl
         {
             if (_kind.Title == "Mod")
             {
-                var rows = await AppServices.Client.CallAsync<List<ModEntry>>("get_installed_mod_entries", new { instance = inst }) ?? new();
+                // get_mod_details = 文件列表 + jar 内元数据（模组名/版本/描述），带缓存
+                var rows = await AppServices.Client.CallAsync<List<ModEntry>>("get_mod_details", new { instance = inst }) ?? new();
                 if (rows.Count == 0)
                 {
                     ResultList.Children.Add(new TextBlock { Text = "还没有安装模组", Margin = new Thickness(12), Opacity = 0.7 });
@@ -327,7 +328,16 @@ public sealed partial class CatalogPage : UserControl
                     g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
                     g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                     g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                    g.Children.Add(new TextBlock { Text = row.Filename, VerticalAlignment = VerticalAlignment.Center });
+                    var display = string.IsNullOrWhiteSpace(row.Name) ? row.Filename : row.Name;
+                    var meta = string.Join("  ·  ", new[] { row.Version, row.Filename == display ? "" : row.Filename }
+                        .Where(s => !string.IsNullOrWhiteSpace(s)));
+                    var textCol = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+                    textCol.Children.Add(new TextBlock { Text = display });
+                    if (!string.IsNullOrWhiteSpace(meta))
+                        textCol.Children.Add(new TextBlock { Text = meta, Opacity = 0.6, FontSize = 11 });
+                    if (!string.IsNullOrWhiteSpace(row.Description))
+                        ToolTipService.SetToolTip(textCol, row.Description);
+                    g.Children.Add(textCol);
                     var sw = new ToggleSwitch { IsOn = row.Enabled, OnContent = "开", OffContent = "关" };
                     var name = row.Filename;
                     sw.Toggled += async (_, _) =>

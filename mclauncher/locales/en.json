@@ -525,6 +525,7 @@
   "披风": "Cape",
   "指向上报口，不要填看板端口": "Point to the report API, not the dashboard port",
   "按文件名筛选…": "Filter by filename…",
+  "按名称或文件名筛选…": "Filter by name or filename…",
   "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant",
   "排队中…": "Queued…",
   "接入方式": "Connection mode",
