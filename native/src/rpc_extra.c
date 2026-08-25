@@ -363,6 +363,59 @@ static void format_playtime(long long sec, char *out, size_t n) {
     else snprintf(out, n, "%lld 秒", s);
 }
 
+void pymcl_format_playtime(long long sec, char *out, size_t n) {
+    format_playtime(sec, out, n);
+}
+
+/* 记录一次游玩会话（对齐 mclauncher/playtime.record_session 的结构：
+ * instances.<名>.{total, versions.<id>, sessions[{start,duration,version}]}，
+ * sessions 只留最近 500 条）。C 桥以前只读 playtime.json 从不写，
+ * WinUI / EziApp 的「游玩统计」页对 C 桥启动的游戏永远是 0。 */
+void pymcl_playtime_record(const char *inst_name, const char *ver, long long dur) {
+    if (dur <= 0) return;
+    char path[PYMCL_PATH];
+    playtime_path(path, sizeof(path));
+    cJSON *data = pymcl_read_json(path);
+    if (!cJSON_IsObject(data)) { cJSON_Delete(data); data = cJSON_CreateObject(); }
+    cJSON *insts = cJSON_GetObjectItem(data, "instances");
+    if (!cJSON_IsObject(insts)) {
+        cJSON_DeleteItemFromObject(data, "instances");
+        insts = cJSON_AddObjectToObject(data, "instances");
+    }
+    cJSON *i = cJSON_GetObjectItem(insts, inst_name);
+    if (!cJSON_IsObject(i)) {
+        cJSON_DeleteItemFromObject(insts, inst_name);
+        i = cJSON_AddObjectToObject(insts, inst_name);
+    }
+    double total = cJSON_GetNumberValue(cJSON_GetObjectItem(i, "total"));
+    if (total != total || total < 0) total = 0;   /* NaN/负数兜底 */
+    cJSON_DeleteItemFromObject(i, "total");
+    cJSON_AddNumberToObject(i, "total", total + (double)dur);
+    cJSON *vers = cJSON_GetObjectItem(i, "versions");
+    if (!cJSON_IsObject(vers)) {
+        cJSON_DeleteItemFromObject(i, "versions");
+        vers = cJSON_AddObjectToObject(i, "versions");
+    }
+    double vsec = cJSON_GetNumberValue(cJSON_GetObjectItem(vers, ver));
+    if (vsec != vsec || vsec < 0) vsec = 0;
+    cJSON_DeleteItemFromObject(vers, ver);
+    cJSON_AddNumberToObject(vers, ver, vsec + (double)dur);
+    cJSON *sess = cJSON_GetObjectItem(i, "sessions");
+    if (!cJSON_IsArray(sess)) {
+        cJSON_DeleteItemFromObject(i, "sessions");
+        sess = cJSON_AddArrayToObject(i, "sessions");
+    }
+    cJSON *rec = cJSON_CreateObject();
+    cJSON_AddNumberToObject(rec, "start", (double)(time(NULL) - dur));
+    cJSON_AddNumberToObject(rec, "duration", (double)dur);
+    cJSON_AddStringToObject(rec, "version", ver);
+    cJSON_AddItemToArray(sess, rec);
+    while (cJSON_GetArraySize(sess) > 500)
+        cJSON_DeleteItemFromArray(sess, 0);
+    pymcl_write_json(path, data);
+    cJSON_Delete(data);
+}
+
 /* URL 路径段编码（UTF-8 字节逐个百分号编码，字母数字与 -_. 除外） */
 static void path_enc(const char *s, char *out, size_t n) {
     size_t o = 0;

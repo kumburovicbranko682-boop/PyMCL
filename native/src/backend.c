@@ -439,6 +439,17 @@ static void *task_run(void *p) {
                         pthread_mutex_unlock(&g_mu);
                         long scode = (long)code;
                         if (code > 0x7FFFFFFFu) scode = (long)(code - 0x100000000ull);
+                        /* 游玩时长入账（取消也算，Python 的 tracker 在 finally 里）。 */
+                        {
+                            long long dur = (long long)((double)time(NULL) - started);
+                            pymcl_playtime_record(inst, ver, dur);
+                            if (dur > 0) {
+                                char fbuf[64], lbuf[128];
+                                pymcl_format_playtime(dur, fbuf, sizeof(fbuf));
+                                snprintf(lbuf, sizeof(lbuf), "本次游玩 %s", fbuf);
+                                ctx_log(t, lbuf);
+                            }
+                        }
                         /* 与 Python 桥一致：取消也算退出，launcher 必须恢复可见。 */
                         {
                             cJSON *ge = cJSON_CreateObject();
