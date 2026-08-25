@@ -1133,5 +1133,6 @@
   "仅从列表移除，磁盘文件未动": "Removed from the list only; files on disk untouched",
   "选择要添加的游戏目录": "Choose a game directory to add",
   "（不存在）": " (missing)",
-  "默认目录": "Default directory"
+  "默认目录": "Default directory",
+  "打开 MC 百科页面": "Open mcmod.cn wiki page"
 }

@@ -145,11 +145,22 @@ class PclResultRow(QFrame):
         btn.setStyleSheet(ghost_btn_qss())
         btn.clicked.connect(lambda: on_install(item, btn))
         layout.addWidget(btn)
+        if item.get("mcmod_url"):
+            wiki = TransparentToolButton(FIF.GLOBE)
+            wiki.setToolTip(tr("打开 MC 百科页面"))
+            wiki.clicked.connect(lambda: self._open_url(item["mcmod_url"]))
+            layout.addWidget(wiki)
         if on_fav:
             star = TransparentToolButton(_HEART)
             star.setToolTip(tr("收藏"))
             star.clicked.connect(lambda: on_fav(item))
             layout.addWidget(star)
+
+    @staticmethod
+    def _open_url(url: str):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(url))
 
 
 MOD_SPEC = {
@@ -612,6 +623,9 @@ class PclCatalogPage(QWidget):
             col = QVBoxLayout()
             col.setSpacing(2)
             display = row.get("name") or (name[:-4] if name.lower().endswith(".zip") else name)
+            cn = str(row.get("cn_name") or "").strip()
+            if cn and cn not in display:
+                display = f"{cn} · {display}"
             top_lab = QLabel(display)
             top_lab.setStyleSheet(
                 f"color: {Theme.title}; font-size: 13px; font-weight: 600; background: transparent;")
@@ -640,6 +654,11 @@ class PclCatalogPage(QWidget):
             lab = QLabel(name)
             lab.setStyleSheet("font-size: 13px; background: transparent;")
             lay.addWidget(lab, 1)
+        if row.get("mcmod_url"):
+            wiki = TransparentToolButton(FIF.GLOBE)
+            wiki.setToolTip(tr("打开 MC 百科页面"))
+            wiki.clicked.connect(lambda _, u=row["mcmod_url"]: self._open_wiki(u))
+            lay.addWidget(wiki)
         if "enabled" in row:
             sw = SwitchButton()
             sw.setChecked(bool(row.get("enabled")))
@@ -649,6 +668,11 @@ class PclCatalogPage(QWidget):
         btn.clicked.connect(lambda _, n=name: self._delete_installed(n))
         lay.addWidget(btn)
         return host
+
+    def _open_wiki(self, url: str):
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(url))
 
     def _toggle(self, filename, enabled):
         inst = self._current_instance()

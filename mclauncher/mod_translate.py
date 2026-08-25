@@ -40,6 +40,7 @@ _lock = threading.Lock()
 _records: dict[str, list[dict]] = {}
 _slug_index: dict[str, dict] = {}
 _modid_index: dict[str, dict] = {}
+_subname_index: dict[str, dict] = {}
 _warmed = False
 # 拉取失败后的退避（秒）：断网时不至于每次搜索都卡在重试上
 _FAIL_BACKOFF = 600
@@ -137,6 +138,7 @@ def load(kind: str = "mod", dm=None, allow_network: bool = True,
         _slug_index.pop(kind, None)
         if kind == "mod":
             _modid_index.clear()
+            _subname_index.clear()
         return recs
 
 
@@ -178,6 +180,16 @@ def _modids() -> dict:
             for mid in rec.get("mod_ids") or []:
                 _modid_index.setdefault(mid.lower(), rec)
     return _modid_index
+
+
+def _subnames() -> dict:
+    """去标点小写的英文名 → 记录（本地模组按解析出的名字配对用）。"""
+    if not _subname_index:
+        for rec in _records.get("mod") or []:
+            key = _squash((rec.get("subname") or "").lower())
+            if key:
+                _subname_index.setdefault(key, rec)
+    return _subname_index
 
 
 def display_label(rec: dict) -> str:
@@ -269,6 +281,41 @@ def best_cn_match(query, kind: str = "mod", dm=None) -> dict | None:
         return None
     hits = search_cn(query, kind=kind, limit=1, dm=dm)
     return hits[0] if hits else None
+
+
+def for_local(modid, name) -> dict | None:
+    """本地已装模组配对：先按英文名（更准），再按 modId（HMCL 同款双匹配）。"""
+    key = _squash(str(name or "").lower())
+    if key:
+        rec = _subnames().get(key)
+        if rec:
+            return rec
+    return for_modid(modid)
+
+
+def annotate_local(rows):
+    """给本地模组列表行补 cn_name / cn_label / mcmod_url（就地，返回原列表）。
+
+    行需要有 name（解析出的模组名），最好有 modid。只用已加载数据，不碰网络。
+    """
+    warm_async()
+    if not rows or not _records.get("mod"):
+        return rows
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = row.get("name") or ""
+        if has_cjk(name):
+            continue
+        rec = for_local(row.get("modid") or row.get("id"), name)
+        if not rec:
+            continue
+        row["cn_name"] = rec.get("name") or ""
+        row["cn_label"] = display_label(rec)
+        url = wiki_url(rec, "mod")
+        if url:
+            row["mcmod_url"] = url
+    return rows
 
 
 def annotate(rows, kind: str = "mod"):

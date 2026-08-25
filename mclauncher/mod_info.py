@@ -148,8 +148,10 @@ def describe_mods_at(mods_dir, cache_dir=None) -> list[dict]:
         # 解析器兜底会把 name 设成 path.stem；对禁用文件那是 "foo.jar"，不好看
         if not name or name == path.stem:
             name = stem
+        modid = str(meta.get("id") or "").strip()
         row.update({
             "name": name,
+            "modid": "" if modid == path.stem else modid,
             "version": str(meta.get("version") or ""),
             "loader": str(meta.get("loader") or "unknown"),
             "description": str(meta.get("description") or ""),
@@ -164,7 +166,9 @@ def describe_mods_at(mods_dir, cache_dir=None) -> list[dict]:
         dirty = True
     if dirty:
         _save_cache(root, cache)
-    return rows
+    # mcmod.cn 中文名 + 百科链接（HMCL 同款；数据未加载时是无操作）
+    from . import mod_translate
+    return mod_translate.annotate_local(rows)
 
 
 def export_mod_list(mods_dir, dest, fmt: str = "markdown", title: str = "") -> str:

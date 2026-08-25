@@ -292,6 +292,54 @@ class ModrinthIntegrationTests(_Isolated):
         self.assertEqual(rows[0].get("cn_name"), "钠")
 
 
+class LocalMatchTests(_Isolated):
+    def test_by_subname_preferred(self):
+        self._load_sample()
+        rec = mt.for_local("someid", "Industrial Craft 2")
+        self.assertEqual(rec["name"], "工业时代2")
+
+    def test_by_modid_fallback(self):
+        self._load_sample()
+        rec = mt.for_local("ic2", "Renamed Fork Of IC")
+        self.assertEqual(rec["name"], "工业时代2")
+
+    def test_no_match(self):
+        self._load_sample()
+        self.assertIsNone(mt.for_local("nope", "Unknown Mod"))
+
+    def test_annotate_local(self):
+        self._load_sample()
+        rows = [
+            {"filename": "jei.jar", "name": "Just Enough Items", "modid": "jei"},
+            {"filename": "x.jar", "name": "我的中文模组", "modid": "x"},
+            {"filename": "y.jar", "name": "Unknown", "modid": "y"},
+        ]
+        mt.annotate_local(rows)
+        self.assertEqual(rows[0]["cn_name"], "JEI物品管理器")
+        self.assertEqual(rows[0]["mcmod_url"], "https://www.mcmod.cn/class/25.html")
+        self.assertNotIn("cn_name", rows[1])
+        self.assertNotIn("cn_name", rows[2])
+
+    def test_describe_mods_at_integration(self):
+        """真实 jar：fabric.mod.json 的 id/name 解析后应带中文名。"""
+        import json
+        import zipfile
+        self._load_sample()
+        mods_dir = self.root / "mods"
+        mods_dir.mkdir()
+        with zipfile.ZipFile(mods_dir / "sodium-0.5.jar", "w") as zf:
+            zf.writestr("fabric.mod.json", json.dumps({
+                "id": "sodium", "name": "Sodium", "version": "0.5.8",
+                "description": "A rendering optimization mod.",
+            }))
+        from mclauncher import mod_info
+        rows = mod_info.describe_mods_at(mods_dir, cache_dir=self.root / "modcache")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["modid"], "sodium")
+        self.assertEqual(rows[0]["cn_name"], "钠")
+        self.assertIn("mcmod.cn", rows[0]["mcmod_url"])
+
+
 class FacadeFieldTests(unittest.TestCase):
     def test_row_builders_pass_cn_fields(self):
         import inspect
