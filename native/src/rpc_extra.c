@@ -22,7 +22,13 @@ static int find_python(char *out, size_t n) {
 }
 
 cJSON *py_rpc_call(const char *method, cJSON *params) {
+    return py_rpc_call_t(method, params, 120);
+}
+
+cJSON *py_rpc_call_t(const char *method, cJSON *params, int timeout_sec) {
     char py[PYMCL_PATH], script[PYMCL_PATH], pin[PYMCL_PATH], pout[PYMCL_PATH], tmpdir[PYMCL_PATH];
+    static volatile LONG g_rpc_seq;
+    LONG seq = InterlockedIncrement(&g_rpc_seq);
     find_python(py, sizeof(py));
     pymcl_path_join3(script, sizeof(script), g_root, "native\\tools", "py_rpc.py");
     if (!pymcl_file_exists(script)) {
@@ -33,8 +39,11 @@ cJSON *py_rpc_call(const char *method, cJSON *params) {
         return NULL;
     }
     GetTempPathA(sizeof(tmpdir), tmpdir);
-    snprintf(pin, sizeof(pin), "%spymcl-rpc-in-%u.json", tmpdir, (unsigned)GetCurrentProcessId());
-    snprintf(pout, sizeof(pout), "%spymcl-rpc-out-%u.json", tmpdir, (unsigned)GetCurrentProcessId() ^ 0xA5A5u);
+    /* 带序号：任务线程里的长调用和并发的短调用会同时在飞，纯 PID 命名会互相覆盖 */
+    snprintf(pin, sizeof(pin), "%spymcl-rpc-in-%u-%ld.json", tmpdir,
+             (unsigned)GetCurrentProcessId(), (long)seq);
+    snprintf(pout, sizeof(pout), "%spymcl-rpc-out-%u-%ld.json", tmpdir,
+             (unsigned)GetCurrentProcessId(), (long)seq);
 
     cJSON *body = params ? cJSON_Duplicate(params, 1) : cJSON_CreateObject();
     if (!cJSON_IsObject(body)) {
@@ -62,7 +71,8 @@ cJSON *py_rpc_call(const char *method, cJSON *params) {
     argv[argc++] = pin;
     argv[argc++] = "--out";
     argv[argc++] = pout;
-    int rc = pymcl_run_process(argv, argc, g_root, NULL, NULL, 120);
+    int rc = pymcl_run_process(argv, argc, g_root, NULL, NULL,
+                               timeout_sec > 0 ? timeout_sec : 120);
     DeleteFileA(pin);
     cJSON *wrap = pymcl_read_json(pout);
     DeleteFileA(pout);
@@ -516,15 +526,15 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         || strcmp(method, "ai_stop") == 0 || strcmp(method, "ai_confirm") == 0
         || strcmp(method, "ai_answer") == 0 || strcmp(method, "terracotta_snapshot") == 0
         || strcmp(method, "terracotta_host") == 0 || strcmp(method, "terracotta_join") == 0
-        || strcmp(method, "terracotta_idle") == 0 || strcmp(method, "terracotta_prepare") == 0
+        || strcmp(method, "terracotta_idle") == 0
         || strcmp(method, "terracotta_allow_firewall") == 0
         || strcmp(method, "terracotta_open_firewall_settings") == 0
         || strcmp(method, "terracotta_shutdown") == 0 || strcmp(method, "lan_hint") == 0
         || strcmp(method, "list_loader_versions") == 0 || strcmp(method, "list_catalog_files") == 0
-        || strcmp(method, "search_worlds") == 0 || strcmp(method, "install_world") == 0
-        || strcmp(method, "repair_version") == 0 || strcmp(method, "export_modpack") == 0
-        || strcmp(method, "start_authlib_login") == 0 || strcmp(method, "start_nide8_login") == 0
-        || strcmp(method, "start_self_update") == 0 || strcmp(method, "start_mod_updates") == 0) {
+        || strcmp(method, "search_worlds") == 0) {
+        /* 任务型方法（install_world / repair_version / export_modpack / start_* /
+         * terracotta_prepare）不再走这里的一次性调用：backend.c 已把它们包进
+         * 原生任务机制，UI 能拿到 task_added/finished 事件。 */
         cJSON *r = py_rpc_call(method, params);
         if (r) return r;
         /* graceful empty fallbacks so UI stays usable without Python */
