@@ -128,6 +128,17 @@ static void version_settings_path(const char *inst, const char *ver, char *out, 
     pymcl_path_join3(out, n, vd, ver, "pymcl.json");
 }
 
+/* 版本是否被用户隐藏（versions/<id>/pymcl.json 的 hidden 键）。
+ * get_installed_versions 的过滤要用，与 bridge/api.py 同名方法对齐。 */
+int pymcl_version_hidden(const char *inst, const char *ver) {
+    char path[PYMCL_PATH];
+    version_settings_path(inst, ver, path, sizeof(path));
+    cJSON *j = pymcl_read_json(path);
+    int hidden = cJSON_IsTrue(cJSON_GetObjectItem(j, "hidden"));
+    cJSON_Delete(j);
+    return hidden;
+}
+
 static cJSON *vs_defaults(void) {
     return cJSON_Parse(
         "{\"isolation\":\"none\",\"memory_mb\":null,\"java\":\"自动选择\","

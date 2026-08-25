@@ -700,7 +700,19 @@ cJSON *backend_call(const char *method, cJSON *params) {
         if (inst[0]) {
             cJSON *ids = NULL;
             instance_installed_ids(inst, &ids);
-            return ids;
+            /* 与 bridge/api.py 对齐：默认过滤 hidden 版本。以前 Qt 里隐藏的
+             * 版本在 C 桥前端（WinUI/EziApp 启动页）照样全部列出来。 */
+            if (cJSON_IsTrue(cJSON_GetObjectItem(params, "include_hidden"))
+                || config_bool("show_hidden_versions", 0))
+                return ids;
+            cJSON *vis = cJSON_CreateArray();
+            cJSON *v;
+            cJSON_ArrayForEach(v, ids) {
+                if (v->valuestring && !pymcl_version_hidden(inst, v->valuestring))
+                    cJSON_AddItemToArray(vis, cJSON_CreateString(v->valuestring));
+            }
+            cJSON_Delete(ids);
+            return vis;
         }
         cJSON *names = NULL, *out = cJSON_CreateArray();
         instance_list(&names);

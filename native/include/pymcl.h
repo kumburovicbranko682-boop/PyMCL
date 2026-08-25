@@ -259,6 +259,7 @@ int install_content(const char *kind, const char *instance, const char *name, cJ
 int install_modpack(const char *name, const char *source, cJSON *extra, pymcl_ctx *ctx);
 cJSON *list_instance_files(const char *instance, const char *subdir);
 int delete_instance_file(const char *instance, const char *subdir, const char *filename);
+int pymcl_version_hidden(const char *instance, const char *version_id);
 
 /* ---------- backend / server ---------- */
 typedef void (*sse_emit_fn)(const char *event, cJSON *data);
