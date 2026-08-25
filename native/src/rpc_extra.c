@@ -211,6 +211,7 @@ static void *ai_pump(void *p) {
     char buf[8192];
     size_t ll = 0;
     DWORD n;
+    int terminal_seen = 0;
     while (line && ReadFile(rd, buf, sizeof(buf), &n, NULL) && n > 0) {
         for (DWORD i = 0; i < n; i++) {
             char c = buf[i];
@@ -227,6 +228,8 @@ static void *ai_pump(void *p) {
                             g_ai_emit(ev, payload);
                             if (!data) cJSON_Delete(payload);
                         }
+                        if (ev && (strcmp(ev, "ai.done") == 0 || strcmp(ev, "ai.fail") == 0))
+                            terminal_seen = 1;
                         cJSON_Delete(o);
                     }
                 }
@@ -238,6 +241,15 @@ static void *ai_pump(void *p) {
     }
     free(line);
     CloseHandle(rd);
+    /* 子进程没发 ai.done/ai.fail 就死了（Python 崩溃、被杀）：以前这里
+     * 静默收尾，UI 的对话框永远停在「处理中」。补一个终止事件。 */
+    if (!terminal_seen && g_ai_emit) {
+        cJSON *payload = cJSON_CreateObject();
+        cJSON_AddStringToObject(payload, "text", "AI 子进程意外退出");
+        cJSON_AddBoolToObject(payload, "stopped", 0);
+        g_ai_emit("ai.fail", payload);
+        cJSON_Delete(payload);
+    }
     pthread_mutex_lock(&g_ai_mu);
     if (g_ai_stdin) { CloseHandle(g_ai_stdin); g_ai_stdin = NULL; }
     if (g_ai_proc) {

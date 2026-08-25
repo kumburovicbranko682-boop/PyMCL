@@ -46,7 +46,10 @@ def main() -> int:
     try:
         params = json.loads(params_path.read_text(encoding="utf-8") or "{}")
     except Exception as exc:  # noqa: BLE001
-        _emit_line("ai.fail", {"message": f"参数解析失败: {exc}"})
+        # 事件形状对齐 bridge/api.py 的 ai.fail：{"text", "stopped"}。
+        # UI（EziApp/WinUI）只读 text 字段，以前发 message 会显示成
+        # 兜底的「AI 请求失败/出错了」，真实原因被吞掉。
+        _emit_line("ai.fail", {"text": f"参数解析失败: {exc}", "stopped": False})
         return 1
     try:
         params_path.unlink()
@@ -58,7 +61,7 @@ def main() -> int:
     try:
         from bridge.api import BackendAPI, EventBus
     except Exception as exc:  # noqa: BLE001
-        _emit_line("ai.fail", {"message": f"无法加载 Python 后端: {exc}"})
+        _emit_line("ai.fail", {"text": f"无法加载 Python 后端: {exc}", "stopped": False})
         return 1
 
     bus = EventBus()
@@ -87,14 +90,14 @@ def main() -> int:
                     params.get("launch") or None)
     if not (isinstance(r, dict) and r.get("ok")):
         msg = (r or {}).get("message") if isinstance(r, dict) else None
-        _emit_line("ai.fail", {"message": msg or "AI 无法启动"})
+        _emit_line("ai.fail", {"text": msg or "AI 无法启动", "stopped": False})
         return 1
 
     while True:
         try:
             item = q.get(timeout=3600)
         except queue.Empty:
-            _emit_line("ai.fail", {"message": "AI 超时无响应"})
+            _emit_line("ai.fail", {"text": "AI 超时无响应", "stopped": False})
             return 1
         ev = str(item.get("event") or "")
         # ui_changed 也要透传：AI 工具建实例/装模组后靠它让前端刷新列表，
