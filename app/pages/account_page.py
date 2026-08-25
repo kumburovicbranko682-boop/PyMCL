@@ -163,6 +163,164 @@ class SkinManagerDialog(MessageBoxBase):
         self._on_profile(profile)
 
 
+class OfflineSkinDialog(MessageBoxBase):
+    """离线账户皮肤：选择本地 PNG / 抓取正版玩家皮肤，启动时经本地皮肤服务注入。"""
+
+    def __init__(self, backend, account_name: str, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.account = account_name
+        self._busy = False
+
+        self.viewLayout.addWidget(SubtitleLabel(tr("离线皮肤"), self))
+        self.status = BodyLabel(tr("正在读取皮肤配置…"), self)
+        self.status.setWordWrap(True)
+        self.viewLayout.addWidget(self.status)
+
+        row = QHBoxLayout()
+        row.addWidget(BodyLabel(tr("模型"), self))
+        self.model_box = ComboBox(self)
+        self.model_box.addItems([tr("经典（粗臂）"), tr("纤细（细臂）")])
+        self.model_box.setFixedWidth(150)
+        self.model_box.activated.connect(self._apply_model)
+        row.addWidget(self.model_box)
+        self.skin_btn = PushButton(FIF.PHOTO, tr("选择皮肤 PNG…"), self)
+        self.skin_btn.clicked.connect(self._pick_skin)
+        row.addWidget(self.skin_btn)
+        self.cape_btn = PushButton(tr("选择披风 PNG…"), self)
+        self.cape_btn.clicked.connect(self._pick_cape)
+        row.addWidget(self.cape_btn)
+        row.addStretch(1)
+        host = QWidget(self)
+        host.setLayout(row)
+        self.viewLayout.addWidget(host)
+
+        fetch_row = QHBoxLayout()
+        self.player_edit = LineEdit(self)
+        self.player_edit.setPlaceholderText(tr("正版玩家名，例如 Notch"))
+        self.player_edit.setFixedWidth(220)
+        fetch_row.addWidget(self.player_edit)
+        self.fetch_btn = PushButton(FIF.DOWNLOAD, tr("抓取该玩家皮肤"), self)
+        self.fetch_btn.clicked.connect(self._fetch_premium)
+        fetch_row.addWidget(self.fetch_btn)
+        self.clear_btn = PushButton(tr("清除皮肤"), self)
+        self.clear_btn.clicked.connect(self._clear)
+        fetch_row.addWidget(self.clear_btn)
+        fetch_row.addStretch(1)
+        fetch_host = QWidget(self)
+        fetch_host.setLayout(fetch_row)
+        self.viewLayout.addWidget(fetch_host)
+
+        tip = CaptionLabel(
+            tr("启动时通过本地皮肤服务 + authlib-injector 注入，进入游戏即可看到。皮肤要求 64x64（旧版 64x32）PNG。"),
+            self)
+        tip.setWordWrap(True)
+        self.viewLayout.addWidget(tip)
+
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(520)
+        self._refresh()
+
+    # ---- 数据
+
+    def _refresh(self):
+        self.backend.call_async(
+            lambda: self.backend.get_offline_skin(self.account),
+            guard(self, self._on_config), guard(self, self._on_err))
+
+    def _on_config(self, cfg: dict):
+        cfg = cfg or {}
+        self.model_box.setCurrentIndex(1 if cfg.get("model") == "slim" else 0)
+        parts = []
+        if cfg.get("skin_file"):
+            from pathlib import Path as _P
+            parts.append(tr("皮肤：{name}").format(name=_P(cfg["skin_file"]).name))
+        else:
+            parts.append(tr("未设置皮肤（游戏内为默认 Steve/Alex）"))
+        if cfg.get("cape_file"):
+            parts.append(tr("已设置披风"))
+        self.status.setText("  ·  ".join(parts))
+        self._set_busy(False)
+
+    def _on_err(self, err):
+        self.status.setText(tr("操作失败：{err}").format(err=err))
+        self._set_busy(False)
+
+    def _set_busy(self, busy: bool):
+        self._busy = busy
+        for btn in (self.skin_btn, self.cape_btn, self.fetch_btn, self.clear_btn):
+            btn.setEnabled(not busy)
+
+    def _on_changed(self, cfg: dict):
+        InfoBar.success(tr("已更新"), tr("离线皮肤已保存，下次启动生效。"),
+                        parent=self, position=InfoBarPosition.TOP, duration=3000)
+        self._on_config(cfg)
+
+    # ---- 操作
+
+    def _model_value(self) -> str:
+        return "slim" if self.model_box.currentIndex() == 1 else "default"
+
+    def _apply_model(self, _idx: int = 0):
+        if self._busy:
+            return
+        self._set_busy(True)
+        model = self._model_value()
+        self.backend.call_async(
+            lambda: self.backend.set_offline_skin(self.account, model=model),
+            guard(self, self._on_config), guard(self, self._on_err))
+
+    def _pick_skin(self):
+        if self._busy:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选择皮肤 PNG"), "", "PNG (*.png)")
+        if not path:
+            return
+        self._set_busy(True)
+        self.status.setText(tr("正在保存皮肤…"))
+        model = self._model_value()
+        self.backend.call_async(
+            lambda: self.backend.set_offline_skin(self.account, skin_path=path, model=model),
+            guard(self, self._on_changed), guard(self, self._on_err))
+
+    def _pick_cape(self):
+        if self._busy:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选择披风 PNG"), "", "PNG (*.png)")
+        if not path:
+            return
+        self._set_busy(True)
+        self.status.setText(tr("正在保存披风…"))
+        self.backend.call_async(
+            lambda: self.backend.set_offline_skin(self.account, cape_path=path),
+            guard(self, self._on_changed), guard(self, self._on_err))
+
+    def _fetch_premium(self):
+        if self._busy:
+            return
+        player = (self.player_edit.text() or "").strip()
+        if not player:
+            InfoBar.warning(tr("请输入玩家名"), tr("填写要抓取皮肤的正版玩家名。"),
+                            parent=self, position=InfoBarPosition.TOP, duration=3000)
+            return
+        self._set_busy(True)
+        self.status.setText(tr("正在抓取皮肤…"))
+        self.backend.call_async(
+            lambda: self.backend.fetch_offline_skin_premium(self.account, player),
+            guard(self, self._on_changed), guard(self, self._on_err))
+
+    def _clear(self):
+        if self._busy:
+            return
+        self._set_busy(True)
+        self.backend.call_async(
+            lambda: self.backend.clear_offline_skin(self.account),
+            guard(self, self._on_changed), guard(self, self._on_err))
+
+
 class AccountPage(QWidget):
     def __init__(self, backend, parent=None):
         super().__init__(parent)
@@ -354,6 +512,9 @@ class AccountPage(QWidget):
         elif kind == "authlib":
             self.skin_btn.setText(tr("打开皮肤站"))
             self.skin_btn.show()
+        elif active and (kind or "offline") == "offline":
+            self.skin_btn.setText(tr("离线皮肤"))
+            self.skin_btn.show()
         else:
             self.skin_btn.hide()
 
@@ -417,6 +578,11 @@ class AccountPage(QWidget):
             else:
                 InfoBar.warning(tr("无法打开"), tr("该账号没有对应的皮肤站地址。"),
                                 parent=self, position=InfoBarPosition.TOP, duration=3000)
+            return
+        if (active.get("type") or "offline") == "offline":
+            dlg = OfflineSkinDialog(self.backend, active["name"], self.window())
+            dlg.exec()
+            self.reload()
 
     def _set_auth_busy(self, busy: bool):
         self._auth_busy = busy

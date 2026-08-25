@@ -1349,6 +1349,71 @@ class BackendAPI(QObject):
         from mclauncher import skin as skin_mod
         return skin_mod.skin_site_url(self.accounts.get_account(account_name))
 
+    # ---- 离线账户皮肤（本地皮肤服务 + authlib-injector，进游戏可见）
+
+    def _offline_account(self, account_name: str) -> dict:
+        from mclauncher.auth import AuthError
+        acc = self.accounts.get_account(account_name)
+        if not acc:
+            raise AuthError(f"账号不存在: {account_name}")
+        if (acc.get("type") or "offline") != "offline":
+            raise AuthError(tr("只有离线账号支持本地皮肤。"))
+        return acc
+
+    def get_offline_skin(self, account_name: str) -> dict:
+        """离线账户当前皮肤配置。"""
+        acc = self._offline_account(account_name)
+        return {
+            "model": acc.get("skin_model") or "default",
+            "skin_file": acc.get("skin_file") or "",
+            "cape_file": acc.get("cape_file") or "",
+            "has_skin": bool(acc.get("skin_file") or acc.get("cape_file")),
+        }
+
+    def set_offline_skin(self, account_name: str, skin_path: str = "",
+                         model: str = "", cape_path: str = "") -> dict:
+        """设置离线账户皮肤 / 披风 / 模型。传空的参数保持不变。"""
+        from mclauncher import offline_skin
+        acc = self._offline_account(account_name)
+        uid = (acc.get("uuid") or "").replace("-", "") or acc.get("name") or "player"
+        if skin_path:
+            acc["skin_file"] = offline_skin.store_skin_file(skin_path, uid, "skin")
+        if cape_path:
+            acc["cape_file"] = offline_skin.store_skin_file(cape_path, uid, "cape")
+        if model:
+            acc["skin_model"] = "slim" if str(model).lower() in ("slim", "alex") else "default"
+        self.accounts.save()
+        return self.get_offline_skin(account_name)
+
+    def clear_offline_skin(self, account_name: str) -> dict:
+        """清除离线账户皮肤配置并删除已复制的材质文件。"""
+        acc = self._offline_account(account_name)
+        for key in ("skin_file", "cape_file"):
+            path = acc.pop(key, "") or ""
+            if path:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        acc.pop("skin_model", None)
+        self.accounts.save()
+        return self.get_offline_skin(account_name)
+
+    def fetch_offline_skin_premium(self, account_name: str, player_name: str) -> dict:
+        """按正版玩家名抓取皮肤设置给离线账户。同步网络调用，UI 请走 call_async。"""
+        from mclauncher import offline_skin
+        acc = self._offline_account(account_name)
+        uid = (acc.get("uuid") or "").replace("-", "") or acc.get("name") or "player"
+        data = offline_skin.fetch_premium_skin(player_name, uid)
+        acc["skin_file"] = data["skin_file"]
+        acc["skin_model"] = data["skin_model"]
+        if data.get("cape_file"):
+            acc["cape_file"] = data["cape_file"]
+        else:
+            acc.pop("cape_file", None)
+        self.accounts.save()
+        return self.get_offline_skin(account_name)
+
     def ping_server(self, address: str, port: int = 0) -> dict:
         """查询服务器状态（Server List Ping）。同步网络调用，UI 请走 call_async。"""
         from mclauncher import server_ping
@@ -1962,6 +2027,12 @@ class BackendAPI(QObject):
         if account == tr("离线模式") or not account:
             acc = self.accounts.offline_account(
                 username or "Player", skin=CONFIG.get("offline_skin") or "default")
+            # 同名离线账号配过本地皮肤时，快速启动路径也带上
+            stored = self.accounts.get_account(acc.get("name"))
+            if stored and (stored.get("type") or "offline") == "offline":
+                for key in ("skin_file", "skin_model", "cape_file"):
+                    if stored.get(key):
+                        acc[key] = stored[key]
         else:
             acc = self.accounts.get_account(account)
             if not acc:
@@ -2038,6 +2109,13 @@ class BackendAPI(QObject):
             props = dict(props)
             props["authlib_api"] = auth_server
             log(f"认证服: {auth_server}")
+        if not props.get("authlib_api") and (acc.get("type") or "offline") == "offline":
+            from mclauncher import offline_skin
+            skin_api = offline_skin.prepare_injection(acc)
+            if skin_api:
+                props = dict(props)
+                props["authlib_api"] = skin_api
+                log(tr("离线皮肤：本地皮肤服务已就绪") + f" {skin_api}")
         if props.get("authlib_api"):
             from mclauncher import authlib as authlib_mod
             authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
