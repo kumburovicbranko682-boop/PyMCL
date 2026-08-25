@@ -296,6 +296,14 @@ static void *task_run(void *p) {
                     snprintf(g_launch_id, sizeof(g_launch_id), "%s", t->id);
                     pthread_mutex_unlock(&g_mu);
                     if (proc) {
+                        /* WinUI 主窗口靠 game_started/game_exited 做「启动后隐藏
+                         * 启动器/退出后恢复」；Python 桥一直在发，C 桥以前不发，
+                         * launcher_visibility 设置在 C 桥下整个是死的。 */
+                        {
+                            cJSON *o = cJSON_CreateObject();
+                            emit("game_started", o);
+                            cJSON_Delete(o);
+                        }
                         char buf[4096]; DWORD got;
                         char *tail[CRASH_TAIL];
                         int tn = 0, ts = 0;
@@ -327,10 +335,17 @@ static void *task_run(void *p) {
                         pthread_mutex_lock(&g_mu);
                         if (g_game == proc) g_game = NULL;
                         pthread_mutex_unlock(&g_mu);
+                        long scode = (long)code;
+                        if (code > 0x7FFFFFFFu) scode = (long)(code - 0x100000000ull);
+                        /* 对齐 bridge/api.py：finally 里必发，取消也发。 */
+                        {
+                            cJSON *o = cJSON_CreateObject();
+                            cJSON_AddNumberToObject(o, "code", (double)scode);
+                            emit("game_exited", o);
+                            cJSON_Delete(o);
+                        }
                         if (t->cancelled) { ok = 1; snprintf(msg, sizeof(msg), "已停止游戏"); }
                         else {
-                            long scode = (long)code;
-                            if (code > 0x7FFFFFFFu) scode = (long)(code - 0x100000000ull);
                             cJSON *rep = analyze_game_crash(inst, ver, scode, tail, tn, ts, started);
                             int crashed = 0;
                             const char *summary = NULL;
