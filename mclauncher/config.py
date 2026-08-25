@@ -73,6 +73,15 @@ DEFAULT_CONFIG = {
     # 结果就是「关掉飞入动画、重开启动器它又自己回来了」。
     "ui_fly_animation": True,
     "ui_fly_duration_ms": 620,
+    # 同一类坑：下面这些由「界面动画」开关和「布局设置」页写入，
+    # 不声明的话用户的固定/隐藏/排序/侧栏宽度重启就全丢。
+    # 默认值保持读取处的「未设置」语义（or [] / or 0 / pinned=None）。
+    "ui_motion": True,
+    "ui_nav_order": [],
+    "ui_nav_hidden": [],
+    "ui_nav_pinned": None,
+    "ui_section_members": None,
+    "ui_sidebar_width": 0,
     # 全局默认 Java：版本设置与实例偏好都是「自动」时才生效
     "default_java": "",
     "global_mods_dir": "",
