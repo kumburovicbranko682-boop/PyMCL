@@ -165,6 +165,18 @@ static int pint(cJSON *a, const char *k, int def) {
     return def;
 }
 
+/* 目录搜索是否带了「游戏版本 / 分类」筛选（"全部"/空串视作未筛选）。 */
+static int search_has_filters(cJSON *params) {
+    cJSON *x = cJSON_GetObjectItem(params, "extra");
+    if (!cJSON_IsObject(x)) return 0;
+    const char *gv = cJSON_GetStringValue(cJSON_GetObjectItem(x, "game_version"));
+    if (gv && gv[0]) return 1;
+    const char *cat = cJSON_GetStringValue(cJSON_GetObjectItem(x, "category"));
+    if (cat && cat[0] && strcmp(cat, "全部") != 0 && !pymcl_ieq(cat, "all"))
+        return 1;
+    return 0;
+}
+
 /* 目录页「安装所选」会在 extra 里钉住 version_id/file_id。原生安装器一律装
  * 最新版，钉了版本的请求必须落到 Python 实现，否则用户挑的旧版被静默换掉。 */
 static int extra_pins_version(cJSON *args) {
@@ -804,16 +816,26 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_Delete(root);
         return out;
     }
-    if (strcmp(method, "search_mods") == 0)
-        return search_mods(pstr(params, "query", ""), pstr(params, "source", ""));
-    if (strcmp(method, "search_modpacks") == 0)
-        return search_modpacks(pstr(params, "query", ""), pstr(params, "source", ""));
-    if (strcmp(method, "search_shaders") == 0)
-        return search_content("shader", pstr(params, "query", ""), pstr(params, "source", ""));
-    if (strcmp(method, "search_resourcepacks") == 0)
-        return search_content("resourcepack", pstr(params, "query", ""), pstr(params, "source", ""));
-    if (strcmp(method, "search_datapacks") == 0)
-        return search_content("datapack", pstr(params, "query", ""), pstr(params, "source", ""));
+    if (strcmp(method, "search_mods") == 0 || strcmp(method, "search_modpacks") == 0
+        || strcmp(method, "search_shaders") == 0 || strcmp(method, "search_resourcepacks") == 0
+        || strcmp(method, "search_datapacks") == 0) {
+        /* 目录页的「游戏版本 / 分类」筛选只有 Python 端实现；以前 C 桥把
+         * extra 直接丢掉，筛选条件静默失效。带筛选就转发 Python，转发不了
+         * 明确报错，绝不能装作筛过了。 */
+        if (search_has_filters(params)) {
+            cJSON *r = py_rpc_call(method, params);
+            if (r) return r;
+            pymcl_set_error("版本/分类筛选需要 Python 后端；清除筛选可用内置搜索");
+            return NULL;
+        }
+        if (strcmp(method, "search_mods") == 0)
+            return search_mods(pstr(params, "query", ""), pstr(params, "source", ""));
+        if (strcmp(method, "search_modpacks") == 0)
+            return search_modpacks(pstr(params, "query", ""), pstr(params, "source", ""));
+        const char *kind = strstr(method, "shader") ? "shader" :
+            strstr(method, "resource") ? "resourcepack" : "datapack";
+        return search_content(kind, pstr(params, "query", ""), pstr(params, "source", ""));
+    }
     if (strcmp(method, "get_installed_mods") == 0)
         return list_instance_files(pstr(params, "instance", "default"), "mods");
     if (strcmp(method, "get_installed_shaders") == 0)
