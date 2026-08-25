@@ -1556,6 +1556,36 @@ class BackendAPI(QObject):
             extra_game_args=["--server", ip, "--port", str(int(port or 25565))],
         )
 
+    def join_world(self, instance: str, world: str, version: str = "") -> str:
+        """一键启动并直接进入某个单人存档（HMCL 同款，1.20+ Quick Play）。
+
+        version 不传时取该实例最近启动过的版本（没有则第一个已装版本）；
+        账号用当前活动账号。返回启动任务 id。
+        """
+        world = (world or "").strip()
+        if not world:
+            raise LaunchError(tr("请先选择存档"))
+        inst = self._instance(instance)
+        installed = list(self.get_installed_versions(inst.name) or [])
+        if not installed:
+            raise LaunchError(tr("该实例还没有安装版本，请先到「版本」页安装"))
+        version = (version or "").strip()
+        if not version:
+            from mclauncher import playtime as playtime_mod
+            for sess in reversed(playtime_mod.get_playtime(inst.name).get("sessions") or []):
+                if sess.get("version") in installed:
+                    version = sess["version"]
+                    break
+        version = version or installed[0]
+        account = self.accounts.active or tr("离线模式")
+        return self.launch_game(
+            instance=inst.name, version=version, account=account,
+            username="", memory_mb=int(CONFIG.get("memory_mb") or 4096),
+            width=int(CONFIG.get("width") or 854),
+            height=int(CONFIG.get("height") or 480),
+            extra_game_args=["--quickPlaySingleplayer", world],
+        )
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)

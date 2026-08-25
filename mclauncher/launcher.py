@@ -64,6 +64,29 @@ def _extract_server(extras):
     return out, host, port
 
 
+def _extract_world(extras):
+    """从额外游戏参数里剥离 --quickPlaySingleplayer（快速进入存档）。
+
+    与 _extract_server 同一套路：调用方把存档文件夹名塞进 extras，
+    这里提取后由 build_launch_command 按版本能力生成参数——
+    1.20+ 走 Quick Play 特性注入；老版本没有等价参数，直接给可读报错，
+    而不是把游戏莫名其妙启动到主界面。
+    """
+    world = ""
+    out = []
+    i = 0
+    extras = list(extras or [])
+    while i < len(extras):
+        a = str(extras[i])
+        if a == "--quickPlaySingleplayer" and i + 1 < len(extras):
+            world = str(extras[i + 1]).strip()
+            i += 2
+            continue
+        out.append(a)
+        i += 1
+    return out, world
+
+
 def _server_game_args(game_args, extras, server, server_port):
     """没有 Quick Play 参数（老版本）时补旧式 --server/--port 直连参数。"""
     if not server:
@@ -358,6 +381,8 @@ def build_launch_command(instance, version_id, account_props, java_exe,
     server_port = int(server_port or 0) or ex_port
     if server:
         server_port = int(server_port or 25565)
+    # ---- 快速进入单人存档（HMCL 同款；1.20+ 才有对应参数）
+    extras_in, world = _extract_world(extras_in)
 
     # ---- 占位符
     props = account_props or {}
@@ -389,10 +414,13 @@ def build_launch_command(instance, version_id, account_props, java_exe,
     }
     if server:
         placeholders["quickPlayMultiplayer"] = f"{server}:{server_port}"
+    if world:
+        placeholders["quickPlaySingleplayer"] = world
     features = {
         "is_demo_user": False,
         "has_custom_resolution": bool(width or height),
         "is_quick_play_multiplayer": bool(server),
+        "is_quick_play_singleplayer": bool(world),
     }
 
     # ---- 参数
@@ -439,6 +467,10 @@ def build_launch_command(instance, version_id, account_props, java_exe,
         lp = assets_dir / "log_configs" / logcfg["file"]["id"]
         if lp.is_file() and not any("log4j.configurationFile" in a for a in jvm_args):
             jvm_args.append(f"-Dlog4j.configurationFile={lp}")
+
+    if world and "--quickPlaySingleplayer" not in game_args:
+        raise LaunchError(
+            f"版本 {version_id} 不支持直接进入存档（需要 1.20 及以上）。请正常启动后在游戏里选择该世界。")
 
     extras = extras_in
     game_args += _server_game_args(game_args, extras, server, server_port)

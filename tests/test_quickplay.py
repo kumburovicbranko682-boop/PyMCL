@@ -35,6 +35,18 @@ class ExtractServerTests(unittest.TestCase):
         self.assertEqual(launcher._extract_server([]), ([], "", 0))
 
 
+class ExtractWorldTests(unittest.TestCase):
+    def test_extracts_world(self):
+        out, world = launcher._extract_world(
+            ["--demo", "--quickPlaySingleplayer", "My World", "--x"])
+        self.assertEqual(out, ["--demo", "--x"])
+        self.assertEqual(world, "My World")
+
+    def test_no_world(self):
+        self.assertEqual(launcher._extract_world(["--demo"]), (["--demo"], ""))
+        self.assertEqual(launcher._extract_world([]), ([], ""))
+
+
 class ServerGameArgsTests(unittest.TestCase):
     def test_no_server_no_args(self):
         self.assertEqual(launcher._server_game_args(["--username", "x"], [], "", 0), [])
@@ -89,6 +101,11 @@ MODERN_JSON = {
                            "features": {"is_quick_play_multiplayer": True}}],
                 "value": ["--quickPlayMultiplayer", "${quickPlayMultiplayer}"],
             },
+            {
+                "rules": [{"action": "allow",
+                           "features": {"is_quick_play_singleplayer": True}}],
+                "value": ["--quickPlaySingleplayer", "${quickPlaySingleplayer}"],
+            },
         ],
     },
 }
@@ -109,24 +126,28 @@ LEGACY_JSON = {
 }
 
 
+def _build_cmd(vjson, **kwargs):
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        vid = vjson["id"]
+        vdir = root / "versions" / vid
+        vdir.mkdir(parents=True)
+        (vdir / f"{vid}.json").write_text(
+            json.dumps(vjson), encoding="utf-8")
+        (vdir / f"{vid}.jar").write_bytes(b"PK\x03\x04fakejar")
+        inst = _FakeInstance(root)
+        props = {"name": "Steve", "uuid": "a" * 32, "token": "0",
+                 "user_type": "legacy", "xuid": ""}
+        with patch.object(launcher.java_mod, "java_usable_for", return_value=True), \
+             patch.object(launcher.java_mod, "get_java_major", return_value=17):
+            cmd, _n, _v, _g = launcher.build_launch_command(
+                inst, vid, props, sys.executable, memory_mb=1024, **kwargs)
+        return cmd
+
+
 class BuildCommandServerTests(unittest.TestCase):
     def _build(self, vjson, **kwargs):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            vid = vjson["id"]
-            vdir = root / "versions" / vid
-            vdir.mkdir(parents=True)
-            (vdir / f"{vid}.json").write_text(
-                json.dumps(vjson), encoding="utf-8")
-            (vdir / f"{vid}.jar").write_bytes(b"PK\x03\x04fakejar")
-            inst = _FakeInstance(root)
-            props = {"name": "Steve", "uuid": "a" * 32, "token": "0",
-                     "user_type": "legacy", "xuid": ""}
-            with patch.object(launcher.java_mod, "java_usable_for", return_value=True), \
-                 patch.object(launcher.java_mod, "get_java_major", return_value=17):
-                cmd, _n, _v, _g = launcher.build_launch_command(
-                    inst, vid, props, sys.executable, memory_mb=1024, **kwargs)
-            return cmd
+        return _build_cmd(vjson, **kwargs)
 
     def test_modern_uses_quickplay(self):
         cmd = self._build(MODERN_JSON, server="play.example.com", server_port=25566)
@@ -174,6 +195,33 @@ class BuildCommandServerTests(unittest.TestCase):
                           extra_game_args=["--demo", "--server", "s.example.com"])
         self.assertIn("--demo", cmd)
         self.assertIn("--quickPlayMultiplayer", cmd)
+
+
+class BuildCommandWorldTests(unittest.TestCase):
+    """快速进入单人存档（--quickPlaySingleplayer）。"""
+
+    def _build(self, vjson, **kwargs):
+        return _build_cmd(vjson, **kwargs)
+
+    def test_modern_joins_world(self):
+        cmd = self._build(MODERN_JSON,
+                          extra_game_args=["--quickPlaySingleplayer", "My World"])
+        idx = cmd.index("--quickPlaySingleplayer")
+        self.assertEqual(cmd[idx + 1], "My World")
+        self.assertNotIn("--quickPlayMultiplayer", cmd)
+
+    def test_modern_without_world_has_no_arg(self):
+        cmd = self._build(MODERN_JSON)
+        self.assertNotIn("--quickPlaySingleplayer", cmd)
+
+    def test_mid_version_raises_readable_error(self):
+        with self.assertRaises(launcher.LaunchError) as ctx:
+            self._build(MID_JSON, extra_game_args=["--quickPlaySingleplayer", "W"])
+        self.assertIn("1.20", str(ctx.exception))
+
+    def test_legacy_version_raises_readable_error(self):
+        with self.assertRaises(launcher.LaunchError):
+            self._build(LEGACY_JSON, extra_game_args=["--quickPlaySingleplayer", "W"])
 
 
 if __name__ == "__main__":
