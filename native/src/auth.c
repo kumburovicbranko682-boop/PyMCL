@@ -179,15 +179,99 @@ static int ms_refresh(cJSON *acc) {
     return 0;
 }
 
+/* 皮肤站 / 统一通行证令牌刷新（对齐 authlib.refresh / nide8.refresh：
+ * POST /authserver/refresh，成功则换新 token 并顺延 7 天）。
+ * 以前 C 桥对这两类账号直接原样返回，令牌过期后启动进服必被拒，
+ * 而账号页看起来一切正常。 */
+static int yggdrasil_refresh(cJSON *acc, int is_nide8) {
+    char base[600];
+    if (is_nide8) {
+        const char *raw = cJSON_GetStringValue(cJSON_GetObjectItem(acc, "server_id"));
+        if (!raw || !raw[0]) raw = cJSON_GetStringValue(cJSON_GetObjectItem(acc, "api")) ?: "";
+        char sid[40];
+        if (pymcl_nide8_sid(raw, sid, sizeof(sid)) != 0) {
+            pymcl_set_error("服务器 ID 应为 32 位十六进制，或含该 ID 的链接");
+            return -1;
+        }
+        snprintf(base, sizeof(base), "https://auth.mc-user.com:233/%s", sid);
+    } else {
+        pymcl_authlib_normalize_api(
+            cJSON_GetStringValue(cJSON_GetObjectItem(acc, "api")) ?: "", base, sizeof(base));
+        if (!base[0]) { pymcl_set_error("请填写皮肤站 Yggdrasil API 地址"); return -1; }
+    }
+    const char *tok = cJSON_GetStringValue(cJSON_GetObjectItem(acc, "access_token"));
+    if (!tok || !tok[0]) {
+        pymcl_set_error(is_nide8 ? "统一通行证令牌缺失，请重新登录" : "皮肤站令牌缺失，请重新登录");
+        return -1;
+    }
+    cJSON *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(payload, "accessToken", tok);
+    const char *ct = cJSON_GetStringValue(cJSON_GetObjectItem(acc, "client_token"));
+    /* Python：nide8 恒带 clientToken（可为空串），authlib 只在非空时带 */
+    if (is_nide8) cJSON_AddStringToObject(payload, "clientToken", ct ?: "");
+    else if (ct && ct[0]) cJSON_AddStringToObject(payload, "clientToken", ct);
+    cJSON_AddTrueToObject(payload, "requestUser");
+    char *body = cJSON_PrintUnformatted(payload);
+    cJSON_Delete(payload);
+    char url[700];
+    snprintf(url, sizeof(url), "%s/authserver/refresh", base);
+    http_resp r;
+    int rc = http_post_json(url, body, &r, NULL, 20);
+    free(body);
+    if (rc != 0) {
+        http_resp_free(&r);
+        pymcl_set_error(is_nide8 ? "统一通行证刷新失败" : "皮肤站无法连接");
+        return -1;
+    }
+    if (r.status >= 400) {
+        http_resp_free(&r);
+        pymcl_set_error(is_nide8 ? "统一通行证令牌已过期，请重新登录" : "皮肤站令牌已过期，请重新登录");
+        return -1;
+    }
+    cJSON *data = r.body ? cJSON_Parse(r.body) : NULL;
+    http_resp_free(&r);
+    const char *ntok = cJSON_GetStringValue(cJSON_GetObjectItem(data, "accessToken"));
+    cJSON_DeleteItemFromObject(acc, "access_token");
+    cJSON_AddStringToObject(acc, "access_token", (ntok && ntok[0]) ? ntok : tok);
+    const char *nct = cJSON_GetStringValue(cJSON_GetObjectItem(data, "clientToken"));
+    if (nct && nct[0]) {
+        cJSON_DeleteItemFromObject(acc, "client_token");
+        cJSON_AddStringToObject(acc, "client_token", nct);
+    }
+    cJSON *prof = cJSON_GetObjectItem(data, "selectedProfile");
+    const char *pname = cJSON_GetStringValue(cJSON_GetObjectItem(prof, "name"));
+    if (pname && pname[0]) {
+        cJSON_DeleteItemFromObject(acc, "name");
+        cJSON_AddStringToObject(acc, "name", pname);
+    }
+    const char *pid = cJSON_GetStringValue(cJSON_GetObjectItem(prof, "id"));
+    if (pid && pid[0]) {
+        char uuid[40];
+        pymcl_dashed_uuid(pid, uuid);
+        cJSON_DeleteItemFromObject(acc, "uuid");
+        cJSON_AddStringToObject(acc, "uuid", uuid);
+    }
+    cJSON_DeleteItemFromObject(acc, "expires_at");
+    cJSON_AddNumberToObject(acc, "expires_at", (double)time(NULL) + 7.0 * 24 * 3600);
+    cJSON_DeleteItemFromObject(acc, "updated_at");
+    cJSON_AddNumberToObject(acc, "updated_at", (double)time(NULL));
+    cJSON_Delete(data);
+    return 0;
+}
+
 cJSON *account_ensure_valid(cJSON *acc) {
     if (!acc) return NULL;
     const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(acc, "type"));
-    if (!type || strcmp(type, "microsoft") != 0) return cJSON_Duplicate(acc, 1);
+    int is_ms = type && strcmp(type, "microsoft") == 0;
+    int is_al = type && strcmp(type, "authlib") == 0;
+    int is_n8 = type && strcmp(type, "nide8") == 0;
+    if (!is_ms && !is_al && !is_n8) return cJSON_Duplicate(acc, 1);
     double exp = cJSON_GetNumberValue(cJSON_GetObjectItem(acc, "expires_at"));
     const char *tok = cJSON_GetStringValue(cJSON_GetObjectItem(acc, "access_token"));
     if (time(NULL) < exp && tok && tok[0]) return cJSON_Duplicate(acc, 1);
     cJSON *copy = cJSON_Duplicate(acc, 1);
-    if (ms_refresh(copy) != 0) { cJSON_Delete(copy); return NULL; }
+    int rc = is_ms ? ms_refresh(copy) : yggdrasil_refresh(copy, is_n8);
+    if (rc != 0) { cJSON_Delete(copy); return NULL; }
     cJSON *root = accounts_load();
     cJSON *arr = cJSON_GetObjectItem(root, "accounts");
     const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(copy, "name"));
