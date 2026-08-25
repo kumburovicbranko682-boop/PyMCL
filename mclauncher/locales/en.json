@@ -1166,5 +1166,7 @@
   "最近更新": "Recently Updated",
   "最新发布": "Newest",
   "排序": "Sort",
-  "加载更多": "Load More"
+  "加载更多": "Load More",
+  "版本名称": "Version Name",
+  "留空使用默认名（如 {mc}）": "Leave empty for the default name (e.g. {mc})"
 }

@@ -22,6 +22,16 @@ def install_game(installer: Installer, version: str, loader: str = "无",
     mc = (version or "").strip()
     if not mc:
         raise InstallError("缺少 Minecraft 版本")
+    # 自定义版本名（HMCL/PCL2 安装新游戏同款）：先预检重名，装完统一改名
+    custom = str(extra.get("custom_name") or "").strip()
+    if custom:
+        from . import version_ops as vops
+        try:
+            custom = vops.sanitize_id(custom)
+        except vops.VersionOpError as exc:
+            raise InstallError(str(exc)) from exc
+        if (installer.instance.versions_dir() / custom).exists():
+            raise InstallError(f"已存在版本 {custom}，换个名字")
     primary = (loader or extra.get("loader") or "无").strip().lower()
     want_of = bool(extra.get("optifine")) or primary == "optifine"
     want_ll = bool(extra.get("liteloader")) or primary == "liteloader"
@@ -70,4 +80,13 @@ def install_game(installer: Installer, version: str, loader: str = "无",
             installer._note(f"OptiFine 已作为 Forge 模组放入 mods/{name}")
         else:
             vid = installer.install_optifine(mc, typ=of_typ, patch=of_patch)
+
+    if custom and custom != vid:
+        from . import version_ops as vops
+        try:
+            vid = vops.rename_version(installer.instance, vid, custom)
+            installer._note(f"版本已命名: {vid}")
+        except vops.VersionOpError as exc:
+            # 命名失败不吞掉安装成果：保留自动名并提示
+            installer._note(f"自定义版本名失败（保留 {vid}）: {exc}")
     return vid

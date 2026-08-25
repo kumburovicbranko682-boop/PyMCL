@@ -2,7 +2,7 @@
 """安装向导：原版 + 主加载器 + OptiFine / LiteLoader，可选加载器版本。"""
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    BodyLabel, CheckBox, ComboBox, MessageBoxBase, SubtitleLabel,
+    BodyLabel, CheckBox, ComboBox, LineEdit, MessageBoxBase, SubtitleLabel,
 )
 
 from mclauncher.config import CONFIG
@@ -25,6 +25,13 @@ class InstallWizardDialog(MessageBoxBase):
         form = QWidget(self)
         lay = QVBoxLayout(form)
         lay.setContentsMargins(0, 8, 0, 0)
+        # 版本名称（HMCL/PCL2 安装新游戏同款）：留空用默认自动名
+        self.name_edit = LineEdit()
+        self.name_edit.setPlaceholderText(tr("留空使用默认名（如 {mc}）").format(mc=mc_version))
+        row0 = QHBoxLayout()
+        row0.addWidget(BodyLabel(tr("版本名称")))
+        row0.addWidget(self.name_edit, 1)
+        lay.addLayout(row0)
         self.primary = ComboBox()
         self.primary.addItems([tr("无（原版）"), "Fabric", "Forge", "Quilt", "NeoForge"])
         self.loader_ver = ComboBox()
@@ -136,4 +143,7 @@ class InstallWizardDialog(MessageBoxBase):
         of = self.of_ver.currentText()
         if of and of != tr("最新"):
             extra["optifine_version"] = of
+        name = self.name_edit.text().strip()
+        if name:
+            extra["custom_name"] = name
         return {"loader": loader, "loader_version": extra.get("loader_version") or "", "extra": extra}
