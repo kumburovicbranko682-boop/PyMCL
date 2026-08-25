@@ -568,10 +568,17 @@ class BackendAPI:
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
         from mclauncher import launcher
+        from mclauncher import version_settings as _vs
+        # 与 app/backend.py 同步：带上版本级 auth_server 覆盖和 authlib_api，
+        # 否则皮肤站账号复制出的命令缺 -javaagent，照着跑必然登录失败。
+        auth_server = str(_vs.load(inst, version).get("auth_server") or "").strip()
+        if auth_server and not props.get("authlib_api"):
+            props = dict(props)
+            props["authlib_api"] = auth_server
         java_exe = "自动选择" if java in ("自动选择", "") else java
         cmd, _natives, _vdir, _gdir = launcher.build_launch_command(
             inst, version, props, java_exe, memory_mb=memory_mb,
-            width=width, height=height)
+            width=width, height=height, authlib_api=props.get("authlib_api"))
         return cmd
 
     def start_microsoft_login(self) -> str:
