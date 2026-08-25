@@ -280,6 +280,13 @@ static void *task_run(void *p) {
                     snprintf(g_launch_id, sizeof(g_launch_id), "%s", t->id);
                     pthread_mutex_unlock(&g_mu);
                     if (proc) {
+                        /* WinUI「启动后隐藏启动器」和 EziApp 的运行状态都靠这对事件；
+                         * Python 桥一直在发，这里以前从来不发，功能在 C 桥下静默失效。 */
+                        {
+                            cJSON *gs = cJSON_CreateObject();
+                            emit("game_started", gs);
+                            cJSON_Delete(gs);
+                        }
                         char buf[4096]; DWORD got;
                         char *tail[CRASH_TAIL];
                         int tn = 0, ts = 0;
@@ -311,10 +318,17 @@ static void *task_run(void *p) {
                         pthread_mutex_lock(&g_mu);
                         if (g_game == proc) g_game = NULL;
                         pthread_mutex_unlock(&g_mu);
+                        long scode = (long)code;
+                        if (code > 0x7FFFFFFFu) scode = (long)(code - 0x100000000ull);
+                        /* 与 Python 桥一致：取消也算退出，launcher 必须恢复可见。 */
+                        {
+                            cJSON *ge = cJSON_CreateObject();
+                            cJSON_AddNumberToObject(ge, "code", (double)scode);
+                            emit("game_exited", ge);
+                            cJSON_Delete(ge);
+                        }
                         if (t->cancelled) { ok = 1; snprintf(msg, sizeof(msg), "已停止游戏"); }
                         else {
-                            long scode = (long)code;
-                            if (code > 0x7FFFFFFFu) scode = (long)(code - 0x100000000ull);
                             cJSON *rep = analyze_game_crash(inst, ver, scode, tail, tn, ts, started);
                             int crashed = 0;
                             const char *summary = NULL;
