@@ -182,6 +182,128 @@ static cJSON *list_mod_entries(const char *instance) {
     return out;
 }
 
+/* ---------- AI 流式子进程 ----------
+ * ai_send 靠后台线程持续推 ai.delta/ai.done 事件；一次性 py_rpc 拿到
+ * {"started":true} 就退出，线程被杀，UI 毫无反应。改为常驻子进程：
+ * stdout 逐行回传事件由 C 转发到 SSE，stdin 下发 stop/confirm/answer。 */
+static pthread_mutex_t g_ai_mu = PTHREAD_MUTEX_INITIALIZER;
+static HANDLE g_ai_proc;
+static HANDLE g_ai_stdin;
+static sse_emit_fn g_ai_emit;
+
+static int ai_write_line(const char *line) {
+    pthread_mutex_lock(&g_ai_mu);
+    HANDLE h = g_ai_stdin;
+    int ok = 0;
+    if (h) {
+        DWORD wr = 0;
+        ok = WriteFile(h, line, (DWORD)strlen(line), &wr, NULL) != 0;
+        if (ok) WriteFile(h, "\n", 1, &wr, NULL);
+    }
+    pthread_mutex_unlock(&g_ai_mu);
+    return ok;
+}
+
+static void *ai_pump(void *p) {
+    HANDLE rd = (HANDLE)p;
+    const size_t line_cap = 65536;
+    char *line = (char *)malloc(line_cap);
+    char buf[8192];
+    size_t ll = 0;
+    DWORD n;
+    while (line && ReadFile(rd, buf, sizeof(buf), &n, NULL) && n > 0) {
+        for (DWORD i = 0; i < n; i++) {
+            char c = buf[i];
+            if (c == '\r') continue;
+            if (c == '\n') {
+                line[ll] = 0;
+                if (ll > 0) {
+                    cJSON *o = cJSON_Parse(line);
+                    if (o) {
+                        const char *ev = cJSON_GetStringValue(cJSON_GetObjectItem(o, "event"));
+                        cJSON *data = cJSON_GetObjectItem(o, "data");
+                        if (ev && g_ai_emit) {
+                            cJSON *payload = data ? data : cJSON_CreateObject();
+                            g_ai_emit(ev, payload);
+                            if (!data) cJSON_Delete(payload);
+                        }
+                        cJSON_Delete(o);
+                    }
+                }
+                ll = 0;
+            } else if (ll + 1 < line_cap) {
+                line[ll++] = c;
+            }
+        }
+    }
+    free(line);
+    CloseHandle(rd);
+    pthread_mutex_lock(&g_ai_mu);
+    if (g_ai_stdin) { CloseHandle(g_ai_stdin); g_ai_stdin = NULL; }
+    if (g_ai_proc) {
+        WaitForSingleObject(g_ai_proc, 5000);
+        CloseHandle(g_ai_proc);
+        g_ai_proc = NULL;
+    }
+    pthread_mutex_unlock(&g_ai_mu);
+    return NULL;
+}
+
+static int ai_spawn(const char *params_path) {
+    char py[PYMCL_PATH], script[PYMCL_PATH];
+    static char cmd[PYMCL_PATH * 4];
+    find_python(py, sizeof(py));
+    pymcl_path_join3(script, sizeof(script), g_root, "native\\tools", "py_ai_stream.py");
+    if (!pymcl_file_exists(script))
+        pymcl_path_join3(script, sizeof(script), g_root, "native/tools", "py_ai_stream.py");
+    if (!pymcl_file_exists(script)) {
+        pymcl_set_error("缺少 py_ai_stream.py；AI 助手需要 Python 后端");
+        return -1;
+    }
+
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    HANDLE in_rd = NULL, in_wr = NULL, out_rd = NULL, out_wr = NULL;
+    if (!CreatePipe(&out_rd, &out_wr, &sa, 0) || !CreatePipe(&in_rd, &in_wr, &sa, 0)) {
+        pymcl_set_error("创建管道失败");
+        if (out_rd) CloseHandle(out_rd);
+        if (out_wr) CloseHandle(out_wr);
+        return -1;
+    }
+    SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(in_wr, HANDLE_FLAG_INHERIT, 0);
+
+    snprintf(cmd, sizeof(cmd), "\"%s\" -u \"%s\" --root \"%s\" --params \"%s\"",
+             py, script, g_root, params_path);
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = in_rd;
+    si.hStdOutput = out_wr;
+    si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+    if (!CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, g_root, &si, &pi)) {
+        pymcl_set_error("无法启动 AI 助手进程");
+        CloseHandle(in_rd); CloseHandle(in_wr);
+        CloseHandle(out_rd); CloseHandle(out_wr);
+        return -1;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(in_rd);
+    CloseHandle(out_wr);
+
+    pthread_mutex_lock(&g_ai_mu);
+    g_ai_proc = pi.hProcess;
+    g_ai_stdin = in_wr;
+    pthread_mutex_unlock(&g_ai_mu);
+
+    pthread_t th;
+    pthread_create(&th, NULL, ai_pump, out_rd);
+    pthread_detach(th);
+    return 0;
+}
+
 static void format_playtime(long long sec, char *out, size_t n) {
     if (sec < 0) sec = 0;
     long long h = sec / 3600, m = (sec % 3600) / 60, s = sec % 60;
@@ -515,6 +637,67 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         return o;
     }
 
+    /* ---- AI 流式：常驻子进程转发事件（一次性 py_rpc 会立刻杀死流式线程） ---- */
+    if (strcmp(method, "ai_send") == 0) {
+        pthread_mutex_lock(&g_ai_mu);
+        int busy = g_ai_proc != NULL && WaitForSingleObject(g_ai_proc, 0) == WAIT_TIMEOUT;
+        pthread_mutex_unlock(&g_ai_mu);
+        if (busy) {
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddBoolToObject(o, "ok", 0);
+            cJSON_AddStringToObject(o, "message", "上一条还在处理");
+            return o;
+        }
+        g_ai_emit = emit;
+        char tmpdir[PYMCL_PATH], pin[PYMCL_PATH];
+        static volatile LONG s_ai_seq;
+        GetTempPathA(sizeof(tmpdir), tmpdir);
+        snprintf(pin, sizeof(pin), "%spymcl-ai-%u-%ld.json", tmpdir,
+                 (unsigned)GetCurrentProcessId(), (long)InterlockedIncrement(&s_ai_seq));
+        {
+            cJSON *body = params ? cJSON_Duplicate(params, 1) : cJSON_CreateObject();
+            char *txt = cJSON_PrintUnformatted(body);
+            cJSON_Delete(body);
+            if (!txt) { pymcl_set_error("参数序列化失败"); return NULL; }
+            pymcl_write_file(pin, txt, strlen(txt));
+            free(txt);
+        }
+        if (ai_spawn(pin) != 0) {
+            DeleteFileA(pin);
+            return NULL;
+        }
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddBoolToObject(o, "ok", 1);
+        cJSON_AddBoolToObject(o, "started", 1);
+        return o;
+    }
+    if (strcmp(method, "ai_stop") == 0 || strcmp(method, "ai_confirm") == 0
+        || strcmp(method, "ai_answer") == 0) {
+        pthread_mutex_lock(&g_ai_mu);
+        int live = g_ai_stdin != NULL;
+        pthread_mutex_unlock(&g_ai_mu);
+        if (live) {
+            char linebuf[4096];
+            if (strcmp(method, "ai_stop") == 0) {
+                snprintf(linebuf, sizeof(linebuf), "{\"op\":\"stop\"}");
+            } else if (strcmp(method, "ai_confirm") == 0) {
+                snprintf(linebuf, sizeof(linebuf), "{\"op\":\"confirm\",\"ok\":%s}",
+                         cJSON_IsTrue(cJSON_GetObjectItem(params, "ok")) ? "true" : "false");
+            } else {
+                cJSON *res = cJSON_GetObjectItem(params, "result");
+                char *rt = res ? cJSON_PrintUnformatted(res) : NULL;
+                snprintf(linebuf, sizeof(linebuf), "{\"op\":\"answer\",\"result\":%s}",
+                         rt ? rt : "null");
+                free(rt);
+            }
+            ai_write_line(linebuf);
+        }
+        /* 没有在飞的子进程时无事可做；与 Python 桥语义一致返回 ok */
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddBoolToObject(o, "ok", 1);
+        return o;
+    }
+
     /* ---- feedback / help / news / update / cleaner / AI / terracotta ---- */
     if (strcmp(method, "submit_feedback") == 0 || strcmp(method, "help_articles") == 0
         || strcmp(method, "help_article") == 0 || strcmp(method, "cached_news") == 0
@@ -522,9 +705,7 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         || strcmp(method, "cleaner_preview") == 0 || strcmp(method, "cleaner_apply") == 0
         || strcmp(method, "test_ai_connection") == 0 || strcmp(method, "ai_list_chats") == 0
         || strcmp(method, "ai_new_chat") == 0 || strcmp(method, "ai_delete_chat") == 0
-        || strcmp(method, "ai_set_active") == 0 || strcmp(method, "ai_send") == 0
-        || strcmp(method, "ai_stop") == 0 || strcmp(method, "ai_confirm") == 0
-        || strcmp(method, "ai_answer") == 0 || strcmp(method, "terracotta_snapshot") == 0
+        || strcmp(method, "ai_set_active") == 0 || strcmp(method, "terracotta_snapshot") == 0
         || strcmp(method, "terracotta_host") == 0 || strcmp(method, "terracotta_join") == 0
         || strcmp(method, "terracotta_idle") == 0
         || strcmp(method, "terracotta_allow_firewall") == 0
