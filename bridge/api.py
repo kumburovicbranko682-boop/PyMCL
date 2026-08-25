@@ -558,9 +558,12 @@ class BackendAPI:
         inst = self._instance(instance)
         if not version:
             raise LaunchError("请先选择版本")
+        from mclauncher import version_settings as _vs
+        _vsdata = _vs.load(inst, version)
         if account == "离线模式" or not account:
+            # 与 _launch_game_impl 一致：版本级离线皮肤覆盖全局
             acc = self.accounts.offline_account(
-                username or "Player", skin=CONFIG.get("offline_skin") or "default")
+                username or "Player", skin=_vs.offline_skin(_vsdata))
         else:
             acc = self.accounts.get_account(account)
             if not acc:
@@ -568,10 +571,9 @@ class BackendAPI:
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
         from mclauncher import launcher
-        from mclauncher import version_settings as _vs
         # 与 app/backend.py 同步：带上版本级 auth_server 覆盖和 authlib_api，
         # 否则皮肤站账号复制出的命令缺 -javaagent，照着跑必然登录失败。
-        auth_server = str(_vs.load(inst, version).get("auth_server") or "").strip()
+        auth_server = str(_vsdata.get("auth_server") or "").strip()
         if auth_server and not props.get("authlib_api"):
             props = dict(props)
             props["authlib_api"] = auth_server
@@ -1604,13 +1606,15 @@ class BackendAPI:
         CONFIG.set("default_instance", inst.name)
         CONFIG.save()
         from mclauncher import version_settings as vs
-        bound = vs.load(inst, version).get("login_account") or ""
+        vsdata = vs.load(inst, version)
+        bound = vsdata.get("login_account") or ""
         if bound:
             account = bound
             log(f"该版本绑定账号: {bound}")
         if account == "离线模式" or not account:
+            # 版本设置的「离线皮肤」覆盖全局（以前保存了也没人读，纯摆设）
             acc = self.accounts.offline_account(
-                username or "Player", skin=CONFIG.get("offline_skin") or "default")
+                username or "Player", skin=vs.offline_skin(vsdata))
         else:
             acc = self.accounts.get_account(account)
             if not acc:

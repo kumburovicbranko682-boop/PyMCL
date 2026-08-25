@@ -246,6 +246,7 @@ typedef struct {
     char pre_launch[1024];     /* 启动前命令（shell 原样执行） */
     char post_launch[1024];    /* 退出后命令 */
     char nide8_id[128];        /* 版本设置的统一通行证服务器 ID */
+    char offline_skin[32];     /* 版本设置的离线皮肤；"default"/空 = 跟随全局 */
 } pymcl_launch_prep;
 void pymcl_launch_prep_load(const char *instance, const char *version_id, pymcl_launch_prep *out);
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,

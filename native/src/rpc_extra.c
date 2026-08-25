@@ -251,6 +251,8 @@ void pymcl_launch_prep_load(const char *inst, const char *ver, pymcl_launch_prep
     out->pre_launch_wait = !cJSON_IsFalse(cJSON_GetObjectItem(j, "pre_launch_wait"));
     snprintf(out->nide8_id, sizeof(out->nide8_id), "%s",
              cJSON_GetStringValue(cJSON_GetObjectItem(j, "nide8_id")) ?: "");
+    snprintf(out->offline_skin, sizeof(out->offline_skin), "%s",
+             cJSON_GetStringValue(cJSON_GetObjectItem(j, "offline_skin")) ?: "");
     cJSON_Delete(j);
 }
 

@@ -356,9 +356,15 @@ static void *task_run(void *p) {
             cJSON *acc = NULL;
             if (!account[0] || strcmp(account, "离线模式") == 0) {
                 acc = account_offline(user);
-                /* 设置页选的全局离线皮肤（Steve/Alex 固定 UUID）。Python 桥
-                 * 启动时一直应用，这里以前忽略，同一账号两个桥皮肤不一致。 */
-                account_apply_offline_skin(acc, config_str("offline_skin", ""));
+                /* 版本设置的离线皮肤覆盖全局（对齐 version_settings.offline_skin：
+                 * steve/alex 才算显式选择，"default"/空 = 跟随全局）；再回落
+                 * 设置页的全局离线皮肤（Steve/Alex 固定 UUID）。 */
+                pymcl_launch_prep vsp;
+                pymcl_launch_prep_load(inst, ver, &vsp);
+                const char *skin =
+                    (pymcl_ieq(vsp.offline_skin, "steve") || pymcl_ieq(vsp.offline_skin, "alex"))
+                        ? vsp.offline_skin : config_str("offline_skin", "");
+                account_apply_offline_skin(acc, skin);
             } else {
                 cJSON *root = accounts_load();
                 cJSON *it;

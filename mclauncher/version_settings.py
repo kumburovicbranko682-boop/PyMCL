@@ -59,6 +59,20 @@ DEFAULTS = {
 FULLSCREEN_MODES = ("maximize", "fullscreen")
 
 
+def offline_skin(settings) -> str:
+    """离线皮肤生效值：版本级 steve/alex 覆盖全局，"default"/空 = 跟随全局。
+
+    版本设置对话框一直能保存 offline_skin，但四条启动链以前全都只读
+    CONFIG，版本级选择是纯摆设。DEFAULTS 会把 "default" 物化进每个
+    pymcl.json，所以 "default" 必须解释为「跟随全局」，否则任何一次
+    部分保存都会把全局皮肤设置挡死（与 window_mode 空串同一约定）。
+    """
+    v = str((settings or {}).get("offline_skin") or "").strip().lower()
+    if v in ("steve", "alex"):
+        return v
+    return str(CONFIG.get("offline_skin") or "default")
+
+
 def _file(instance, version_id) -> Path:
     return instance.versions_dir() / version_id / FILE_NAME
 
