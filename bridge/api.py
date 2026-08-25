@@ -822,6 +822,15 @@ class BackendAPI:
             patch["ui_motion"] = bool(data.get("ui_motion"))
         CONFIG.update(patch)
         CONFIG.save()
+        # 与 app/backend.py 同步的落盘后副作用：不做这三步的话，
+        # WinUI / EziApp 改「下载源」后 auto 模式还按旧测速结果走
+        # （测速缓存 TTL 10 分钟），切「忽略系统代理」更是要重启桥
+        # 才生效——界面提示已保存，实际当次会话完全没变。
+        from mclauncher.source import invalidate_probe, warmup_async
+        invalidate_probe()
+        from mclauncher.net import apply_proxy_policy
+        apply_proxy_policy()
+        warmup_async()
 
     def collect_sysinfo(self, force: bool = False, scan_system_java: bool = False) -> dict:
         from mclauncher import sysinfo as sysinfo_mod
