@@ -38,11 +38,13 @@ public partial class DownloadPage : UserControl
             var ver = VersionBox.Text?.Trim() ?? "";
             var loader = (LoaderBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "vanilla";
             if (string.IsNullOrEmpty(ver)) { MessageBox.Show("请填写版本"); return; }
-            var tid = await AppServices.Client.StartTaskAsync("download_version", new
+            // 桥上从来没有 download_version 这个方法，真实入口是 install_game；
+            // 两个桥（Python / C）都只认「无」表示不装加载器，vanilla 会被当成未知加载器拒掉。
+            var tid = await AppServices.Client.StartTaskAsync("install_game", new
             {
                 instance = inst,
                 version = ver,
-                loader,
+                loader = loader == "vanilla" ? "无" : loader,
             });
             Hint.Text = "任务已排队: " + tid;
         }
