@@ -941,6 +941,16 @@ class BackendAPI(QObject):
         inst = self._instance(instance)
         return mod_info.describe_mods_at(self._mods_folder(inst, version))
 
+    def export_mod_list(self, instance: str, version: str = "",
+                        fmt: str = "markdown") -> str:
+        """把已装模组清单导出为 Markdown / 文本，返回文件路径（HMCL 同款）。"""
+        from mclauncher import mod_info
+        inst = self._instance(instance)
+        suffix = "txt" if fmt == "text" else "md"
+        dest = utils.ROOT / "exports" / f"modlist-{inst.name}.{suffix}"
+        return mod_info.export_mod_list(
+            self._mods_folder(inst, version), dest, fmt=fmt, title=inst.name)
+
     def get_mods_targets(self, instance: str) -> list[dict]:
         """Mod 安装目标列表：实例共享 mods + 开了版本隔离的版本各自目录。"""
         from mclauncher import version_settings as vs

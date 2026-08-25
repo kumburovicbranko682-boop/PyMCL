@@ -1261,6 +1261,16 @@ class BackendAPI:
         inst = self._instance(instance)
         return mod_info.describe_mods_at(self._mods_folder(inst, version))
 
+    def export_mod_list(self, instance: str, version: str = "",
+                        fmt: str = "markdown") -> str:
+        """把已装模组清单导出为 Markdown / 文本，返回文件路径（HMCL 同款）。"""
+        from mclauncher import mod_info
+        inst = self._instance(instance)
+        suffix = "txt" if fmt == "text" else "md"
+        dest = utils.ROOT / "exports" / f"modlist-{inst.name}.{suffix}"
+        return mod_info.export_mod_list(
+            self._mods_folder(inst, version), dest, fmt=fmt, title=inst.name)
+
     def open_global_mods(self):
         from mclauncher import global_mods as gm
         path = gm.root()

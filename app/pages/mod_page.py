@@ -241,7 +241,11 @@ class ModManagerPage(QWidget):
         self.import_btn = TransparentPushButton(FIF.ADD, tr("导入 jar"))
         self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
         self.conflict_btn = TransparentPushButton(FIF.SEARCH, tr("冲突扫描"))
-        for b in (self.folder_btn, self.import_btn, self.update_btn, self.conflict_btn):
+        self.export_btn = TransparentPushButton(
+            getattr(FIF, "SAVE_AS", FIF.SAVE), tr("导出清单"))
+        self.export_btn.setToolTip(tr("把模组列表导出成 Markdown 文件，方便分享"))
+        for b in (self.folder_btn, self.import_btn, self.update_btn, self.conflict_btn,
+                  self.export_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
         cv.addLayout(bar)
@@ -274,6 +278,7 @@ class ModManagerPage(QWidget):
         self.import_btn.clicked.connect(self._import_local)
         self.update_btn.clicked.connect(self._check_updates)
         self.conflict_btn.clicked.connect(self._scan_conflicts)
+        self.export_btn.clicked.connect(self._export_list)
         self.setAcceptDrops(True)
 
         # 目录监视（PCL2 同款）：在文件管理器里往 mods 文件夹放/删文件，
@@ -478,6 +483,29 @@ class ModManagerPage(QWidget):
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+
+    def _export_list(self):
+        inst = self._current_instance()
+        ver = self._current_version()
+        self.export_btn.setEnabled(False)
+
+        def _done(path):
+            self.export_btn.setEnabled(True)
+            InfoBar.success(tr("已导出模组清单"), str(path), parent=self,
+                            position=InfoBarPosition.TOP, duration=5000)
+            try:
+                self.backend.open_media(str(path))
+            except Exception:
+                pass
+
+        def _fail(msg):
+            self.export_btn.setEnabled(True)
+            InfoBar.error(tr("导出失败"), str(msg), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        self.backend.call_async(
+            lambda i=inst, v=ver: self.backend.export_mod_list(i, v),
+            guard(self, _done), guard(self, _fail))
 
     def _scan_conflicts(self):
         inst = self._current_instance()

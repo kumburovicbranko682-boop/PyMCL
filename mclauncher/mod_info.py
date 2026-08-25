@@ -165,3 +165,38 @@ def describe_mods_at(mods_dir, cache_dir=None) -> list[dict]:
     if dirty:
         _save_cache(root, cache)
     return rows
+
+
+def export_mod_list(mods_dir, dest, fmt: str = "markdown", title: str = "") -> str:
+    """把已装模组清单写成可分享的 Markdown 表格或纯文本（对标 HMCL 导出模组列表）。
+
+    fmt: "markdown" 或 "text"。返回写出的文件路径。
+    """
+    rows = describe_mods_at(mods_dir)
+    dest = Path(dest)
+    utils.ensure_dir(dest.parent)
+    header = title or Path(str(mods_dir)).parent.name
+    lines: list[str] = []
+    if fmt == "text":
+        lines.append(f"# 模组清单 · {header}（共 {len(rows)} 个）")
+        for r in rows:
+            state = "" if r.get("enabled", True) else "（已禁用）"
+            ver = f" {r['version']}" if r.get("version") else ""
+            lines.append(f"{r['name']}{ver}{state}  [{r['filename']}]")
+    else:
+        lines.append(f"# 模组清单 · {header}")
+        lines.append("")
+        lines.append(f"共 {len(rows)} 个模组")
+        lines.append("")
+        lines.append("| 名称 | 版本 | 加载器 | 文件 | 状态 |")
+        lines.append("| --- | --- | --- | --- | --- |")
+        for r in rows:
+            state = "启用" if r.get("enabled", True) else "禁用"
+            loader = r.get("loader") or ""
+            if loader == "unknown":
+                loader = ""
+            cells = [str(r.get("name") or ""), str(r.get("version") or ""),
+                     loader, str(r.get("filename") or ""), state]
+            lines.append("| " + " | ".join(c.replace("|", "\\|") for c in cells) + " |")
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return str(dest)
