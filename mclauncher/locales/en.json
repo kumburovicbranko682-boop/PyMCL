@@ -1008,5 +1008,8 @@
   "{id} 与 {other} 不兼容": "{id} is incompatible with {other}",
   "缺失的依赖可到「下载」页搜索安装": "Missing dependencies can be found and installed from the Download page",
   "知道了": "Got it",
-  "重置": "Reset"
+  "重置": "Reset",
+  "整合包安装到实例": "Install modpack into instance",
+  "推荐每个整合包一个独立实例：新名字会自动创建实例，填已有实例名则装进那个实例（会覆盖同名整合包文件）。": "One instance per modpack is recommended: a new name creates a fresh instance; an existing instance name installs into it (overwriting files managed by a same-name pack).",
+  "装进已有实例": "Installing into existing instance"
 }

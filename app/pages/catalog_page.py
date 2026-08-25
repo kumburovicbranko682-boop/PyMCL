@@ -758,13 +758,50 @@ class PclCatalogPage(QWidget):
         InfoBar.info(tr("识别到剪贴板链接"), clip[:96], parent=self,
                      position=InfoBarPosition.TOP, duration=3500)
 
+    def _pack_instance_default(self, item) -> str:
+        """整合包默认实例名：包标题 / 文件名 / 链接文件名。"""
+        from pathlib import Path
+        from mclauncher.version_ops import sanitize_id
+        raw = str(item.get("title") or item.get("name") or "").strip()
+        path = str(item.get("path") or "")
+        if path and (not raw or raw == path):
+            raw = Path(path).stem
+        if raw.startswith(("http://", "https://")):
+            raw = Path(raw.split("?", 1)[0].rstrip("/")).stem
+        try:
+            return sanitize_id(raw)
+        except Exception:
+            return "modpack"
+
+    def _ask_pack_instance(self, item):
+        """整合包装进哪个实例：默认按包名新建（HMCL 行为），可改成已有实例名。
+
+        返回实例名；用户取消返回 None。
+        """
+        default = self._pack_instance_default(item)
+        existing = {str(i.get("name") or "") for i in (self.backend.get_instances() or [])}
+        hint = tr("推荐每个整合包一个独立实例：新名字会自动创建实例，填已有实例名则装进那个实例（会覆盖同名整合包文件）。")
+        dlg = InputDialog(tr("整合包安装到实例"), hint, text=default, parent=self.window())
+        if not dlg.exec():
+            return None
+        value = dlg.value() or default
+        if value in existing:
+            InfoBar.info(tr("装进已有实例"), value, parent=self,
+                         position=InfoBarPosition.TOP, duration=2500)
+        return value
+
     def _do_install(self, item, tile=None):
         name = item.get("name") or ""
+        extra = dict(item)
+        if self.spec.get("install") == "install_modpack":
+            target = self._ask_pack_instance(extra)
+            if target is None:
+                return
+            extra["instance"] = target
         win = self.window()
         if tile is not None and hasattr(win, "fly_to_tasks"):
             win.fly_to_tasks(tile, name)
         fn = getattr(self.backend, self.spec["install"], None)
-        extra = dict(item)
         # FilePickDialog 里选过的安装目标（实例/版本）不能被页面当前值覆盖
         extra.setdefault("instance", self._current_instance())
         extra["source"] = item.get("source") or self._source()
