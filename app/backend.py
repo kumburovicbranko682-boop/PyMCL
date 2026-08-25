@@ -322,6 +322,21 @@ class BackendAPI(QObject):
                 pass
         return {"ok": box.get("ok"), "message": box.get("msg"), "task_id": task_id}
 
+    def list_tasks(self) -> list:
+        """运行中任务在前，随后是近期完结任务（新→旧）。与 bridge.api.BackendAPI.list_tasks 对齐。"""
+        items = [{"id": tid, "title": self._titles.get(tid, tid), "status": "running"}
+                 for tid in self._workers]
+        for tid, (ok, msg) in reversed(list(self._task_results.items())):
+            if tid in self._workers:
+                continue
+            items.append({
+                "id": tid,
+                "title": self._titles.get(tid, tid),
+                "status": "done" if ok else "failed",
+                "message": msg,
+            })
+        return items
+
     def cancel_task(self, task_id: str):
         worker = self._workers.get(task_id)
         if worker:

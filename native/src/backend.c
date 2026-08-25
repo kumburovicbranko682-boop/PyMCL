@@ -730,6 +730,21 @@ cJSON *backend_call(const char *method, cJSON *params) {
         pthread_mutex_unlock(&g_mu);
         return cJSON_CreateTrue();
     }
+    if (strcmp(method, "list_tasks") == 0) {
+        /* 原生桥不保留完结历史，只报运行中任务；不能回落到一次性 Python（拿不到本进程任务）。 */
+        cJSON *arr = cJSON_CreateArray();
+        pthread_mutex_lock(&g_mu);
+        for (int i = 0; i < g_ntasks; i++) {
+            if (!g_tasks[i]) continue;
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "id", g_tasks[i]->id);
+            cJSON_AddStringToObject(o, "title", g_tasks[i]->title);
+            cJSON_AddStringToObject(o, "status", g_tasks[i]->cancelled ? "cancelling" : "running");
+            cJSON_AddItemToArray(arr, o);
+        }
+        pthread_mutex_unlock(&g_mu);
+        return arr;
+    }
     if (strcmp(method, "install_game") == 0)
         return start_task("安装游戏", method, params);
     if (strcmp(method, "download_java") == 0)

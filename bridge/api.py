@@ -212,6 +212,27 @@ class BackendAPI:
     def task_title(self, task_id: str) -> str:
         return self._titles.get(task_id, task_id)
 
+    def list_tasks(self) -> list:
+        """运行中任务在前，随后是近期完结任务（新→旧）。供 WPF 任务页等轮询式 UI 使用。"""
+        # _task_results/_titles 由工作线程在锁外写入，先做原子快照再遍历。
+        results = list(self._task_results.items())
+        titles = dict(self._titles)
+        with self._lock:
+            running = [(tid, titles.get(tid, tid)) for tid in self._workers]
+            running_ids = set(self._workers)
+        finished = [(tid, titles.get(tid, tid), ok, msg)
+                    for tid, (ok, msg) in results
+                    if tid not in running_ids]
+        items = [{"id": tid, "title": title, "status": "running"} for tid, title in running]
+        for tid, title, ok, msg in reversed(finished):
+            items.append({
+                "id": tid,
+                "title": title,
+                "status": "done" if ok else "failed",
+                "message": msg,
+            })
+        return items
+
     def get_crash(self, task_id: str = "") -> dict:
         if task_id and task_id in self._crashes:
             return self._crashes[task_id]
