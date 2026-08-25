@@ -488,6 +488,7 @@ void backend_shutdown(void) {
 cJSON *backend_call(const char *method, cJSON *params) {
     if (!method) return NULL;
     if (strcmp(method, "get_settings") == 0) {
+        /* 键位对齐 bridge/api.py get_settings，别只回一小半让 UI 显示默认值。 */
         cJSON *o = cJSON_CreateObject();
         cJSON_AddBoolToObject(o, "share_libraries", config_bool("shared_libraries", 0));
         cJSON_AddBoolToObject(o, "share_assets", config_bool("shared_assets", 0));
@@ -499,6 +500,43 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_AddItemToObject(o, "default_resolution", res);
         cJSON_AddStringToObject(o, "ms_client_id", config_str("microsoft_client_id", ""));
         cJSON_AddStringToObject(o, "curseforge_api_key", config_str("curseforge_api_key", ""));
+        {
+            static const struct { const char *key; int def; } bool_keys[] = {
+                {"use_system_proxy", 1}, {"auto_check_update", 1}, {"feedback_heartbeat", 1},
+                {"ai_confirm_writes", 1}, {"ui_fly_animation", 1}, {"ui_motion", 1}, {"first_run", 1},
+                {"ui_dark", 0}, {"skip_assets", 0}, {"allow_multi_instance", 0},
+                {"show_hidden_versions", 0}, {"feedback_consent", 0},
+            };
+            static const struct { const char *key; int def; } int_keys[] = {
+                {"ui_fly_duration_ms", 620}, {"download_limit_kbps", 0},
+            };
+            static const struct { const char *key; const char *def; } str_keys[] = {
+                {"ai_mode", "public"}, {"ai_permission_mode", "standard"}, {"ai_gateway_url", ""},
+                {"ai_base_url", ""}, {"ai_api_key", ""}, {"ai_model", "deepseek-v4-flash"},
+                /* 默认地址与 mclauncher/feedback_defaults.py 保持一致 */
+                {"feedback_url", "http://114.66.28.184:53611"},
+                {"default_isolation", "none"}, {"default_jvm_args", ""}, {"default_priority", "normal"},
+                {"update_url", ""}, {"theme_color", "#2E9B6B"}, {"ui_background", ""},
+                {"global_mods_dir", ""}, {"download_source", "auto"}, {"community_source", "auto"},
+                {"launcher_visibility", "keep"}, {"gc_preset", "auto"}, {"custom_homepage", ""},
+                {"homepage_mode", "news"}, {"window_mode", "window"}, {"offline_skin", "default"},
+                {"default_java", ""}, {"instances_dir", ".minecraft"},
+            };
+            size_t i;
+            for (i = 0; i < sizeof(bool_keys) / sizeof(bool_keys[0]); i++)
+                cJSON_AddBoolToObject(o, bool_keys[i].key, config_bool(bool_keys[i].key, bool_keys[i].def));
+            for (i = 0; i < sizeof(int_keys) / sizeof(int_keys[0]); i++)
+                cJSON_AddNumberToObject(o, int_keys[i].key, config_int(int_keys[i].key, int_keys[i].def));
+            for (i = 0; i < sizeof(str_keys) / sizeof(str_keys[0]); i++) {
+                const char *v = config_str(str_keys[i].key, "");
+                cJSON_AddStringToObject(o, str_keys[i].key, v[0] ? v : str_keys[i].def);
+            }
+        }
+        {
+            char gd[PYMCL_PATH];
+            pymcl_instances_dir(gd, sizeof(gd));
+            cJSON_AddStringToObject(o, "game_dir", gd);
+        }
         cJSON_AddStringToObject(o, "root", g_root);
         return o;
     }
@@ -507,8 +545,12 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON *inner = cJSON_GetObjectItem(d, "data");
         if (!cJSON_IsObject(inner)) inner = cJSON_GetObjectItem(d, "settings");
         if (cJSON_IsObject(inner)) d = inner;
-        config_set_bool("shared_libraries", cJSON_IsTrue(cJSON_GetObjectItem(d, "share_libraries")));
-        config_set_bool("shared_assets", cJSON_IsTrue(cJSON_GetObjectItem(d, "share_assets")));
+        cJSON *v;
+        /* 局部更新语义：没提交的键保持现值，绝不能把缺席布尔写成 false。 */
+        if ((v = cJSON_GetObjectItem(d, "share_libraries")) != NULL)
+            config_set_bool("shared_libraries", cJSON_IsTrue(v));
+        if ((v = cJSON_GetObjectItem(d, "share_assets")) != NULL)
+            config_set_bool("shared_assets", cJSON_IsTrue(v));
         if (cJSON_IsNumber(cJSON_GetObjectItem(d, "download_threads")))
             config_set_int("download_threads", (int)cJSON_GetObjectItem(d, "download_threads")->valuedouble);
         if (cJSON_IsNumber(cJSON_GetObjectItem(d, "default_memory_mb")))
@@ -522,6 +564,46 @@ cJSON *backend_call(const char *method, cJSON *params) {
             config_set_str("microsoft_client_id", cJSON_GetObjectItem(d, "ms_client_id")->valuestring);
         if (cJSON_IsString(cJSON_GetObjectItem(d, "curseforge_api_key")))
             config_set_str("curseforge_api_key", cJSON_GetObjectItem(d, "curseforge_api_key")->valuestring);
+        {
+            /* 其余键与 bridge/api.py save_settings 对齐，设置名 == 配置名。 */
+            static const char *bool_keys[] = {
+                "use_system_proxy", "ui_dark", "ui_fly_animation", "ui_motion", "auto_check_update",
+                "skip_assets", "allow_multi_instance", "first_run", "show_hidden_versions",
+                "feedback_heartbeat", "feedback_consent", "ai_confirm_writes",
+            };
+            static const char *int_keys[] = {"ui_fly_duration_ms", "download_limit_kbps"};
+            static const char *str_keys[] = {
+                "ai_mode", "ai_gateway_url", "ai_base_url", "ai_api_key", "ai_model",
+                "feedback_url", "default_isolation", "default_jvm_args", "default_priority",
+                "update_url", "theme_color", "ui_background", "global_mods_dir",
+                "download_source", "community_source", "launcher_visibility", "gc_preset",
+                "custom_homepage", "homepage_mode", "window_mode", "offline_skin", "default_java",
+            };
+            size_t i;
+            for (i = 0; i < sizeof(bool_keys) / sizeof(bool_keys[0]); i++) {
+                v = cJSON_GetObjectItem(d, bool_keys[i]);
+                if (v && !cJSON_IsNull(v))
+                    config_set_bool(bool_keys[i], cJSON_IsTrue(v));
+            }
+            for (i = 0; i < sizeof(int_keys) / sizeof(int_keys[0]); i++) {
+                v = cJSON_GetObjectItem(d, int_keys[i]);
+                if (cJSON_IsNumber(v))
+                    config_set_int(int_keys[i], (int)v->valuedouble);
+            }
+            for (i = 0; i < sizeof(str_keys) / sizeof(str_keys[0]); i++) {
+                v = cJSON_GetObjectItem(d, str_keys[i]);
+                if (cJSON_IsString(v))
+                    config_set_str(str_keys[i], v->valuestring);
+            }
+            v = cJSON_GetObjectItem(d, "ai_permission_mode");
+            if (cJSON_IsString(v))
+                config_set_str("ai_permission_mode",
+                               strcmp(v->valuestring, "full") == 0 ? "full" : "standard");
+            /* 空的 instances_dir 不落盘，避免把游戏目录写成空串。 */
+            v = cJSON_GetObjectItem(d, "instances_dir");
+            if (cJSON_IsString(v) && v->valuestring[0])
+                config_set_str("instances_dir", v->valuestring);
+        }
         config_save();
         return cJSON_CreateTrue();
     }
