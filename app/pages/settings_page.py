@@ -366,12 +366,14 @@ class SettingsPage(QWidget):
             tr("允许多开"), tr("取消勾选 = 游戏运行时再次启动会提示"),
             checked=bool(settings.get("allow_multi_instance", False)))
         maint_group.addSettingCard(self.multi_card)
-        # 官方启动器迁移
+        # 游戏目录迁移：官方自动检测 + 任意目录（PCL / HMCL / 旧电脑拷来的 .minecraft）
         mig_card = SettingCard(
             FIF.DOWNLOAD if hasattr(FIF, "DOWNLOAD") else FIF.SYNC,
-            tr("官方启动器迁移"), tr("从官方 .minecraft 导入版本和账号"))
+            tr("游戏目录迁移"), tr("从官方启动器 / PCL / HMCL 的 .minecraft 导入已装版本"))
         self.mig_btn = PushButton(tr("检测并迁移"))
+        self.mig_pick_btn = PushButton(tr("选目录导入…"))
         mig_card.hBoxLayout.addWidget(self.mig_btn, 0, Qt.AlignRight)
+        mig_card.hBoxLayout.addWidget(self.mig_pick_btn, 0, Qt.AlignRight)
         mig_card.hBoxLayout.addSpacing(8)
         maint_group.addSettingCard(mig_card)
         # 智能推荐
@@ -399,6 +401,7 @@ class SettingsPage(QWidget):
         self.load_theme_btn.clicked.connect(self._load_theme)
         self.del_theme_btn.clicked.connect(self._del_theme)
         self.mig_btn.clicked.connect(self._migrate_official)
+        self.mig_pick_btn.clicked.connect(self._migrate_from_dir)
         self.rec_btn.clicked.connect(self._show_recommendation)
 
         ai_group = SettingCardGroup(tr("AI 助手"), host)
@@ -872,8 +875,15 @@ class SettingsPage(QWidget):
             self.mig_btn.setEnabled(True)
             self.mig_btn.setText(tr("检测并迁移"))
             if not found:
-                InfoBar.info(tr("提示"), tr("未检测到官方启动器数据目录"), parent=self,
-                             position=InfoBarPosition.TOP, duration=3000)
+                from qfluentwidgets import MessageBox
+                box = MessageBox(
+                    tr("未检测到官方启动器"),
+                    tr("没有找到官方启动器的 .minecraft。也可以手动选择 PCL / HMCL "
+                       "或其他启动器的游戏目录导入。"), self)
+                box.yesButton.setText(tr("选目录导入…"))
+                box.cancelButton.setText(tr("取消"))
+                if box.exec():
+                    self._migrate_from_dir()
                 return
             from qfluentwidgets import MessageBox
             msg = (f"发现官方启动器目录: {found['dir']}\n\n"
@@ -895,6 +905,49 @@ class SettingsPage(QWidget):
                           position=InfoBarPosition.TOP, duration=4000)
 
         self.backend.call_async(probe, scanned, failed)
+
+    def _migrate_from_dir(self):
+        """手动选任意游戏目录导入（PCL / HMCL / 旧电脑拷来的 .minecraft）。"""
+        path = QFileDialog.getExistingDirectory(self, tr("选择要导入的游戏目录"), "")
+        if not path:
+            return
+        self.mig_pick_btn.setEnabled(False)
+        self.mig_pick_btn.setText(tr("扫描中…"))
+
+        def _restore():
+            self.mig_pick_btn.setEnabled(True)
+            self.mig_pick_btn.setText(tr("选目录导入…"))
+
+        def scanned(found):
+            _restore()
+            found = found or {}
+            versions = found.get("versions") or []
+            if not versions:
+                InfoBar.warning(tr("没有版本"), tr("该目录里没有可导入的版本。"), parent=self,
+                                position=InfoBarPosition.TOP, duration=3500)
+                return
+            from qfluentwidgets import MessageBox
+            msg = (f"游戏目录: {found.get('dir')}\n\n"
+                   f"发现 {len(versions)} 个版本:\n"
+                   + "\n".join(f"· {v}" for v in versions[:12])
+                   + ("\n…" if len(versions) > 12 else "") + "\n\n要导入吗？")
+            if not MessageBox(tr("导入游戏目录"), msg, self).exec():
+                return
+            try:
+                task_id = self.backend.migrate_official_launcher(src_dir=found.get("dir") or path)
+                InfoBar.success(tr("迁移中"), f"导入任务已启动: {task_id}", parent=self,
+                                position=InfoBarPosition.TOP, duration=4000)
+            except Exception as e:
+                InfoBar.error(tr("迁移失败"), str(e), parent=self,
+                              position=InfoBarPosition.TOP, duration=4000)
+
+        def failed(exc):
+            _restore()
+            InfoBar.error(tr("无法导入"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4500)
+
+        self.backend.call_async(lambda p=path: self.backend.scan_game_dir(p),
+                                scanned, failed)
 
     def _show_recommendation(self):
         """取硬件信息会调 WMI / PowerShell，首次几秒起步，放后台线程。"""

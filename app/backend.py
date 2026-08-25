@@ -2418,17 +2418,32 @@ class BackendAPI(QObject):
             return []
         return om.scan_versions(d)
 
-    def migrate_official_launcher(self, instance: str = "default") -> str:
+    def scan_game_dir(self, path: str) -> dict:
+        """校验任意目录是不是可导入的游戏目录（PCL / HMCL / 官方均可），
+        返回 {dir, versions}；不是则抛错。"""
+        from mclauncher import official_migrate as om
+        resolved = om.resolve_game_dir(path)
+        if resolved is None:
+            raise ValueError(tr("该目录里没有 versions 文件夹，不是 Minecraft 游戏目录"))
+        return {"dir": str(resolved), "versions": om.scan_versions(resolved)}
+
+    def migrate_official_launcher(self, instance: str = "default", src_dir: str = "") -> str:
         return self.start_task(
-            tr("导入官方启动器"),
-            self._migrate_official_impl, instance,
+            tr("导入游戏目录") if src_dir else tr("导入官方启动器"),
+            self._migrate_official_impl, instance, src_dir,
         )
 
-    def _migrate_official_impl(self, progress, log, instance):
+    def _migrate_official_impl(self, progress, log, instance, src_dir=""):
         from mclauncher import official_migrate as om
-        src = om.official_dir()
-        if not src:
-            raise FileNotFoundError(tr("未找到官方启动器目录"))
+        if src_dir:
+            src = om.resolve_game_dir(src_dir)
+            if src is None:
+                raise FileNotFoundError(
+                    tr("该目录里没有 versions 文件夹，不是 Minecraft 游戏目录") + f": {src_dir}")
+        else:
+            src = om.official_dir()
+            if not src:
+                raise FileNotFoundError(tr("未找到官方启动器目录"))
         log(f"正在从 {src} 迁移…")
         progress(1, 3, tr("扫描版本"))
         versions = om.scan_versions(src)

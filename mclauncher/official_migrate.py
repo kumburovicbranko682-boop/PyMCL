@@ -38,6 +38,24 @@ def detect_official() -> bool:
     return d.is_dir() and (d / "versions").is_dir()
 
 
+def resolve_game_dir(path) -> Path | None:
+    """把用户选的目录解析成实际游戏目录（含 versions/ 的那一层）。
+
+    支持直接选游戏目录，也支持选到上一层（PCL / HMCL / 官方启动器的
+    安装目录，里面套 .minecraft 或 minecraft）。不是游戏目录返回 None。
+    """
+    p = Path(path or "")
+    if not p.is_dir():
+        return None
+    if (p / "versions").is_dir():
+        return p
+    for sub in (".minecraft", "minecraft"):
+        cand = p / sub
+        if (cand / "versions").is_dir():
+            return cand
+    return None
+
+
 def scan_versions(src: Path) -> list[str]:
     """扫描官方目录下的版本。"""
     vdir = src / "versions"
@@ -140,7 +158,7 @@ def migrate(official_root: str, instance_name: str = "default",
     """
     src = Path(official_root)
     if not src.is_dir():
-        raise FileNotFoundError(f"官方启动器目录不存在: {src}")
+        raise FileNotFoundError(f"游戏目录不存在: {src}")
     inst = Instance(instance_name)
     if not inst.path.is_dir():
         inst.create()
