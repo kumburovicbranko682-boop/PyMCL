@@ -213,14 +213,32 @@ def import_servers_json(instance: Instance, data: list[dict]) -> int:
     for entry in data:
         if not isinstance(entry, dict):
             continue
-        ip = str(entry.get("ip", "")).strip()
+        ip = str(entry.get("ip", "") or entry.get("address", "")).strip()
         if not ip:
             continue
-        port = int(entry.get("port") or 25565)
+        # ip 里内嵌端口（"host:25566"）时按 txt 导入的语义拆开，否则端口
+        # 会叠加成 "host:25566:25565"，直连时把带冒号的整串当主机名用。
+        port = entry.get("port")
+        if ":" in ip:
+            host, _, tail = ip.rpartition(":")
+            try:
+                embedded = int(tail)
+            except ValueError:
+                embedded = None
+            if embedded is not None and host.strip():
+                ip = host.strip()
+                if not port:
+                    port = embedded
+        try:
+            port = int(port or 25565)
+        except (TypeError, ValueError):
+            port = 25565
         addr = f"{ip}:{port}"
         if addr in existing_addrs:
             continue
-        servers.append(entry)
+        # 只落盘规范字段，别把用户粘贴的任意键写进 servers.json
+        name = str(entry.get("name") or "").strip() or ip
+        servers.append({"name": name, "ip": ip, "port": port})
         existing_addrs.add(addr)
         imported += 1
 
