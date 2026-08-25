@@ -1981,26 +1981,31 @@ class BackendAPI(QObject):
         if extra.get("path") or extra.get("url"):
             source = extra.get("path") or extra.get("url")
             log(f"安装模组: {source}")
-            mods_mod.install_mod_from_source(dm, str(source), inst, on_progress=on_progress,
-                                             version_id=vid, mods_dir=mods_dir)
+            result = mods_mod.install_mod_from_source(dm, str(source), inst, on_progress=on_progress,
+                                                      version_id=vid, mods_dir=mods_dir)
         elif src_kind.startswith("curse") and extra.get("id"):
             log(f"从 CurseForge 安装模组 id={extra.get('id')}" + (f" file={fid}" if fid else ""))
-            mods_mod.install_curseforge_mod(
+            result = mods_mod.install_curseforge_mod(
                 dm, extra["id"], inst, mc_version=gv, on_progress=on_progress, file_id=fid,
                 mods_dir=mods_dir)
         else:
             hit = extra if extra.get("slug") else self._lookup_mod(str(name), extra.get("source") or "Modrinth")
             if hit.get("id") and str(hit.get("source") or src_kind).lower().startswith("curse"):
                 log(f"从 CurseForge 安装模组 id={hit.get('id')}")
-                mods_mod.install_curseforge_mod(
+                result = mods_mod.install_curseforge_mod(
                     dm, hit["id"], inst, mc_version=gv, on_progress=on_progress,
                     file_id=fid or extra.get("version_id"), mods_dir=mods_dir)
             else:
                 slug = hit.get("slug") or name
                 log(f"从 Modrinth 安装模组 {slug}" + (f" @{vid}" if vid else ""))
-                mods_mod.install_mod_from_source(
+                result = mods_mod.install_mod_from_source(
                     dm, str(slug), inst, mc_version=gv, on_progress=on_progress,
                     version_id=vid, mods_dir=mods_dir)
+        files = (result or {}).get("files") or []
+        if len(files) > 1:
+            log(tr("已自动安装必需前置") + ": " + ", ".join(str(f) for f in files[1:]))
+        for msg in (result or {}).get("warnings") or []:
+            log(f"⚠ {msg}")
         log(tr("模组安装完成"))
 
     def _install_content_impl(self, progress, log, kind, name, instance, extra=None):

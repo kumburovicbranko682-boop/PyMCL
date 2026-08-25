@@ -61,13 +61,20 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         version = _pick_version(dm, slug, mc_version, loader)
 
     seen = set()
+    seen_projects = set()
     downloaded = []
+    warnings = []
 
     def _download(v, depth=0):
         vid = v.get("id")
         if not vid or vid in seen or depth > 3:
             return
+        pid = v.get("project_id")
+        if pid and pid in seen_projects:
+            return
         seen.add(vid)
+        if pid:
+            seen_projects.add(pid)
         f = _primary_file(v)
         if not f or not f.get("url"):
             return
@@ -84,14 +91,25 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
             if dep.get("dependency_type") != "required":
                 continue
             dep_vid = dep.get("version_id")
-            if not dep_vid:
+            dep_pid = dep.get("project_id")
+            if dep_pid and dep_pid in seen_projects:
+                continue
+            if not dep_vid and not dep_pid:
                 continue
             try:
-                dep_version = dm.fetch_json(f"{MODRINTH_API}/version/{dep_vid}", timeout=60)
-                _download(dep_version, depth + 1)
+                if dep_vid:
+                    dep_version = dm.fetch_json(f"{MODRINTH_API}/version/{dep_vid}", timeout=60)
+                else:
+                    # 只声明了项目：按实例 MC 版本与加载器挑兼容版本（HMCL 同款）
+                    dep_version = _pick_version(dm, dep_pid, mc_version, loader)
+                if isinstance(dep_version, dict):
+                    dep_version.setdefault("project_id", dep_pid)
+                    _download(dep_version, depth + 1)
             except Exception as e:
-                utils.log.warning("下载依赖 %s 失败: %s",
-                                  dep.get("file_name") or dep_vid, e)
+                label = dep.get("file_name") or dep_pid or dep_vid
+                msg = f"必需前置 {label} 安装失败: {e}"
+                utils.log.warning("%s", msg)
+                warnings.append(msg)
 
     _download(version)
     if not downloaded:
@@ -100,6 +118,7 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         "slug": slug,
         "version": version.get("version_number"),
         "files": [p.name for p in downloaded],
+        "warnings": warnings,
     }
 
 
@@ -182,6 +201,7 @@ def list_versions(dm: DownloadManager, slug, game_version=None, loaders=None):
             })
         result.append({
             "id": v.get("id"),
+            "project_id": v.get("project_id"),
             "name": v.get("name"),
             "version_number": v.get("version_number"),
             "version_type": v.get("version_type") or "release",
@@ -765,10 +785,121 @@ def _resolve_mods_dir(instance: Instance, mods_dir=None) -> Path:
     return folder
 
 
+CF_DEP_REQUIRED = 3   # relationType: RequiredDependency
+
+
+def _cf_required_dep_ids(file_obj) -> list:
+    """文件必需前置的 CurseForge 项目 id（relationType=3，PCL2「前置模组」）。"""
+    out = []
+    for dep in (file_obj or {}).get("dependencies") or []:
+        if not isinstance(dep, dict):
+            continue
+        if dep.get("relationType") != CF_DEP_REQUIRED:
+            continue
+        mid = dep.get("modId") or dep.get("addonId")
+        try:
+            mid = int(mid)
+        except (TypeError, ValueError):
+            continue
+        if mid and mid not in out:
+            out.append(mid)
+    return out
+
+
+def _cf_pick_file(files, mc_version, loader):
+    """挑最匹配 MC 版本与加载器的文件；没有任何匹配返回 None。"""
+    files = [f for f in files or [] if isinstance(f, dict)]
+    candidates = [f for f in files
+                  if not mc_version or mc_version in (f.get("gameVersions") or [])]
+    if loader:
+        pref = [f for f in candidates
+                if any(loader.lower() in (gv or "").lower()
+                       for gv in (f.get("gameVersions") or []))]
+        if pref:
+            candidates = pref
+    return candidates[0] if candidates else None
+
+
+def _cf_download_file(dm: DownloadManager, addon_id, file_obj, dest_dir,
+                      on_progress=None, label="模组"):
+    """按候选源下载一个 CurseForge 文件（downloadUrl → CDN 直链 → 通用 URL）。"""
+    f = _cf_normalize_file(file_obj)
+    file_id = f.get("id")
+    if file_id is None:
+        raise ModError("模组文件信息缺失")
+    filename = f.get("fileName") or f"mod-{addon_id}-{file_id}.jar"
+    dest = Path(dest_dir) / filename
+    url_sets = []
+    if f.get("downloadUrl"):
+        url_sets.append([f["downloadUrl"]])
+    url_sets.append(_candidate_cf_urls(addon_id, file_id, filename))
+    url_sets.append(_candidate_cf_urls(addon_id, file_id, None))
+    last_err = None
+    tried = set()
+    for urls in url_sets:
+        for url in urls:
+            if url in tried:
+                continue
+            tried.add(url)
+            try:
+                if on_progress:
+                    on_progress(f"下载 CurseForge {label} {filename}", 0, 1)
+                dm.download(url, dest, timeout=900)
+                return dest
+            except Exception as e:
+                last_err = e
+                utils.remove_tree(dest)
+    raise ModError(f"CurseForge {label} {filename} 下载失败: {last_err}")
+
+
+def _install_cf_deps(dm: DownloadManager, file_obj, dest_dir, mc_version, loader,
+                     api_key, on_progress, seen, downloaded, warnings, depth=0):
+    """递归安装文件的必需前置（对齐 PCL2 自动下载前置 / HMCL 依赖安装）。
+
+    单个前置失败不打断主模组安装，失败原因写进 warnings 由上层展示。
+    """
+    if depth > 3:
+        return
+    for dep_id in _cf_required_dep_ids(file_obj):
+        if dep_id in seen:
+            continue
+        seen.add(dep_id)
+        title = str(dep_id)
+        try:
+            dep_mod = cf_detail(dm, dep_id, api_key=api_key)
+            title = dep_mod.get("name") or title
+            files = []
+            if mc_version:
+                try:
+                    files = cf_files(dm, dep_id, api_key=api_key,
+                                     game_version=mc_version, page_size=50)
+                except ModError:
+                    files = []
+            picked = _cf_pick_file(files, mc_version, loader)
+            if picked is None:
+                picked = _cf_pick_file(dep_mod.get("latestFiles") or [],
+                                       mc_version, loader)
+            if picked is None:
+                raise ModError(f"没有支持 MC {mc_version or '当前版本'} 的文件")
+            fname = picked.get("fileName") or ""
+            if fname and (Path(dest_dir) / fname).is_file():
+                utils.log.info("前置 %s 已存在（%s），跳过", title, fname)
+                continue
+            dest = _cf_download_file(dm, dep_id, picked, dest_dir,
+                                     on_progress=on_progress, label=f"前置 {title}")
+            downloaded.append(dest.name)
+            _install_cf_deps(dm, picked, dest_dir, mc_version, loader, api_key,
+                             on_progress, seen, downloaded, warnings, depth + 1)
+        except Exception as e:
+            msg = f"必需前置 {title} 安装失败: {e}"
+            utils.log.warning("%s", msg)
+            warnings.append(msg)
+
+
 def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
                            mc_version=None, loader=None, api_key=None, on_progress=None,
                            file_id=None, mods_dir=None):
-    """安装 CurseForge 模组：自动匹配实例 MC 版本与加载器。"""
+    """安装 CurseForge 模组：自动匹配实例 MC 版本与加载器，含必需前置。"""
     inst = instance
     inst.ensure_standard_dirs()
     dest_dir = _resolve_mods_dir(inst, mods_dir)
@@ -799,49 +930,24 @@ def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
     else:
         if not files:
             raise ModError("该模组没有可下载的文件")
-
-        candidates = [f for f in files
-                      if not mc_version or mc_version in (f.get("gameVersions") or [])]
-        if loader:
-            pref = [f for f in candidates
-                    if any(loader.lower() in (gv or "").lower() for gv in (f.get("gameVersions") or []))]
-            if pref:
-                candidates = pref
-        if not candidates:
+        f = _cf_pick_file(files, mc_version, loader)
+        if f is None:
             utils.log.warning("没有与 MC %s 完全匹配的文件，使用最新文件", mc_version)
-            candidates = files
+            f = files[0]
 
-        f = candidates[0]
-    file_id = f.get("id")
-    if file_id is None:
-        raise ModError("模组文件信息缺失")
-    filename = f.get("fileName") or f"mod-{addon_id}-{file_id}.jar"
-    download_url = f.get("downloadUrl")  # API 可能返回此字段
-    dest = dest_dir / filename
-
-    last_err = None
-    # 候选 URL：API 返回的 downloadUrl → 带文件名的 CDN 直链 → 不带文件名的通用 URL
-    url_sets = []
-    if download_url:
-        url_sets.append([download_url])
-    url_sets.append(_candidate_cf_urls(addon_id, file_id, filename))
-    url_sets.append(_candidate_cf_urls(addon_id, file_id, None))
-
-    tried = set()
-    for urls in url_sets:
-        for url in urls:
-            if url in tried:
-                continue
-            tried.add(url)
-            try:
-                if on_progress:
-                    on_progress(f"下载 CurseForge 模组 {filename}", 0, 1)
-                dm.download(url, dest, timeout=900)
-                return {"source": "curseforge", "title": mod.get("name"), "files": [dest.name]}
-            except Exception as e:
-                last_err = e
-                utils.remove_tree(dest)
-    raise ModError(f"CurseForge 模组下载失败: {last_err}")
+    dest = _cf_download_file(dm, addon_id, f, dest_dir, on_progress=on_progress)
+    downloaded = [dest.name]
+    warnings = []
+    seen = set()
+    try:
+        seen.add(int(addon_id))
+    except (TypeError, ValueError):
+        pass
+    # 必需前置（如 API / 库模组）自动安装，缺了进游戏必崩
+    _install_cf_deps(dm, f, dest_dir, mc_version, loader, api_key,
+                     on_progress, seen, downloaded, warnings)
+    return {"source": "curseforge", "title": mod.get("name"),
+            "files": downloaded, "warnings": warnings}
 
 
 def install_cf_mod(dm: DownloadManager, url, instance: Instance, on_progress=None, mods_dir=None):
