@@ -78,24 +78,7 @@ def _post(api: str, path: str, payload: dict) -> dict:
     return data
 
 
-def login(api: str, username: str, password: str) -> dict:
-    api = normalize_api(api)
-    username = (username or "").strip()
-    if not username or not password:
-        raise AuthError("请输入皮肤站账号和密码")
-    data = _post(api, "/authserver/authenticate", {
-        "agent": {"name": "Minecraft", "version": 1},
-        "username": username,
-        "password": password,
-        "requestUser": True,
-    })
-    profile = data.get("selectedProfile") or {}
-    if not profile:
-        profiles = data.get("availableProfiles") or []
-        if profiles:
-            profile = profiles[0]
-    if not profile.get("name"):
-        raise AuthError("皮肤站没有可用角色，请先在网站创建角色")
+def _build_account(api: str, username: str, data: dict, profile: dict) -> dict:
     return {
         "type": "authlib",
         "name": profile.get("name"),
@@ -107,6 +90,69 @@ def login(api: str, username: str, password: str) -> dict:
         "expires_at": time.time() + 7 * 24 * 3600,
         "updated_at": time.time(),
     }
+
+
+def login(api: str, username: str, password: str, profile_id: str = "") -> dict:
+    """皮肤站登录。
+
+    账号有多个角色且未指定 profile_id 时，返回
+    {"pending": True, "profiles": [...], ...}，由调用方让用户选择后调
+    select_profile 完成绑定（对齐 PCL2 / HMCL 的角色选择）。
+    """
+    api = normalize_api(api)
+    username = (username or "").strip()
+    if not username or not password:
+        raise AuthError("请输入皮肤站账号和密码")
+    data = _post(api, "/authserver/authenticate", {
+        "agent": {"name": "Minecraft", "version": 1},
+        "username": username,
+        "password": password,
+        "requestUser": True,
+    })
+    profile = data.get("selectedProfile") or {}
+    profiles = [p for p in (data.get("availableProfiles") or []) if isinstance(p, dict)]
+    if profile_id:
+        hit = next((p for p in profiles if str(p.get("id")) == str(profile_id)), None)
+        if hit:
+            return select_profile(api, data.get("accessToken") or "",
+                                  data.get("clientToken") or "", hit, username)
+    if profile.get("name"):
+        return _build_account(api, username, data, profile)
+    if len(profiles) == 1:
+        # 服务器没自动选：按 Yggdrasil 规范用 refresh 绑定唯一角色
+        return select_profile(api, data.get("accessToken") or "",
+                              data.get("clientToken") or "", profiles[0], username)
+    if len(profiles) > 1:
+        return {
+            "pending": True,
+            "kind": "authlib",
+            "api": api,
+            "username": username,
+            "access_token": data.get("accessToken") or "",
+            "client_token": data.get("clientToken") or "",
+            "profiles": [{"id": p.get("id"), "name": p.get("name")} for p in profiles],
+        }
+    raise AuthError("皮肤站没有可用角色，请先在网站创建角色")
+
+
+def select_profile(api: str, access_token: str, client_token: str,
+                   profile: dict, username: str = "") -> dict:
+    """把令牌绑定到选中的角色（POST /authserver/refresh + selectedProfile）。"""
+    api = normalize_api(api)
+    payload = {
+        "accessToken": access_token,
+        "requestUser": True,
+        "selectedProfile": {"id": profile.get("id"), "name": profile.get("name")},
+    }
+    if client_token:
+        payload["clientToken"] = client_token
+    data = _post(api, "/authserver/refresh", payload)
+    if not data.get("accessToken"):
+        data = dict(data)
+        data["accessToken"] = access_token
+        data.setdefault("clientToken", client_token)
+    prof = data.get("selectedProfile") or profile
+    return _build_account(api, username, data, prof)
 
 
 def refresh(account: dict) -> dict:

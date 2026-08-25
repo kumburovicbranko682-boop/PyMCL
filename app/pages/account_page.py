@@ -16,6 +16,32 @@ from ..pcl_chrome import Theme
 from mclauncher.i18n import tr
 
 
+class ProfilePickDialog(MessageBoxBase):
+    """皮肤站 / 通行证账号有多个角色时选一个（对齐 PCL2 / HMCL）。"""
+
+    def __init__(self, profiles: list, parent=None):
+        super().__init__(parent)
+        self._profiles = list(profiles or [])
+        self.selected_id = ""
+        self.viewLayout.addWidget(SubtitleLabel(tr("选择角色"), self))
+        hint = BodyLabel(tr("该账号有多个角色，选一个用于登录游戏。"), self)
+        hint.setWordWrap(True)
+        self.viewLayout.addWidget(hint)
+        self.box = ComboBox(self)
+        for p in self._profiles:
+            self.box.addItem(str(p.get("name") or p.get("id") or "?"))
+        self.viewLayout.addWidget(self.box)
+        self.yesButton.setText(tr("用这个角色登录"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(360)
+        self.yesButton.clicked.connect(self._collect)
+
+    def _collect(self):
+        i = self.box.currentIndex()
+        if 0 <= i < len(self._profiles):
+            self.selected_id = str(self._profiles[i].get("id") or "")
+
+
 class SkinVariantDialog(MessageBoxBase):
     """上传皮肤前选手臂模型（经典 / 纤细）。"""
 
@@ -585,9 +611,26 @@ class AccountPage(QWidget):
         if self._login_dlg and success:
             self._login_dlg.accept()
         if success:
+            try:
+                profiles = self.backend.pending_login_profiles()
+            except Exception:
+                profiles = []
+            if profiles:
+                self._pick_profile(profiles)
+                return
             InfoBar.success(tr("登录成功"), message, parent=self,
                             position=InfoBarPosition.TOP, duration=2500)
             self.reload()
         elif message != tr("已取消"):
             InfoBar.error(tr("登录失败"), message, parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+
+    def _pick_profile(self, profiles):
+        dlg = ProfilePickDialog(profiles, self.window())
+        if dlg.exec() and dlg.selected_id:
+            self._set_auth_busy(True)
+            self._login_task = self.backend.start_login_select(dlg.selected_id)
+        else:
+            self.backend.cancel_pending_login()
+            InfoBar.warning(tr("未完成"), tr("没有选择角色，登录已取消"), parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)

@@ -128,6 +128,7 @@ class BackendAPI:
         self.accounts = AccountManager()
         self._game_proc = None
         self._game_lock = threading.Lock()
+        self._pending_login = None
         self._launch_task_id = None
         self._pack_cache: list[dict] = []
         self._mod_cache: list[dict] = []
@@ -1937,8 +1938,50 @@ class BackendAPI:
         from mclauncher import authlib as authlib_mod
         authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
         account = authlib_mod.login(api, username, password)
+        if account.get("pending"):
+            # 多角色账号：存起令牌等 UI 让用户选角色（对齐 PCL2 / HMCL）
+            self._pending_login = account
+            names = ", ".join(str(p.get("name")) for p in account.get("profiles") or [])
+            log(f"该账号有多个角色: {names}")
+            return "请选择角色完成登录"
         self.accounts.add_account(account)
         log(f"皮肤站登录成功：{account.get('name')}")
+        return f"已登录 {account.get('name')}"
+
+    def pending_login_profiles(self) -> list[dict]:
+        """上一次登录是否在等用户选角色；返回 [{id, name}]，没有则空。"""
+        pend = getattr(self, "_pending_login", None) or {}
+        return list(pend.get("profiles") or [])
+
+    def cancel_pending_login(self):
+        self._pending_login = None
+
+    def start_login_select(self, profile_id: str) -> str:
+        return self.start_task("选择角色", self._login_select_impl, profile_id)
+
+    def _login_select_impl(self, progress, log, profile_id):
+        from mclauncher.auth import AuthError
+        pend = getattr(self, "_pending_login", None)
+        if not pend:
+            raise AuthError("没有待选择的角色，请重新登录")
+        profile = next((p for p in pend.get("profiles") or []
+                        if str(p.get("id")) == str(profile_id)), None)
+        if not profile:
+            raise AuthError("角色不存在，请重新登录")
+        progress(0, 0, "绑定角色")
+        if pend.get("kind") == "nide8":
+            from mclauncher import nide8 as nide8_mod
+            account = nide8_mod.select_profile(
+                pend.get("server_id") or "", pend.get("access_token") or "",
+                pend.get("client_token") or "", profile, pend.get("username") or "")
+        else:
+            from mclauncher import authlib as authlib_mod
+            account = authlib_mod.select_profile(
+                pend.get("api") or "", pend.get("access_token") or "",
+                pend.get("client_token") or "", profile, pend.get("username") or "")
+        self._pending_login = None
+        self.accounts.add_account(account)
+        log(f"登录成功：{account.get('name')}")
         return f"已登录 {account.get('name')}"
 
     def _repair_impl(self, progress, log, instance, version):
@@ -1974,6 +2017,11 @@ class BackendAPI:
         from mclauncher import nide8 as nide8_mod
         nide8_mod.ensure_jar(self._dm(progress, log), on_note=log)
         account = nide8_mod.login(server_id, username, password)
+        if account.get("pending"):
+            self._pending_login = account
+            names = ", ".join(str(p.get("name")) for p in account.get("profiles") or [])
+            log(f"该账号有多个角色: {names}")
+            return "请选择角色完成登录"
         self.accounts.add_account(account)
         log(f"统一通行证登录成功：{account.get('name')}")
         return f"已登录 {account.get('name')}"

@@ -14,7 +14,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Qt, Signal
 
 from mclauncher import utils
-from mclauncher.auth import AccountManager, MicrosoftAuthenticator
+from mclauncher.auth import AccountManager, AuthError, MicrosoftAuthenticator
 from mclauncher.catalog import CBC_CF_ID, CBC_CF_SLUG, CDC_CF_ID, CDC_CF_SLUG, POPULAR_MODPACKS, POPULAR_MODS
 from mclauncher.config import CONFIG
 from mclauncher.downloader import DownloadManager
@@ -166,6 +166,7 @@ class BackendAPI(QObject):
         self.accounts = AccountManager()
         self._game_proc = None
         self._game_lock = threading.Lock()
+        self._pending_login = None
         self._launch_task_id = None
         self._pack_cache: list[dict] = []
         self._mod_cache: list[dict] = []
@@ -2351,8 +2352,49 @@ class BackendAPI(QObject):
         authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
         progress(1, 2, tr("登录皮肤站"))
         account = authlib_mod.login(api, username, password)
+        if account.get("pending"):
+            # 多角色账号：存起令牌等 UI 让用户选角色（对齐 PCL2 / HMCL）
+            self._pending_login = account
+            names = ", ".join(str(p.get("name")) for p in account.get("profiles") or [])
+            log(tr("该账号有多个角色: {n}").format(n=names))
+            return tr("请选择角色完成登录")
         self.accounts.add_account(account)
         log(f"皮肤站登录成功：{account.get('name')}")
+        return f"已登录 {account.get('name')}"
+
+    def pending_login_profiles(self) -> list[dict]:
+        """上一次登录是否在等用户选角色；返回 [{id, name}]，没有则空。"""
+        pend = getattr(self, "_pending_login", None) or {}
+        return list(pend.get("profiles") or [])
+
+    def cancel_pending_login(self):
+        self._pending_login = None
+
+    def start_login_select(self, profile_id: str) -> str:
+        return self.start_task(tr("选择角色"), self._login_select_impl, profile_id)
+
+    def _login_select_impl(self, progress, log, profile_id):
+        pend = getattr(self, "_pending_login", None)
+        if not pend:
+            raise AuthError(tr("没有待选择的角色，请重新登录"))
+        profile = next((p for p in pend.get("profiles") or []
+                        if str(p.get("id")) == str(profile_id)), None)
+        if not profile:
+            raise AuthError(tr("角色不存在，请重新登录"))
+        progress(0, 0, tr("绑定角色"))
+        if pend.get("kind") == "nide8":
+            from mclauncher import nide8 as nide8_mod
+            account = nide8_mod.select_profile(
+                pend.get("server_id") or "", pend.get("access_token") or "",
+                pend.get("client_token") or "", profile, pend.get("username") or "")
+        else:
+            from mclauncher import authlib as authlib_mod
+            account = authlib_mod.select_profile(
+                pend.get("api") or "", pend.get("access_token") or "",
+                pend.get("client_token") or "", profile, pend.get("username") or "")
+        self._pending_login = None
+        self.accounts.add_account(account)
+        log(f"登录成功：{account.get('name')}")
         return f"已登录 {account.get('name')}"
 
     def _repair_impl(self, progress, log, instance, version):
@@ -2393,6 +2435,11 @@ class BackendAPI(QObject):
         nide8_mod.ensure_jar(self._dm(progress, log), on_note=log)
         progress(1, 2, tr("登录统一通行证"))
         account = nide8_mod.login(server_id, username, password)
+        if account.get("pending"):
+            self._pending_login = account
+            names = ", ".join(str(p.get("name")) for p in account.get("profiles") or [])
+            log(tr("该账号有多个角色: {n}").format(n=names))
+            return tr("请选择角色完成登录")
         self.accounts.add_account(account)
         log(f"统一通行证登录成功：{account.get('name')}")
         return f"已登录 {account.get('name')}"
