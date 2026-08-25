@@ -858,6 +858,56 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
 
 # ================================================================ CurseForge
 
+def download_pack_mods_tolerant(dm: DownloadManager, tasks, raw_files, meta,
+                                on_progress=None) -> list[dict]:
+    """下载整合包 Mod，容忍个别失败。
+
+    个别 Mod 常因作者禁止第三方分发（API downloadUrl 为空、CDN 直链 403）
+    下不下来。PCL2 / HMCL 的做法是装完其余部分、列出需手动下载的清单，
+    而不是让整包安装报废。返回需手动下载的条目列表
+    [{name, filename, project_id, file_id, url, dest_dir}]。
+
+    只有「一个都没下载成」（且不止几个文件）或失败但找不到缺失文件时才
+    原样抛错——那说明是网络整体不可用，不该转成手动清单。用户取消照常抛。
+    """
+    download_err = None
+    try:
+        dm.download_all(tasks, message="下载整合包 Mod")
+    except DownloadError as e:
+        if "用户取消" in str(e):
+            raise
+        download_err = e
+    manual_mods = []
+    for raw, task in zip(raw_files, tasks):
+        dest = Path(task[1])
+        if dest.is_file():
+            continue
+        pid, fid = raw.get("projectID"), raw.get("fileID")
+        info = meta.get(int(fid), {}) if fid is not None else {}
+        manual_mods.append({
+            "name": info.get("displayName") or info.get("fileName") or f"项目 {pid}",
+            "filename": dest.name,
+            "project_id": pid,
+            "file_id": fid,
+            "url": f"https://www.curseforge.com/projects/{pid}",
+            "dest_dir": str(dest.parent),
+        })
+    if download_err:
+        if not manual_mods:
+            raise download_err
+        if len(manual_mods) == len(tasks) and len(tasks) > 3:
+            raise download_err
+    if manual_mods:
+        _emit(on_progress,
+              f"{len(manual_mods)} 个 Mod 未能自动下载（常见原因：作者禁止第三方分发）：")
+        for m in manual_mods:
+            _emit(on_progress, f"  {m['name']} → 浏览器打开 {m['url']} 下载后放入 {m['dest_dir']}")
+        _emit(on_progress, "其余内容已安装。手动补齐上述文件后即可正常启动。")
+    else:
+        _emit(on_progress, "整合包 Mod 下载完成")
+    return manual_mods
+
+
 def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                    on_progress=None, cancel=None, force=False, java=None):
     """安装 CurseForge 整合包 zip（本地文件或直链）。"""
@@ -958,10 +1008,11 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             size = info.get("fileLength")
             urls = cf_mod_download_urls(pid, fid, filename=filename, download_url=download_url)
             tasks.append((urls, dest, sha1, size))
+        manual_mods = []
         if tasks:
             _emit(on_progress, f"开始下载整合包 Mod（{len(tasks)} 个）")
-            dm.download_all(tasks, message="下载整合包 Mod")
-            _emit(on_progress, "整合包 Mod 下载完成")
+            manual_mods = download_pack_mods_tolerant(
+                dm, tasks, raw_files, meta, on_progress=on_progress)
 
         # overrides
         overrides = mf.get("overrides")
@@ -978,6 +1029,8 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             "source": "curseforge",
             "instance": instance.name,
         }
+        if manual_mods:
+            pack_meta["manual_mods"] = manual_mods
         instance.set_meta("modpack", pack_meta)
         instance.set_meta("mc_version", loader_vid or mc_version)
         _emit(on_progress, f"整合包 {pack_meta['name']} 安装完成 -> 实例 {instance.name}")

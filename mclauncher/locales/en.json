@@ -513,6 +513,7 @@
   "整合包": "Modpack",
   "整合包 (*.mrpack *.zip)": "Modpack (*.mrpack *.zip)",
   "整合包安装引擎：按声明的 Forge/Fabric 版本直装（不依赖残缺的 Maven 列表）": "Modpack installer: installs declared Forge/Fabric versions directly (no broken Maven lists)",
+  "整合包已安装，但 {n} 个 Mod 因作者限制需手动下载，链接见任务日志": "Modpack installed, but {n} mod(s) must be downloaded manually due to author restrictions; links are in the task log",
   "整合包链接或文件": "Modpack link or file",
   "文件下载源": "Download Source",
   "文本文件 (*.txt)": "Text file (*.txt)",

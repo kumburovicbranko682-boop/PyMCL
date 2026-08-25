@@ -1792,6 +1792,10 @@ class BackendAPI(QObject):
             CONFIG.set("default_instance", meta["instance"])
             CONFIG.save()
         log(f"整合包安装完成: {(meta or {}).get('name') or name}")
+        manual = (meta or {}).get("manual_mods") or []
+        if manual:
+            return tr("整合包已安装，但 {n} 个 Mod 因作者限制需手动下载，链接见任务日志").format(
+                n=len(manual))
 
     def _install_mod_impl(self, progress, log, name, instance, extra=None):
         extra = extra or {}
