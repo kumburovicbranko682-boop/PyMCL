@@ -529,6 +529,10 @@ class PclCatalogPage(QWidget):
         self._search_token = 0
         self._popular_loaded = False
         self._mode = "search"
+        # 翻页（对标 PCL2 下载页翻页 / HMCL 加载更多）
+        self._next_offset = 0
+        self._seen_keys = set()
+        self._more_btn = None
         self.setAcceptDrops(True)
         self._reload_instances()
         self._show_idle()
@@ -572,10 +576,22 @@ class PclCatalogPage(QWidget):
         self._search()
 
     def _clear_list(self):
+        self._more_btn = None
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+    def _drop_tail(self):
+        """追加下一页前，摘掉尾部的 stretch 与「加载更多」按钮。"""
+        for i in range(self.list_layout.count() - 1, -1, -1):
+            item = self.list_layout.itemAt(i)
+            w = item.widget()
+            if w is None or w is self._more_btn:
+                self.list_layout.takeAt(i)
+                if w is not None:
+                    w.deleteLater()
+        self._more_btn = None
 
     def _show_idle(self):
         self._search_token += 1
@@ -583,10 +599,18 @@ class PclCatalogPage(QWidget):
         self.list_layout.addWidget(EmptyState(self.spec["icon"], tr("输入名称后点击搜索")))
         self.list_layout.addStretch(1)
 
-    def _search(self):
+    PAGE_STEP = 30  # 每页条目数（Modrinth offset / CurseForge index 的步长）
+
+    def _search(self, append: bool = False):
         self._search_token += 1
         token = self._search_token
-        self._clear_list()
+        if not append:
+            self._next_offset = 0
+            self._seen_keys = set()
+            self._clear_list()
+        elif self._more_btn is not None:
+            self._more_btn.setEnabled(False)
+            self._more_btn.setText(tr("正在加载…"))
         fn = getattr(self.backend, self.spec["search"], None)
         if not callable(fn):
             self.list_layout.addWidget(EmptyState(self.spec["icon"], self.spec["empty_search"]))
@@ -599,6 +623,7 @@ class PclCatalogPage(QWidget):
         extra = {
             "game_version": "" if (not gv or str(gv).startswith(tr("全部"))) else gv,
             "category": type_f,
+            "offset": self._next_offset,
         }
         call_async = getattr(self.backend, "call_async", None)
 
@@ -609,43 +634,81 @@ class PclCatalogPage(QWidget):
                 return fn(query, source)
 
         if callable(call_async):
-            self.list_layout.addWidget(EmptyState(self.spec["icon"], tr("正在搜索…")))
-            self.list_layout.addStretch(1)
+            if not append:
+                self.list_layout.addWidget(EmptyState(self.spec["icon"], tr("正在搜索…")))
+                self.list_layout.addStretch(1)
             call_async(
                 _call,
-                lambda rows, t=token, tf=type_f: self._on_search_ok(t, rows, tf),
-                lambda err, t=token: self._on_search_err(t, err),
+                lambda rows, t=token, tf=type_f, a=append: self._on_search_ok(t, rows, tf, a),
+                lambda err, t=token, a=append: self._on_search_err(t, err, a),
             )
             return
-        self._on_search_ok(token, _call(), type_f)
+        self._on_search_ok(token, _call(), type_f, append)
 
-    def _on_search_err(self, token, err):
+    def _on_search_err(self, token, err, append: bool = False):
         if token != self._search_token:
+            return
+        if append:
+            # 保留已加载的结果，恢复按钮让用户可以重试
+            if self._more_btn is not None:
+                self._more_btn.setEnabled(True)
+                self._more_btn.setText(tr("加载更多"))
+            InfoBar.error(tr("加载更多失败"), str(err), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
             return
         self._clear_list()
         self.list_layout.addWidget(EmptyState(self.spec["icon"], f"搜索失败: {err}"))
         self.list_layout.addStretch(1)
 
-    def _on_search_ok(self, token, results, type_f):
+    def _make_more_button(self):
+        btn = PushButton(tr("加载更多"))
+        btn.setFixedHeight(34)
+        btn.setStyleSheet(ghost_btn_qss())
+        btn.clicked.connect(lambda: self._search(append=True))
+        return btn
+
+    def _on_search_ok(self, token, results, type_f, append: bool = False):
         if token != self._search_token:
             return
         results = list(results or [])
         del type_f
-        self._clear_list()
         query = self.name_edit.text().strip()
-        if not query:
-            head = QLabel(tr("热门推荐"))
-            head.setStyleSheet(
-                f"color: {Theme.title}; font-size: 13px; font-weight: 700;"
-                " background: transparent; padding: 10px 12px 6px 12px;")
-            self.list_layout.addWidget(head)
-        if not results:
-            self.list_layout.addWidget(EmptyState(self.spec["icon"], self.spec["empty_search"]))
-            self.list_layout.addStretch(1)
-            return
+        # 翻页时 CurseForge 人气排序会漂移，按 (来源, id/slug) 去重
+        fresh = []
         for row in results:
+            key = (str(row.get("source") or ""),
+                   str(row.get("id") or row.get("slug") or row.get("name") or ""))
+            if key in self._seen_keys:
+                continue
+            self._seen_keys.add(key)
+            fresh.append(row)
+        if append:
+            self._drop_tail()
+            if not fresh:
+                InfoBar.info(tr("没有更多结果"), "", parent=self,
+                             position=InfoBarPosition.TOP, duration=2500)
+                self.list_layout.addStretch(1)
+                return
+        else:
+            self._clear_list()
+            if not query:
+                head = QLabel(tr("热门推荐"))
+                head.setStyleSheet(
+                    f"color: {Theme.title}; font-size: 13px; font-weight: 700;"
+                    " background: transparent; padding: 10px 12px 6px 12px;")
+                self.list_layout.addWidget(head)
+            if not results:
+                self.list_layout.addWidget(EmptyState(self.spec["icon"], self.spec["empty_search"]))
+                self.list_layout.addStretch(1)
+                return
+        for row in fresh:
             self.list_layout.addWidget(PclResultRow(
                 row, self._install, on_fav=self._toggle_fav, on_detail=self._show_detail))
+        self._next_offset += self.PAGE_STEP
+        # 满页（含近满页的双源合并）才显示「加载更多」；空查询是静态热门推荐，没有下一页
+        if query and len(results) >= 20:
+            self._more_btn = self._make_more_button()
+            self.list_layout.addWidget(self._more_btn)
         self.list_layout.addStretch(1)
 
     def _show_detail(self, item: dict, btn=None):

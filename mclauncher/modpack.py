@@ -57,7 +57,7 @@ def cf_manifest_loaders(mf):
 # ================================================================ CurseForge 搜索（BMCLAPI 镜像）
 
 def search_cf_modpacks(dm: DownloadManager, query, limit=25, api_key=None,
-                       game_version=None, categories=None):
+                       game_version=None, categories=None, offset=0):
     """搜索 CurseForge 整合包（走 BMCLAPI 国内镜像，无需 API key）。"""
     from .mods import search_curseforge, CF_CLASS_MODPACK
     from .catalog_files import cf_category_tokens
@@ -66,7 +66,8 @@ def search_cf_modpacks(dm: DownloadManager, query, limit=25, api_key=None,
         tokens.extend(cf_category_tokens(c) or [str(c).lower()])
     hits = search_curseforge(dm, query=query, limit=limit, api_key=api_key,
                              class_id=CF_CLASS_MODPACK,
-                             game_version=game_version, categories=tokens or None)
+                             game_version=game_version, categories=tokens or None,
+                             offset=offset)
     for h in hits:
         h["description"] = h.pop("summary", "")
         h.pop("cf_categories", None)
@@ -416,7 +417,7 @@ def _match_filters_cf(mod: dict, game_version=None, cat_keys=None) -> bool:
 # ================================================================ Modrinth
 
 def modrinth_search(dm: DownloadManager, query, limit=25,
-                    game_version=None, categories=None):
+                    game_version=None, categories=None, offset=0):
     """搜索 Modrinth 整合包（官方优先，MCIM 镜像兜底）。"""
     from .mods import mirror_modrinth_url, _mr_facets
     from .catalog_files import category_facets
@@ -428,6 +429,8 @@ def modrinth_search(dm: DownloadManager, query, limit=25,
         "limit": limit,
         "index": "relevance",
     }
+    if offset:
+        params["offset"] = int(offset)
     if categories:
         cats = category_facets(categories[0] if len(categories) == 1 else "")
         # 多类型时 _mr_facets 生成 OR 组，单类型走 facets 里的精确分类

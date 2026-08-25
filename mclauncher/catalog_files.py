@@ -274,6 +274,10 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
     src = str(source or extra.get("source") or "").lower()
     gv = _game_version({**extra, "game_version": extra.get("game_version") or extra.get("version")})
     cats = category_facets(extra.get("category") or extra.get("type") or "")
+    try:
+        offset = int(extra.get("offset") or 0)
+    except (TypeError, ValueError):
+        offset = 0
     want_mr = src in ("", "全部", "all", "modrinth") and kind in KIND_MR
     want_cf = src in ("", "全部", "all") or src.startswith("curse")
     if src.startswith("modrinth"):
@@ -290,10 +294,12 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
     if want_mr:
         try:
             if kind == "mod":
-                hits = mods_mod.search_mods(dm, q or " ", limit=30, game_version=gv, categories=cats)
+                hits = mods_mod.search_mods(dm, q or " ", limit=30, game_version=gv,
+                                            categories=cats, offset=offset)
             else:
                 hits = mods_mod.search_modrinth_projects(
-                    dm, q, KIND_MR[kind], limit=30, game_version=gv, categories=cats)
+                    dm, q, KIND_MR[kind], limit=30, game_version=gv, categories=cats,
+                    offset=offset)
             for h in hits:
                 rows.append(_hit_row(h, "modrinth"))
         except Exception:
@@ -305,6 +311,7 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
                 class_id=KIND_CF.get(kind, mods_mod.CF_CLASS_MOD),
                 game_version=gv,
                 categories=cf_category_tokens(extra.get("category") or extra.get("type") or ""),
+                offset=offset,
             )
             for h in hits:
                 row = _hit_row(h, "curseforge")

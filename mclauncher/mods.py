@@ -138,14 +138,20 @@ def _mr_facets(project_type, game_version=None, categories=None):
     return json.dumps(facets)
 
 
-def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categories=None):
-    """搜索 Modrinth 模组（project_type:mod），官方与镜像短超时轮询。"""
+def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categories=None,
+                offset=0):
+    """搜索 Modrinth 模组（project_type:mod），官方与镜像短超时轮询。
+
+    offset 用于翻页（对标 PCL2 下载页翻页 / HMCL 加载更多）。
+    """
     params = {
         "query": query or " ",
         "facets": _mr_facets("mod", game_version, categories),
         "limit": limit,
         "index": "relevance" if (query or "").strip() else "downloads",
     }
+    if offset:
+        params["offset"] = int(offset)
     last_err = None
     from . import source
     for base in source.modrinth_api_bases():
@@ -662,18 +668,19 @@ def cf_files_by_ids(dm: DownloadManager, file_ids, api_key=None):
 
 def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
                       class_id=CF_CLASS_MOD, slug=None, game_version=None,
-                      categories=None):
+                      categories=None, offset=0):
     """搜索 CurseForge（官方 API 优先，国内镜像兜底）。
 
     categories 是 canonical key 的展示名碎片（见 catalog_files.CF_TYPE_TOKENS）；
     CF 的 categoryFilter 对 slug 约束不稳定，这里改为拉回结果后按分类名过滤。
+    offset 是逻辑条目偏移；开分类过滤时 pageSize 翻倍，index 同步翻倍保证窗口不重叠。
     """
     params = {
         "gameId": 432,
         "classId": class_id,
         "sortField": 2,      # 按人气排序
         "pageSize": limit * 2 if categories else limit,
-        "index": 0,
+        "index": int(offset) * 2 if categories else int(offset),
     }
     if query:
         params["searchFilter"] = query
@@ -1032,7 +1039,7 @@ CONTENT_KINDS = {
 
 
 def search_modrinth_projects(dm: DownloadManager, query, project_type, limit=30,
-                             game_version=None, categories=None):
+                             game_version=None, categories=None, offset=0):
     """按 project_type 搜 Modrinth（shader / resourcepack / datapack / mod）。"""
     params = {
         "query": query or " ",
@@ -1040,6 +1047,8 @@ def search_modrinth_projects(dm: DownloadManager, query, project_type, limit=30,
         "limit": limit,
         "index": "relevance" if (query or "").strip() else "downloads",
     }
+    if offset:
+        params["offset"] = int(offset)
     last_err = None
     data = None
     from . import source

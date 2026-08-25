@@ -1665,16 +1665,19 @@ class BackendAPI(QObject):
         }
 
     def search_modpacks(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
-        """搜索整合包。extra 携带 game_version / category（下载页的筛选框）。"""
+        """搜索整合包。extra 携带 game_version / category / offset（下载页的筛选框与翻页）。"""
         extra = extra or {}
         src = self._catalog_source(source)
         q = (query or "").strip()
+        offset = self._search_offset(extra)
         from mclauncher.catalog_files import category_facets
         cats = category_facets(extra.get("category") or extra.get("type") or "")
         gv = extra.get("game_version") or extra.get("version") or ""
         if isinstance(gv, str) and gv.startswith(tr("全部")):
             gv = ""
         if not q:
+            if offset:
+                return []  # 热门推荐只有一页
             rows = []
             seen = set()
             for title, pack_src, key, slug in POPULAR_MODPACKS:
@@ -1708,12 +1711,14 @@ class BackendAPI(QObject):
         dm = DownloadManager(threads=2)
         key = CONFIG.get("curseforge_api_key")
         hits = []
-        try:
-            hits = modpack_mod.search_modpacks_chinese(
-                dm, q, limit=25, api_key=key, game_version=gv or None,
-                categories=cats or None)
-        except Exception:
-            hits = []
+        if not offset:
+            # 中文别名目录只有第一页；翻页直接走全文搜索
+            try:
+                hits = modpack_mod.search_modpacks_chinese(
+                    dm, q, limit=25, api_key=key, game_version=gv or None,
+                    categories=cats or None)
+            except Exception:
+                hits = []
         if hits and any(h.get("matched_alias") for h in hits):
             rows = [self._modpack_row(h, src) for h in hits]
             self._pack_cache = rows
@@ -1722,12 +1727,12 @@ class BackendAPI(QObject):
             try:
                 if src == "curseforge":
                     hits = modpack_mod.search_cf_modpacks(
-                        dm, q, limit=25, api_key=key, game_version=gv or None,
-                        categories=cats or None)
+                        dm, q, limit=30, api_key=key, game_version=gv or None,
+                        categories=cats or None, offset=offset)
                 else:
                     hits = modpack_mod.modrinth_search(
-                        dm, q, limit=25, game_version=gv or None,
-                        categories=cats or None)
+                        dm, q, limit=30, game_version=gv or None,
+                        categories=cats or None, offset=offset)
             except Exception:
                 hits = []
         else:
@@ -1737,7 +1742,7 @@ class BackendAPI(QObject):
                 key=lambda h: 0 if (h.get("source") or src) == src else 1,
             )
         rows = [self._modpack_row(h, src) for h in hits]
-        self._pack_cache = rows
+        self._pack_cache = (self._pack_cache + rows) if offset else rows
         return rows
 
     def get_project_detail(self, source: str, ident: str) -> dict:
@@ -1747,10 +1752,21 @@ class BackendAPI(QObject):
             DownloadManager(threads=2), source, ident,
             api_key=CONFIG.get("curseforge_api_key") or "")
 
+    @staticmethod
+    def _search_offset(extra: dict | None) -> int:
+        """extra["offset"] → 翻页偏移（对标 PCL2 下载页翻页 / HMCL 加载更多）。"""
+        try:
+            return max(0, int((extra or {}).get("offset") or 0))
+        except (TypeError, ValueError):
+            return 0
+
     def search_mods(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
         src = self._catalog_source(source)
         q = (query or "").strip()
+        offset = self._search_offset(extra)
         if not q:
+            if offset:
+                return []  # 热门推荐只有一页
             rows = []
             for title, mod_src, key, *_rest in POPULAR_MODS:
                 if src != "all" and mod_src != src:
@@ -1779,9 +1795,11 @@ class BackendAPI(QObject):
             if src == "curseforge":
                 hits = mods_mod.search_curseforge(
                     dm, q, limit=30, api_key=CONFIG.get("curseforge_api_key"),
-                    class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None)
+                    class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None,
+                    offset=offset)
             else:
-                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None, categories=cats)
+                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None,
+                                            categories=cats, offset=offset)
         except Exception:
             hits = []
         rows = []
@@ -1798,7 +1816,8 @@ class BackendAPI(QObject):
                 "updated": h.get("updated") or "",
                 "icon_url": h.get("icon_url") or "",
             })
-        self._mod_cache = rows
+        # 翻页时追加缓存，第一页的条目安装时还要按名字反查
+        self._mod_cache = (self._mod_cache + rows) if offset else rows
         return rows
 
     def _content_row(self, hit: dict, default_source: str = "") -> dict:
@@ -1829,6 +1848,7 @@ class BackendAPI(QObject):
         dm = DownloadManager(threads=2)
         rows = []
         q = (query or "").strip()
+        offset = self._search_offset(extra)
         gv = extra.get("game_version") or extra.get("version") or ""
         if isinstance(gv, str) and gv.startswith(tr("全部")):
             gv = ""
@@ -1837,7 +1857,8 @@ class BackendAPI(QObject):
         if want_mr:
             try:
                 hits = mods_mod.search_modrinth_projects(
-                    dm, q, spec["mr"], limit=30, game_version=gv or None, categories=cats)
+                    dm, q, spec["mr"], limit=30, game_version=gv or None, categories=cats,
+                    offset=offset)
                 rows.extend(self._content_row(h, "modrinth") for h in hits)
             except Exception:
                 pass
@@ -1848,6 +1869,7 @@ class BackendAPI(QObject):
                     api_key=CONFIG.get("curseforge_api_key"),
                     class_id=spec["cf"],
                     game_version=gv or None,
+                    offset=offset,
                 )
                 for h in hits:
                     row = self._content_row(h, "curseforge")
