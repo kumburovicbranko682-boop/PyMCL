@@ -297,6 +297,131 @@ static char *detect_mc(const char *inst) {
     return r;
 }
 
+/* ============================================================
+ * 必需前置自动安装（对齐 PCL2「自动下载前置」/ HMCL，与 mclauncher/mods.py 同步）
+ * ============================================================ */
+#define CF_DEP_REQUIRED 3
+#define DEP_SEEN_MAX 32
+
+typedef struct {
+    long long num[DEP_SEEN_MAX]; int nn;      /* CurseForge 项目 id */
+    char str[DEP_SEEN_MAX][64];  int ns;      /* Modrinth 项目 / 版本 id */
+} dep_seen;
+
+/* 返回 1 = 已见过；否则记录并返回 0 */
+static int seen_num(dep_seen *s, long long id) {
+    for (int i = 0; i < s->nn; i++) if (s->num[i] == id) return 1;
+    if (s->nn < DEP_SEEN_MAX) s->num[s->nn++] = id;
+    return 0;
+}
+
+static int seen_str(dep_seen *s, const char *id) {
+    if (!id || !id[0]) return 0;
+    for (int i = 0; i < s->ns; i++) if (strcmp(s->str[i], id) == 0) return 1;
+    if (s->ns < DEP_SEEN_MAX) snprintf(s->str[s->ns++], 64, "%s", id);
+    return 0;
+}
+
+static void dep_log(pymcl_ctx *ctx, const char *fmt, const char *arg) {
+    if (!ctx || !ctx->on_log) return;
+    char m[320];
+    snprintf(m, sizeof(m), fmt, arg ? arg : "?");
+    ctx->on_log(ctx->ud, m);
+}
+
+static cJSON *mr_pick_version(cJSON *vers, const char *mc, const char *loader) {
+    if (!cJSON_IsArray(vers) || cJSON_GetArraySize(vers) == 0) return NULL;
+    cJSON *v;
+    cJSON_ArrayForEach(v, vers) {
+        int ok_mc = !mc, ok_ld = !loader;
+        cJSON *gv, *ld;
+        cJSON_ArrayForEach(gv, cJSON_GetObjectItem(v, "game_versions"))
+            if (mc && cJSON_IsString(gv) && strcmp(gv->valuestring, mc) == 0) ok_mc = 1;
+        cJSON_ArrayForEach(ld, cJSON_GetObjectItem(v, "loaders"))
+            if (loader && cJSON_IsString(ld) && pymcl_ieq(ld->valuestring, loader)) ok_ld = 1;
+        if (ok_mc && ok_ld) return v;
+    }
+    return cJSON_GetArrayItem(vers, 0);
+}
+
+static cJSON *mr_primary_file(cJSON *ver) {
+    cJSON *files = cJSON_GetObjectItem(ver, "files");
+    cJSON *file = NULL, *f;
+    cJSON_ArrayForEach(f, files) if (cJSON_IsTrue(cJSON_GetObjectItem(f, "primary"))) file = f;
+    if (!file && cJSON_GetArraySize(files) > 0) file = cJSON_GetArrayItem(files, 0);
+    return file;
+}
+
+static int mr_download_version(const char *inst, cJSON *ver, pymcl_ctx *ctx) {
+    cJSON *file = mr_primary_file(ver);
+    if (!file) { pymcl_set_error("没有可下载文件"); return -1; }
+    const char *fn = cJSON_GetStringValue(cJSON_GetObjectItem(file, "filename"));
+    const char *u = cJSON_GetStringValue(cJSON_GetObjectItem(file, "url"));
+    char dest[PYMCL_PATH], ip[PYMCL_PATH];
+    instance_path(inst, ip, sizeof(ip));
+    instance_ensure_dirs(inst);
+    pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn ? fn : "mod.jar");
+    char mir[1024];
+    mirror_mr(u, mir, sizeof(mir));
+    const char *ex[] = { u };
+    return download_file(mir, ex, 1, dest, ctx,
+                         cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(file, "hashes"), "sha1")),
+                         -1,
+                         cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(file, "hashes"), "sha512")));
+}
+
+/* 递归安装 Modrinth 必需前置；单个失败只记日志，不打断主模组 */
+static void mr_install_deps(const char *inst, cJSON *ver, const char *mc, const char *loader,
+                            dep_seen *seen, int depth, pymcl_ctx *ctx) {
+    if (depth > 3) return;
+    cJSON *dep;
+    cJSON_ArrayForEach(dep, cJSON_GetObjectItem(ver, "dependencies")) {
+        const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(dep, "dependency_type"));
+        if (!type || strcmp(type, "required") != 0) continue;
+        const char *dvid = cJSON_GetStringValue(cJSON_GetObjectItem(dep, "version_id"));
+        const char *dpid = cJSON_GetStringValue(cJSON_GetObjectItem(dep, "project_id"));
+        if ((!dvid || !dvid[0]) && (!dpid || !dpid[0])) continue;
+        if (dpid && dpid[0] && seen_str(seen, dpid)) continue;
+        char url[256];
+        cJSON *owner = NULL, *dv = NULL;
+        if (dvid && dvid[0]) {
+            snprintf(url, sizeof(url), MODRINTH_API "/version/%s", dvid);
+            owner = http_get_json(url, 45);
+            dv = cJSON_IsObject(owner) ? owner : NULL;
+        } else {
+            /* 只声明了项目：按实例 MC 版本与加载器挑兼容版本 */
+            snprintf(url, sizeof(url), MODRINTH_API "/project/%s/version", dpid);
+            owner = http_get_json(url, 45);
+            dv = mr_pick_version(owner, mc, loader);
+        }
+        if (!dv) {
+            dep_log(ctx, "必需前置 %s 获取失败，需手动安装", dpid ? dpid : dvid);
+            cJSON_Delete(owner);
+            continue;
+        }
+        const char *vpid = cJSON_GetStringValue(cJSON_GetObjectItem(dv, "project_id"));
+        if (vpid && (!dpid || strcmp(vpid, dpid) != 0) && seen_str(seen, vpid)) {
+            cJSON_Delete(owner);
+            continue;
+        }
+        cJSON *pfile = mr_primary_file(dv);
+        const char *fn = pfile ? cJSON_GetStringValue(cJSON_GetObjectItem(pfile, "filename")) : NULL;
+        char dest[PYMCL_PATH], ip[PYMCL_PATH];
+        instance_path(inst, ip, sizeof(ip));
+        pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn ? fn : "");
+        if (fn && pymcl_file_exists(dest)) {   /* 已装过同名文件，跳过 */
+            cJSON_Delete(owner);
+            continue;
+        }
+        dep_log(ctx, "自动安装必需前置: %s", fn ? fn : (dpid ? dpid : dvid));
+        if (mr_download_version(inst, dv, ctx) == 0)
+            mr_install_deps(inst, dv, mc, loader, seen, depth + 1, ctx);
+        else
+            dep_log(ctx, "必需前置 %s 下载失败，需手动安装", fn ? fn : dpid);
+        cJSON_Delete(owner);
+    }
+}
+
 static int install_modrinth_mod(const char *inst, const char *slug, pymcl_ctx *ctx) {
     char url[256];
     snprintf(url, sizeof(url), MODRINTH_API "/project/%s/version", slug);
@@ -308,42 +433,98 @@ static int install_modrinth_mod(const char *inst, const char *slug, pymcl_ctx *c
     }
     char *mc = detect_mc(inst);
     const char *loader = detect_loader(inst);
-    cJSON *chosen = cJSON_GetArrayItem(vers, 0);
-    cJSON *v;
-    cJSON_ArrayForEach(v, vers) {
-        int ok_mc = !mc, ok_ld = !loader;
-        cJSON *gv, *ld;
-        cJSON_ArrayForEach(gv, cJSON_GetObjectItem(v, "game_versions"))
-            if (mc && cJSON_IsString(gv) && strcmp(gv->valuestring, mc) == 0) ok_mc = 1;
-        cJSON_ArrayForEach(ld, cJSON_GetObjectItem(v, "loaders"))
-            if (loader && cJSON_IsString(ld) && pymcl_ieq(ld->valuestring, loader)) ok_ld = 1;
-        if (ok_mc && ok_ld) { chosen = v; break; }
+    cJSON *chosen = mr_pick_version(vers, mc, loader);
+    int r = mr_download_version(inst, chosen, ctx);
+    if (r == 0) {
+        dep_seen seen = {0};
+        const char *pid = cJSON_GetStringValue(cJSON_GetObjectItem(chosen, "project_id"));
+        seen_str(&seen, pid ? pid : slug);
+        mr_install_deps(inst, chosen, mc, loader, &seen, 0, ctx);
     }
     free(mc);
-    cJSON *files = cJSON_GetObjectItem(chosen, "files");
-    cJSON *file = NULL, *f;
-    cJSON_ArrayForEach(f, files) if (cJSON_IsTrue(cJSON_GetObjectItem(f, "primary"))) file = f;
-    if (!file && cJSON_GetArraySize(files) > 0) file = cJSON_GetArrayItem(files, 0);
-    if (!file) { cJSON_Delete(vers); pymcl_set_error("没有可下载文件"); return -1; }
-    const char *fn = cJSON_GetStringValue(cJSON_GetObjectItem(file, "filename"));
-    const char *u = cJSON_GetStringValue(cJSON_GetObjectItem(file, "url"));
-    char dest[PYMCL_PATH], ip[PYMCL_PATH];
-    instance_path(inst, ip, sizeof(ip));
-    instance_ensure_dirs(inst);
-    pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn ? fn : "mod.jar");
-    char mir[1024];
-    mirror_mr(u, mir, sizeof(mir));
-    const char *ex[] = { u };
-    int r = download_file(mir, ex, 1, dest, ctx,
-                          cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(file, "hashes"), "sha1")),
-                          -1,
-                          cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(file, "hashes"), "sha512")));
     cJSON_Delete(vers);
     return r;
 }
 
 static void cf_cdn(long long fid, const char *fn, const char *host, char *out, size_t n) {
     snprintf(out, n, "https://%s/files/%lld/%lld/%s", host, fid / 1000, fid % 1000, fn ? fn : "file.jar");
+}
+
+/* 挑最匹配 MC 版本与加载器的文件；退而求其次只匹配 MC，再不行取第一个 */
+static cJSON *cf_pick_file(cJSON *files, const char *mc, const char *loader) {
+    if (!cJSON_IsArray(files) || cJSON_GetArraySize(files) == 0) return NULL;
+    cJSON *f, *best_mc = NULL;
+    cJSON_ArrayForEach(f, files) {
+        int ok_mc = !mc || !mc[0], ok_ld = !loader || !loader[0];
+        cJSON *gv;
+        cJSON_ArrayForEach(gv, cJSON_GetObjectItem(f, "gameVersions")) {
+            if (!cJSON_IsString(gv)) continue;
+            if (mc && mc[0] && strcmp(gv->valuestring, mc) == 0) ok_mc = 1;
+            if (loader && loader[0] && pymcl_ieq(gv->valuestring, loader)) ok_ld = 1;
+        }
+        if (ok_mc && ok_ld) return f;
+        if (ok_mc && !best_mc) best_mc = f;
+    }
+    return best_mc ? best_mc : cJSON_GetArrayItem(files, 0);
+}
+
+static int cf_download_picked(const char *inst, long long addon, cJSON *f, pymcl_ctx *ctx) {
+    long long fid = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(f, "id"));
+    const char *fn = cJSON_GetStringValue(cJSON_GetObjectItem(f, "fileName")) ?: "mod.jar";
+    const char *du = cJSON_GetStringValue(cJSON_GetObjectItem(f, "downloadUrl"));
+    char dest[PYMCL_PATH], ip[PYMCL_PATH];
+    instance_path(inst, ip, sizeof(ip));
+    instance_ensure_dirs(inst);
+    pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn);
+    char u1[512], u2[512], u3[512];
+    cf_cdn(fid, fn, "mediafilez.forgecdn.net", u1, sizeof(u1));
+    cf_cdn(fid, fn, "edge.forgecdn.net", u2, sizeof(u2));
+    snprintf(u3, sizeof(u3), CF_OFFICIAL "/mods/%lld/files/%lld/download", addon, fid);
+    const char *first = du && du[0] ? du : u1;
+    const char *ex[4]; int ne = 0;
+    if (first != u1) ex[ne++] = u1;
+    ex[ne++] = u2; ex[ne++] = u3;
+    return download_file(first, ex, ne, dest, ctx, NULL, -1, NULL);
+}
+
+/* 递归安装 CurseForge 必需前置（relationType=3）；失败只记日志 */
+static void cf_install_deps(const char *inst, cJSON *file, const char *mc, const char *loader,
+                            dep_seen *seen, int depth, pymcl_ctx *ctx) {
+    if (depth > 3) return;
+    cJSON *dep;
+    cJSON_ArrayForEach(dep, cJSON_GetObjectItem(file, "dependencies")) {
+        cJSON *rel = cJSON_GetObjectItem(dep, "relationType");
+        cJSON *mid = cJSON_GetObjectItem(dep, "modId");
+        if (!cJSON_IsNumber(rel) || (int)cJSON_GetNumberValue(rel) != CF_DEP_REQUIRED) continue;
+        if (!cJSON_IsNumber(mid)) continue;
+        long long id = (long long)cJSON_GetNumberValue(mid);
+        if (id <= 0 || seen_num(seen, id)) continue;
+        char path[64]; snprintf(path, sizeof(path), "/mods/%lld", id);
+        cJSON *d = cf_get(path, NULL);
+        cJSON *mod = d ? cJSON_GetObjectItem(d, "data") : NULL;
+        const char *nm = mod ? cJSON_GetStringValue(cJSON_GetObjectItem(mod, "name")) : NULL;
+        cJSON *pf = cJSON_IsObject(mod)
+            ? cf_pick_file(cJSON_GetObjectItem(mod, "latestFiles"), mc, loader) : NULL;
+        if (!pf) {
+            dep_log(ctx, "必需前置 %s 没有可用文件，需手动安装", nm ? nm : path);
+            cJSON_Delete(d);
+            continue;
+        }
+        const char *fn = cJSON_GetStringValue(cJSON_GetObjectItem(pf, "fileName"));
+        char dest[PYMCL_PATH], ip[PYMCL_PATH];
+        instance_path(inst, ip, sizeof(ip));
+        pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn ? fn : "");
+        if (fn && pymcl_file_exists(dest)) {   /* 已装过同名文件，跳过 */
+            cJSON_Delete(d);
+            continue;
+        }
+        dep_log(ctx, "自动安装必需前置: %s", nm ? nm : (fn ? fn : path));
+        if (cf_download_picked(inst, id, pf, ctx) == 0)
+            cf_install_deps(inst, pf, mc, loader, seen, depth + 1, ctx);
+        else
+            dep_log(ctx, "必需前置 %s 下载失败，需手动安装", nm ? nm : path);
+        cJSON_Delete(d);
+    }
 }
 
 static int install_cf_mod(const char *inst, long long addon, pymcl_ctx *ctx) {
@@ -362,23 +543,17 @@ static int install_cf_mod(const char *inst, long long addon, pymcl_ctx *ctx) {
         cJSON_AddItemToObject(d, "_files", fl);
         files = cf_items(fl);
     }
-    cJSON *f = cJSON_GetArrayItem(files, 0);
-    long long fid = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(f, "id"));
-    const char *fn = cJSON_GetStringValue(cJSON_GetObjectItem(f, "fileName")) ?: "mod.jar";
-    const char *du = cJSON_GetStringValue(cJSON_GetObjectItem(f, "downloadUrl"));
-    char dest[PYMCL_PATH], ip[PYMCL_PATH];
-    instance_path(inst, ip, sizeof(ip));
-    instance_ensure_dirs(inst);
-    pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn);
-    char u1[512], u2[512], u3[512];
-    cf_cdn(fid, fn, "mediafilez.forgecdn.net", u1, sizeof(u1));
-    cf_cdn(fid, fn, "edge.forgecdn.net", u2, sizeof(u2));
-    snprintf(u3, sizeof(u3), CF_OFFICIAL "/mods/%lld/files/%lld/download", addon, fid);
-    const char *first = du && du[0] ? du : u1;
-    const char *ex[4]; int ne = 0;
-    if (first != u1) ex[ne++] = u1;
-    ex[ne++] = u2; ex[ne++] = u3;
-    int r = download_file(first, ex, ne, dest, ctx, NULL, -1, NULL);
+    char *mc = detect_mc(inst);
+    const char *loader = detect_loader(inst);
+    cJSON *f = cf_pick_file(files, mc, loader);
+    int r = f ? cf_download_picked(inst, addon, f, ctx) : -1;
+    if (!f) pymcl_set_error("没有可下载文件");
+    if (r == 0) {
+        dep_seen seen = {0};
+        seen_num(&seen, addon);
+        cf_install_deps(inst, f, mc, loader, &seen, 0, ctx);
+    }
+    free(mc);
     cJSON_Delete(d);
     return r;
 }
