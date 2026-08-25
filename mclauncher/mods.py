@@ -130,7 +130,14 @@ def _mr_facets(project_type, game_version=None, categories=None):
 
 
 def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categories=None):
-    """搜索 Modrinth 模组（project_type:mod），官方与镜像短超时轮询。"""
+    """搜索 Modrinth 模组（project_type:mod），官方与镜像短超时轮询。
+
+    中文关键词先经 mcmod.cn 中文名数据库翻成英文名再搜（HMCL/PCL2 同款）。
+    """
+    from . import mod_translate
+    rec = mod_translate.best_cn_match(query, "mod", dm=dm)
+    if rec:
+        query = rec.get("subname") or rec.get("curseforge") or rec.get("name") or query
     params = {
         "query": query or " ",
         "facets": _mr_facets("mod", game_version, categories),
@@ -150,7 +157,7 @@ def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categor
             data = None
     else:
         raise ModError(f"搜索模组失败（官方+镜像均不可用）: {last_err}")
-    return [
+    rows = [
         {
             "slug": h.get("slug"),
             "title": h.get("title", h.get("slug")),
@@ -164,6 +171,7 @@ def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categor
         }
         for h in data.get("hits", [])
     ]
+    return mod_translate.annotate(rows, "mod")
 
 
 def list_versions(dm: DownloadManager, slug, game_version=None, loaders=None):
@@ -721,6 +729,9 @@ def cf_files_by_ids(dm: DownloadManager, file_ids, api_key=None):
     return out
 
 
+_CF_TRANSLATE_KIND = {CF_CLASS_MOD: "mod", CF_CLASS_MODPACK: "modpack"}
+
+
 def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
                       class_id=CF_CLASS_MOD, slug=None, game_version=None,
                       categories=None):
@@ -728,7 +739,16 @@ def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
 
     categories 是 canonical key 的展示名碎片（见 catalog_files.CF_TYPE_TOKENS）；
     CF 的 categoryFilter 对 slug 约束不稳定，这里改为拉回结果后按分类名过滤。
+    中文关键词经 mcmod.cn 中文名数据库翻译：先按 slug 精确找本体，再按英文名全文搜。
     """
+    from . import mod_translate
+    kind = _CF_TRANSLATE_KIND.get(class_id)
+    cn_slug = None
+    if query and not slug and kind:
+        rec = mod_translate.best_cn_match(query, kind, dm=dm)
+        if rec:
+            cn_slug = (rec.get("curseforge") or "").strip() or None
+            query = rec.get("subname") or rec.get("name") or query
     params = {
         "gameId": 432,
         "classId": class_id,
@@ -745,12 +765,30 @@ def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
 
     data = _cf_fetch(dm, "/mods/search", api_key=api_key, params=params)
     hits = [_cf_norm(m) for m in _cf_items(data)]
+    if cn_slug:
+        # 中文命中的本体置顶；全文搜没带回来就按 slug 单独取一次
+        front = [h for h in hits if (h.get("slug") or "").lower() == cn_slug.lower()]
+        if front:
+            hits = front + [h for h in hits if h not in front]
+        else:
+            try:
+                exact_params = {
+                    "gameId": 432, "classId": class_id, "slug": cn_slug,
+                    "pageSize": 3, "index": 0,
+                }
+                if game_version:
+                    exact_params["gameVersion"] = game_version
+                exact = _cf_fetch(dm, "/mods/search", api_key=api_key, params=exact_params)
+                hits = [_cf_norm(m) for m in _cf_items(exact)] + hits
+            except Exception as e:
+                utils.log.debug("中文名精确 slug 查询失败 %s: %s", cn_slug, e)
     if categories:
         tokens = [str(t).lower() for t in categories if t]
         hits = [h for h in hits if any(
             tok and any(tok in c for c in h.get("cf_categories") or [])
             for tok in tokens)]
-    return hits[:limit]
+    hits = hits[:limit]
+    return mod_translate.annotate(hits, kind) if kind else hits
 
 
 def _cf_norm(m):

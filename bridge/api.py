@@ -1468,6 +1468,9 @@ class BackendAPI:
                 "description": h.get("description") or h.get("summary") or "",
                 "tags": h.get("tags") or [],
                 "updated": h.get("updated") or "",
+                "cn_name": h.get("cn_name") or "",
+                "cn_label": h.get("cn_label") or "",
+                "mcmod_url": h.get("mcmod_url") or "",
             })
         self._mod_cache = rows
         return rows
@@ -1484,6 +1487,9 @@ class BackendAPI:
             "description": hit.get("description") or hit.get("summary") or "",
             "tags": hit.get("tags") or [],
             "updated": hit.get("updated") or "",
+            "cn_name": hit.get("cn_name") or "",
+            "cn_label": hit.get("cn_label") or "",
+            "mcmod_url": hit.get("mcmod_url") or "",
         }
 
     def _search_content(self, kind: str, query: str, source: str, extra: dict | None = None) -> list[dict]:

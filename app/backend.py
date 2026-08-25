@@ -1745,6 +1745,9 @@ class BackendAPI(QObject):
             "slug": hit.get("slug"),
             "source": src or default_source,
             "description": hit.get("description") or "",
+            "cn_name": hit.get("cn_name") or "",
+            "cn_label": hit.get("cn_label") or "",
+            "mcmod_url": hit.get("mcmod_url") or "",
         }
 
     def search_modpacks(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
@@ -1873,6 +1876,9 @@ class BackendAPI(QObject):
                 "tags": h.get("tags") or [],
                 "updated": h.get("updated") or "",
                 "icon_url": h.get("icon_url") or "",
+                "cn_name": h.get("cn_name") or "",
+                "cn_label": h.get("cn_label") or "",
+                "mcmod_url": h.get("mcmod_url") or "",
             })
         self._mod_cache = rows
         return rows
@@ -1890,6 +1896,9 @@ class BackendAPI(QObject):
             "tags": hit.get("tags") or [],
             "updated": hit.get("updated") or "",
             "icon_url": hit.get("icon_url") or "",
+            "cn_name": hit.get("cn_name") or "",
+            "cn_label": hit.get("cn_label") or "",
+            "mcmod_url": hit.get("mcmod_url") or "",
         }
 
     def _search_content(self, kind: str, query: str, source: str, extra: dict | None = None) -> list[dict]:

@@ -599,10 +599,17 @@ def _match_filters_cf(mod: dict, game_version=None, cat_keys=None) -> bool:
 
 def modrinth_search(dm: DownloadManager, query, limit=25,
                     game_version=None, categories=None):
-    """搜索 Modrinth 整合包（官方优先，MCIM 镜像兜底）。"""
+    """搜索 Modrinth 整合包（官方优先，MCIM 镜像兜底）。
+
+    中文关键词先经 mcmod.cn 中文名数据库翻成英文名再搜（HMCL/PCL2 同款）。
+    """
     from .mods import mirror_modrinth_url, _mr_facets
     from .catalog_files import category_facets
+    from . import mod_translate
 
+    rec = mod_translate.best_cn_match(query, "modpack", dm=dm)
+    if rec:
+        query = rec.get("subname") or rec.get("curseforge") or rec.get("name") or query
     facets = _mr_facets("modpack", game_version, categories)
     params = {
         "query": query,
@@ -637,7 +644,7 @@ def modrinth_search(dm: DownloadManager, query, limit=25,
             "downloads": hit.get("downloads", 0),
             "game_versions": hit.get("versions") or [],
         })
-    return result
+    return mod_translate.annotate(result, "modpack")
 
 
 def modrinth_project(dm: DownloadManager, slug):

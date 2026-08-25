@@ -93,6 +93,10 @@ class PclResultRow(QFrame):
         self.setStyleSheet(row_qss("pclRow"))
         self.setFixedHeight(88)
         name = item.get("name") or "?"
+        # mcmod.cn 中文名（HMCL/PCL2 同款展示：中文在前，原名在后）
+        cn = str(item.get("cn_name") or "").strip()
+        if cn and cn not in name:
+            name = f"{cn} · {name}"
         desc = (item.get("description") or item.get("summary") or "").strip()
         tags = item.get("tags") or []
         ver = item.get("game_version") or item.get("version") or "—"
