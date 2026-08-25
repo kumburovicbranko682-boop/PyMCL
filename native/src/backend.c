@@ -535,6 +535,7 @@ static cJSON *rpc_java_list(int scan) {
 
 void backend_init(sse_emit_fn emit_fn) {
     g_emit = emit_fn;
+    py_rpc_set_emit(emit_fn);
     catalog_init();
     cJSON *n = NULL;
     instance_list(&n);

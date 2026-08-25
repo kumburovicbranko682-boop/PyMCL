@@ -22,8 +22,89 @@ static int find_python(char *out, size_t n) {
     return 0;
 }
 
+/* py_rpc 子进程协议：
+   EVENT {...}  -> 实时转发到 SSE（进度 / 登录码 / finished 等）
+   RESULT {...} -> 结果一出来就先还给调用方；start_task 型方法的子进程
+                   之后会留着陪任务跑完，事件继续经读线程转发。 */
+
+static sse_emit_fn g_py_emit;
+static volatile long g_pyrpc_seq;
+
+void py_rpc_set_emit(sse_emit_fn fn) { g_py_emit = fn; }
+
+typedef struct {
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    cJSON *result;   /* RESULT 行的 payload，主线程取走 */
+    int finished;    /* 子进程已退出 */
+    int rc;
+    int refs;
+    char pin[PYMCL_PATH];
+    char pout[PYMCL_PATH];
+    char *argv_store[16];
+    int argc;
+} pyrpc_job_t;
+
+static void pyrpc_job_free(pyrpc_job_t *j) {
+    for (int i = 0; i < j->argc; i++)
+        free(j->argv_store[i]);
+    DeleteFileA(j->pout);
+    pthread_mutex_destroy(&j->mu);
+    pthread_cond_destroy(&j->cv);
+    free(j);
+}
+
+static void pyrpc_job_unref(pyrpc_job_t *j) {
+    pthread_mutex_lock(&j->mu);
+    int refs = --j->refs;
+    pthread_mutex_unlock(&j->mu);
+    if (refs == 0) pyrpc_job_free(j);
+}
+
+static void pyrpc_on_line(void *ud, const char *line) {
+    pyrpc_job_t *j = (pyrpc_job_t *)ud;
+    if (strncmp(line, "EVENT ", 6) == 0) {
+        cJSON *o = cJSON_Parse(line + 6);
+        if (cJSON_IsObject(o)) {
+            const char *ev = cJSON_GetStringValue(cJSON_GetObjectItem(o, "event"));
+            cJSON *data = cJSON_GetObjectItem(o, "data");
+            if (ev && ev[0] && g_py_emit)
+                g_py_emit(ev, data);
+        }
+        cJSON_Delete(o);
+        return;
+    }
+    if (strncmp(line, "RESULT ", 7) == 0) {
+        cJSON *o = cJSON_Parse(line + 7);
+        if (o) {
+            pthread_mutex_lock(&j->mu);
+            if (!j->result) {
+                j->result = o;
+                o = NULL;
+            }
+            pthread_cond_broadcast(&j->cv);
+            pthread_mutex_unlock(&j->mu);
+        }
+        cJSON_Delete(o);
+    }
+}
+
+static void *pyrpc_thread(void *ud) {
+    pyrpc_job_t *j = (pyrpc_job_t *)ud;
+    /* 子进程自己限时（任务等待上限 3600s），这里稍微放宽兜底。 */
+    int rc = pymcl_run_process((const char **)j->argv_store, j->argc, g_root, pyrpc_on_line, j, 3900);
+    DeleteFileA(j->pin);
+    pthread_mutex_lock(&j->mu);
+    j->rc = rc;
+    j->finished = 1;
+    pthread_cond_broadcast(&j->cv);
+    pthread_mutex_unlock(&j->mu);
+    pyrpc_job_unref(j);
+    return NULL;
+}
+
 cJSON *py_rpc_call(const char *method, cJSON *params) {
-    char py[PYMCL_PATH], script[PYMCL_PATH], pin[PYMCL_PATH], pout[PYMCL_PATH], tmpdir[PYMCL_PATH];
+    char py[PYMCL_PATH], script[PYMCL_PATH], tmpdir[PYMCL_PATH];
     find_python(py, sizeof(py));
     pymcl_path_join3(script, sizeof(script), g_root, "native\\tools", "py_rpc.py");
     if (!pymcl_file_exists(script)) {
@@ -33,9 +114,19 @@ cJSON *py_rpc_call(const char *method, cJSON *params) {
         pymcl_set_error("py_rpc.py missing; method %s needs Python bridge", method);
         return NULL;
     }
-    GetTempPathA(sizeof(tmpdir), tmpdir);
-    snprintf(pin, sizeof(pin), "%spymcl-rpc-in-%u.json", tmpdir, (unsigned)GetCurrentProcessId());
-    snprintf(pout, sizeof(pout), "%spymcl-rpc-out-%u.json", tmpdir, (unsigned)GetCurrentProcessId() ^ 0xA5A5u);
+    pyrpc_job_t *j = (pyrpc_job_t *)calloc(1, sizeof(*j));
+    if (!j) { pymcl_set_error("内存不足"); return NULL; }
+    pthread_mutex_init(&j->mu, NULL);
+    pthread_cond_init(&j->cv, NULL);
+    j->refs = 2; /* 主线程 + 读线程 */
+    {
+        long seq = InterlockedIncrement(&g_pyrpc_seq);
+        GetTempPathA(sizeof(tmpdir), tmpdir);
+        snprintf(j->pin, sizeof(j->pin), "%spymcl-rpc-in-%u-%ld.json",
+                 tmpdir, (unsigned)GetCurrentProcessId(), seq);
+        snprintf(j->pout, sizeof(j->pout), "%spymcl-rpc-out-%u-%ld.json",
+                 tmpdir, (unsigned)GetCurrentProcessId(), seq);
+    }
 
     cJSON *body = params ? cJSON_Duplicate(params, 1) : cJSON_CreateObject();
     if (!cJSON_IsObject(body)) {
@@ -45,30 +136,64 @@ cJSON *py_rpc_call(const char *method, cJSON *params) {
     {
         char *txt = cJSON_PrintUnformatted(body);
         cJSON_Delete(body);
-        if (!txt) { pymcl_set_error("params serialize failed"); return NULL; }
-        pymcl_write_file(pin, txt, strlen(txt));
+        if (!txt) {
+            pyrpc_job_unref(j);
+            pyrpc_job_unref(j);
+            pymcl_set_error("params serialize failed");
+            return NULL;
+        }
+        pymcl_write_file(j->pin, txt, strlen(txt));
         free(txt);
     }
 
-    const char *argv[16];
-    int argc = 0;
-    argv[argc++] = py;
-    argv[argc++] = "-u";
-    argv[argc++] = script;
-    argv[argc++] = "--root";
-    argv[argc++] = g_root;
-    argv[argc++] = "--method";
-    argv[argc++] = method;
-    argv[argc++] = "--params";
-    argv[argc++] = pin;
-    argv[argc++] = "--out";
-    argv[argc++] = pout;
-    int rc = pymcl_run_process(argv, argc, g_root, NULL, NULL, 120);
-    DeleteFileA(pin);
-    cJSON *wrap = pymcl_read_json(pout);
-    DeleteFileA(pout);
+    /* 读线程可能活得比本栈帧久，argv 必须堆拷贝。 */
+    j->argc = 0;
+    j->argv_store[j->argc++] = pymcl_strdup(py);
+    j->argv_store[j->argc++] = pymcl_strdup("-u");
+    j->argv_store[j->argc++] = pymcl_strdup(script);
+    j->argv_store[j->argc++] = pymcl_strdup("--root");
+    j->argv_store[j->argc++] = pymcl_strdup(g_root);
+    j->argv_store[j->argc++] = pymcl_strdup("--method");
+    j->argv_store[j->argc++] = pymcl_strdup(method);
+    j->argv_store[j->argc++] = pymcl_strdup("--params");
+    j->argv_store[j->argc++] = pymcl_strdup(j->pin);
+    j->argv_store[j->argc++] = pymcl_strdup("--out");
+    j->argv_store[j->argc++] = pymcl_strdup(j->pout);
+
+    pthread_t th;
+    if (pthread_create(&th, NULL, pyrpc_thread, j) != 0) {
+        DeleteFileA(j->pin);
+        pyrpc_job_unref(j);
+        pyrpc_job_unref(j);
+        pymcl_set_error("无法启动 py_rpc 线程");
+        return NULL;
+    }
+    pthread_detach(th);
+
+    /* 等 RESULT 行或子进程退出，上限 120s（与旧行为一致）。 */
+    struct timespec ts;
+    ts.tv_sec = time(NULL) + 120;
+    ts.tv_nsec = 0;
+    pthread_mutex_lock(&j->mu);
+    while (!j->result && !j->finished) {
+        if (pthread_cond_timedwait(&j->cv, &j->mu, &ts) != 0)
+            break;
+    }
+    cJSON *wrap = j->result;
+    j->result = NULL;
+    int finished = j->finished;
+    int rc = j->rc;
+    pthread_mutex_unlock(&j->mu);
+
+    if (!wrap && finished)
+        wrap = pymcl_read_json(j->pout); /* 旧版脚本没有 RESULT 行时的回落 */
+    pyrpc_job_unref(j);
+
     if (!wrap) {
-        pymcl_set_error("py_rpc failed (rc=%d) for %s", rc, method);
+        if (finished)
+            pymcl_set_error("py_rpc failed (rc=%d) for %s", rc, method);
+        else
+            pymcl_set_error("py_rpc timeout for %s", method);
         return NULL;
     }
     if (!cJSON_IsTrue(cJSON_GetObjectItem(wrap, "ok"))) {
