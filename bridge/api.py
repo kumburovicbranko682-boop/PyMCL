@@ -630,8 +630,13 @@ class BackendAPI:
             return vs.mods_dir(inst, version)
         return inst.path / "mods"
 
-    def get_installed_mods(self, instance: str) -> list[str]:
-        return [p.name for p in mods_mod.list_instance_mods(self._instance(instance))]
+    def get_installed_mods(self, instance: str, version: str = "") -> list[str]:
+        # 与 app/backend.py 同步：带 version 时按版本隔离目录列（enable/delete_mod
+        # 一家子早就收 version，唯独这里不收，隔离实例在桥上列的是错误目录）。
+        inst = self._instance(instance)
+        return [r["filename"]
+                for r in mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
+                if r.get("enabled")]
 
     def get_installed_shaders(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "shaderpacks")]
