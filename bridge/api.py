@@ -1066,8 +1066,13 @@ class BackendAPI:
         if kind == "authlib":
             return {"can_upload": True, "can_reset": True, "can_cape": False,
                     "reason": "皮肤站披风请到站点网页管理"}
+        if kind == "offline":
+            # 对标 HMCL：离线账号选本地 PNG，启动时经本地 Yggdrasil + authlib-injector 注入
+            return {"can_upload": True, "can_reset": bool((acc or {}).get("skin_file")),
+                    "can_cape": False,
+                    "reason": "离线皮肤保存在本机，启动游戏时自动注入生效"}
         return {"can_upload": False, "can_reset": False, "can_cape": False,
-                "reason": "离线 / 通行证账号没有云端皮肤，请使用微软或皮肤站账号"}
+                "reason": "通行证账号没有云端皮肤，请使用微软或皮肤站账号"}
 
     def _skin_account(self, account_name: str) -> dict:
         from mclauncher.skin import SkinError
@@ -1130,6 +1135,16 @@ class BackendAPI:
     def _upload_skin_impl(self, progress, log, account_name, file_path, variant):
         from mclauncher import skin as skin_mod
         acc = self._skin_account(account_name)
+        if acc.get("type") == "offline":
+            from mclauncher import offline_skin as offline_skin_mod
+            log("正在保存离线皮肤…")
+            dest = offline_skin_mod.store_skin(file_path)
+            self.accounts.update_account(acc.get("name"), {
+                "skin_file": str(dest),
+                "skin_model": skin_mod.normalize_variant(variant),
+            })
+            self._emit("ui_changed", {})
+            return "离线皮肤已保存，启动游戏时自动注入生效"
         log("正在上传皮肤…")
         if acc.get("type") == "microsoft":
             skin_mod.upload_ms_skin(acc.get("access_token") or "", file_path, variant)
@@ -1138,7 +1153,7 @@ class BackendAPI:
                 acc.get("api") or "", acc.get("access_token") or "",
                 acc.get("uuid") or "", file_path, variant)
         else:
-            raise skin_mod.SkinError("离线 / 通行证账号没有云端皮肤，请使用微软或皮肤站账号")
+            raise skin_mod.SkinError("通行证账号没有云端皮肤，请使用微软或皮肤站账号")
         self._emit("ui_changed", {})
         return "皮肤已更新。第三方预览有缓存，可能要几分钟才能看到新皮肤"
 
@@ -1149,6 +1164,11 @@ class BackendAPI:
         from mclauncher import skin as skin_mod
         acc = self._skin_account(account_name)
         log("正在重置皮肤…")
+        if acc.get("type") == "offline":
+            self.accounts.update_account(acc.get("name"),
+                                         {"skin_file": "", "skin_model": ""})
+            self._emit("ui_changed", {})
+            return "已恢复默认皮肤"
         if acc.get("type") == "microsoft":
             skin_mod.reset_ms_skin(acc.get("access_token") or "")
         elif acc.get("type") == "authlib":
@@ -1156,7 +1176,7 @@ class BackendAPI:
                 acc.get("api") or "", acc.get("access_token") or "",
                 acc.get("uuid") or "")
         else:
-            raise skin_mod.SkinError("离线 / 通行证账号没有云端皮肤，请使用微软或皮肤站账号")
+            raise skin_mod.SkinError("通行证账号没有云端皮肤，请使用微软或皮肤站账号")
         self._emit("ui_changed", {})
         return "已恢复默认皮肤"
 
@@ -1770,6 +1790,21 @@ class BackendAPI:
         log(f"Java -version: {ver_line}")
         log(f"使用 Java {java_mod.get_java_major(java_exe) or '?'}: {java_exe}")
         progress(2, 4, "构建启动参数")
+        offline_skin_srv = None
+        if (acc.get("type") == "offline" and acc.get("skin_file")
+                and not props.get("authlib_api") and not props.get("nide8_id")):
+            # 对标 HMCL 离线皮肤：本地 Yggdrasil + authlib-injector 注入自选 PNG
+            from mclauncher import offline_skin as offline_skin_mod
+            try:
+                offline_skin_srv = offline_skin_mod.serve_for_account(
+                    props.get("name") or "Player", props.get("uuid") or "",
+                    acc["skin_file"], model=acc.get("skin_model") or "classic")
+                props = dict(props)
+                props["authlib_api"] = offline_skin_srv.api_root()
+                log(f"离线皮肤: 本地注入 {Path(acc['skin_file']).name}")
+            except Exception as e:
+                offline_skin_srv = None
+                log(f"离线皮肤不可用，用默认皮肤继续: {e}")
         if props.get("authlib_api"):
             from mclauncher import authlib as authlib_mod
             authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
@@ -1816,6 +1851,8 @@ class BackendAPI:
         try:
             code = proc.wait()
         finally:
+            if offline_skin_srv is not None:
+                offline_skin_srv.stop()
             if tracker is not None:
                 try:
                     dur = tracker.stop()

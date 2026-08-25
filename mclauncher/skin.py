@@ -300,11 +300,22 @@ def fetch_skin_texture(account: dict, timeout: int = 15) -> dict:
     """下载账号当前皮肤的原始 64x64 PNG，供本地渲染预览。
 
     返回 {"png": bytes, "variant": "classic"/"slim"}。
-    只支持微软 / 皮肤站账号；其它类型抛 SkinError（调用方回退第三方渲染）。
+    支持微软 / 皮肤站账号；离线账号读本地自选皮肤；
+    其它类型抛 SkinError（调用方回退第三方渲染）。
     """
     import requests
     acc = account or {}
     kind = acc.get("type") or "offline"
+    if kind == "offline" and acc.get("skin_file"):
+        p = Path(str(acc["skin_file"])).expanduser()
+        if not p.is_file():
+            raise SkinError(f"离线皮肤文件不存在: {p}")
+        png = p.read_bytes()
+        width, height = png_size(png)
+        if width != 64 or height not in (32, 64):
+            raise SkinError(f"皮肤纹理尺寸异常: {width}×{height}")
+        return {"png": png,
+                "variant": "slim" if acc.get("skin_model") == "slim" else "classic"}
     if kind == "microsoft":
         profile = fetch_ms_profile(acc.get("access_token") or "", timeout=timeout)
         active = next((s for s in profile["skins"] if s.get("active")),

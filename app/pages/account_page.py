@@ -378,8 +378,8 @@ class AccountPage(QWidget):
         body_url = row.get("body") or ""
 
         def fetch():
-            # 正版 / 皮肤站优先本地渲染原始纹理，不依赖第三方渲染站
-            if kind in ("microsoft", "authlib"):
+            # 正版 / 皮肤站 / 离线自选皮肤优先本地渲染原始纹理，不依赖第三方渲染站
+            if kind in ("microsoft", "authlib", "offline"):
                 try:
                     return ("texture", self.backend.fetch_skin_texture(name))
                 except Exception:
