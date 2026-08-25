@@ -244,6 +244,11 @@ void pymcl_launch_prep_load(const char *inst, const char *ver, pymcl_launch_prep
     cJSON *port = cJSON_GetObjectItem(j, "port");
     if (cJSON_IsNumber(port)) snprintf(out->port, sizeof(out->port), "%d", port->valueint);
     else snprintf(out->port, sizeof(out->port), "%s", cJSON_GetStringValue(port) ?: "");
+    snprintf(out->pre_launch, sizeof(out->pre_launch), "%s",
+             cJSON_GetStringValue(cJSON_GetObjectItem(j, "pre_launch")) ?: "");
+    snprintf(out->post_launch, sizeof(out->post_launch), "%s",
+             cJSON_GetStringValue(cJSON_GetObjectItem(j, "post_launch")) ?: "");
+    out->pre_launch_wait = !cJSON_IsFalse(cJSON_GetObjectItem(j, "pre_launch_wait"));
     cJSON_Delete(j);
 }
 

@@ -130,6 +130,87 @@ static int ctx_cancel(void *ud) {
     return t->cancelled;
 }
 
+/* shell 原样执行钩子命令。不能走 pymcl_spawn_process：join_cmdline 会按
+ * argv 重新加引号并反斜杠转义，用户写的完整命令行（含引号/管道）会被改写。
+ * 对齐 Python 端 subprocess shell=True 的 cmd /c <原文> 语义。 */
+static HANDLE hook_spawn(const char *command, const char *cwd, HANDLE *out_read) {
+    char line[4096];
+    snprintf(line, sizeof(line), "cmd /c %s", command);
+    wchar_t *wcmd = pymcl_u8_to_wide(line);
+    wchar_t *wcwd = cwd ? pymcl_u8_to_wide(cwd) : NULL;
+    SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };
+    HANDLE rd = NULL, wr = NULL;
+    STARTUPINFOW si; PROCESS_INFORMATION pi;
+    memset(&si, 0, sizeof(si)); memset(&pi, 0, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    if (out_read) {
+        if (!CreatePipe(&rd, &wr, &sa, 0)) { free(wcmd); free(wcwd); return NULL; }
+        SetHandleInformation(rd, HANDLE_FLAG_INHERIT, 0);
+        si.dwFlags |= STARTF_USESTDHANDLES;
+        si.hStdOutput = wr;
+        si.hStdError = wr;
+        si.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    }
+    BOOL ok = CreateProcessW(NULL, wcmd, NULL, NULL, out_read ? TRUE : FALSE,
+                             CREATE_NO_WINDOW, NULL, wcwd, &si, &pi);
+    free(wcmd); free(wcwd);
+    if (wr) CloseHandle(wr);
+    if (!ok) { if (rd) CloseHandle(rd); return NULL; }
+    CloseHandle(pi.hThread);
+    if (out_read) *out_read = rd;
+    return pi.hProcess;
+}
+
+/* 版本设置的「启动前 / 退出后命令」（对齐 launch_flow.run_hook）。
+ * 以前这两条命令在 C 桥启动时从不执行——保存成功但形同虚设。
+ * 等待模式回放前 40 行输出，退出码非零时明确告知；失败不阻断启动，
+ * 与 Python 行为一致。 */
+static int run_launch_hook(task_t *t, const char *command, const char *cwd, int wait) {
+    char cmd[2048];
+    snprintf(cmd, sizeof(cmd), "%s", command ? command : "");
+    char *s = cmd;
+    while (*s == ' ' || *s == '\t') s++;
+    size_t L = strlen(s);
+    while (L && (unsigned char)s[L - 1] <= ' ') s[--L] = 0;
+    if (!*s) return 0;
+    char msg[2200];
+    snprintf(msg, sizeof(msg), "运行启动脚本: %s", s);
+    ctx_log(t, msg);
+    if (!wait) {
+        HANDLE p = hook_spawn(s, cwd, NULL);
+        if (!p) ctx_log(t, "启动脚本无法启动");
+        else CloseHandle(p);
+        return 0;
+    }
+    HANDLE rd = NULL;
+    HANDLE p = hook_spawn(s, cwd, &rd);
+    if (!p) { ctx_log(t, "启动脚本无法启动"); return -1; }
+    char buf[4096], acc[4096]; size_t al = 0; DWORD got;
+    int lines = 0;
+    while (ReadFile(rd, buf, sizeof(buf), &got, NULL) && got) {
+        for (DWORD i = 0; i < got; i++) {
+            if (buf[i] == '\n' || al >= sizeof(acc) - 2) {
+                acc[al] = 0;
+                if (al && acc[al - 1] == '\r') acc[al - 1] = 0;
+                if (acc[0] && lines < 40) { ctx_log(t, acc); lines++; }
+                al = 0;
+            } else acc[al++] = buf[i];
+        }
+    }
+    WaitForSingleObject(p, INFINITE);
+    DWORD code = 0;
+    GetExitCodeProcess(p, &code);
+    CloseHandle(rd);
+    CloseHandle(p);
+    if (code) {
+        snprintf(msg, sizeof(msg), "脚本退出码 %ld", (long)code);
+        ctx_log(t, msg);
+    }
+    return (int)code;
+}
+
 static void finish_task(task_t *t, int ok, const char *msg) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "task_id", t->id);
@@ -304,6 +385,9 @@ static void *task_run(void *p) {
                 /* 与 Python 桥一致：工作目录 = 隔离后的游戏目录（可能是
                  * versions/<id>），不是永远的实例根。 */
                 pymcl_apply_isolation(inst, ver, ip, sizeof(ip));
+                pymcl_launch_prep hooks;
+                pymcl_launch_prep_load(inst, ver, &hooks);
+                run_launch_hook(t, hooks.pre_launch, ip, hooks.pre_launch_wait);
                 if (jexe && build_launch_command(inst, ver, props, jexe, mem, w, h,
                                                  cJSON_GetObjectItem(t->args, "extra_game_args"),
                                                  &argv, &argc, natives, sizeof(natives)) == 0) {
@@ -364,6 +448,8 @@ static void *task_run(void *p) {
                         }
                         if (t->cancelled) { ok = 1; snprintf(msg, sizeof(msg), "已停止游戏"); }
                         else {
+                            /* 退出后命令：与 Python 一致，取消时不执行。 */
+                            run_launch_hook(t, hooks.post_launch, ip, 1);
                             cJSON *rep = analyze_game_crash(inst, ver, scode, tail, tn, ts, started);
                             int crashed = 0;
                             const char *summary = NULL;

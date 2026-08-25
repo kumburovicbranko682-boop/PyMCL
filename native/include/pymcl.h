@@ -237,11 +237,14 @@ typedef struct {
     int window_width;
     int window_height;
     int fullscreen;            /* window_mode ∈ {maximize, fullscreen} */
+    int pre_launch_wait;       /* 缺省 1（对齐 DEFAULTS pre_launch_wait=True） */
     char gc[32];               /* 生效 GC 预设键：版本 > 全局 gc_preset > auto */
     char jvm_args[2048];       /* 版本设置 jvm_args 原文 */
     char game_args[2048];      /* 版本设置 game_args 原文 */
     char server[256];          /* 直连服务器 */
     char port[16];
+    char pre_launch[1024];     /* 启动前命令（shell 原样执行） */
+    char post_launch[1024];    /* 退出后命令 */
 } pymcl_launch_prep;
 void pymcl_launch_prep_load(const char *instance, const char *version_id, pymcl_launch_prep *out);
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,
