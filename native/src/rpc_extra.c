@@ -466,8 +466,16 @@ static cJSON *feedback_submit_native(cJSON *params) {
     return data;
 }
 
-cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
-    if (!method) return NULL;
+cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit, int *handled) {
+    /* 默认「已处理」：所有匹配分支都在中途 return，失败时错误信息必须原样
+       送回 UI，不能让调用方再拿同一方法去 py_rpc 重跑一遍（副作用会翻倍，
+       ai_send 这类被有意拦下的方法更会被重新放行）。
+       只有走到函数末尾才翻成「未处理」。 */
+    if (handled) *handled = 1;
+    if (!method) {
+        if (handled) *handled = 0;
+        return NULL;
+    }
 
     /* ---- accounts ---- */
     if (strcmp(method, "get_account_rows") == 0) {
@@ -644,9 +652,9 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         return cJSON_CreateTrue();
     }
     if (strcmp(method, "update_server") == 0) {
-        cJSON *r = py_rpc_call(method, params);
-        if (r) return r;
-        return cJSON_CreateTrue();
+        /* 失败就报失败。以前这里回 true 假装保存成功，用户改完
+           服务器条目看到「已保存」，其实什么都没写进去。 */
+        return py_rpc_call(method, params);
     }
 
     /* ---- playtime ---- */
@@ -870,10 +878,12 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
             return cJSON_CreateString("AI 需要 Python 桥（未找到可用 Python）");
         if (strcmp(method, "terracotta_allow_firewall") == 0)
             return cJSON_CreateString("请手动放行防火墙，或安装 Python 后端");
-        /* async-looking methods: return fake task id string won't work — return error */
-        pymcl_set_error("方法 %s 需要 Python 桥（设置 PYMCL_PYTHON）", method);
+        /* 其余（登录、修复、清理这类有副作用的）失败就失败：pymcl_error 里
+           是 py_rpc 带回的真实原因（比如「邮箱或密码错误」），别再用一句
+           笼统的「需要 Python 桥」把它盖掉。 */
         return NULL;
     }
 
+    if (handled) *handled = 0;
     return NULL; /* not handled here */
 }

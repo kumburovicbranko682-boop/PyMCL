@@ -258,7 +258,9 @@ void backend_shutdown(void);
 int server_run(const char *host, int port, const char *token);
 cJSON *py_rpc_call(const char *method, cJSON *params);
 void py_rpc_set_emit(sse_emit_fn fn);
-cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit);
+/* handled=1 表示方法归本函数管（返回 NULL 即「处理过但失败」，错误已进
+   pymcl_set_error，调用方不得再兜底重试）；handled=0 表示这里不认识该方法。 */
+cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit, int *handled);
 
 #ifdef __cplusplus
 }

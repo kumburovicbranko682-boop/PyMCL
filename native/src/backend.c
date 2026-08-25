@@ -911,13 +911,14 @@ cJSON *backend_call(const char *method, cJSON *params) {
 
     /* Align remaining RPC with Python bridge/api.py (native first, then py_rpc). */
     {
-        cJSON *aligned = rpc_align_call(method, params, emit);
-        if (aligned) return aligned;
+        int handled = 0;
+        cJSON *aligned = rpc_align_call(method, params, emit, &handled);
+        /* handled 且 NULL＝真失败：错误已在 pymcl_error 里，直接送回 UI。
+           以前这里会再拿同一方法去 py_rpc 重跑（副作用翻倍、被拦下的
+           ai_send 又被放行），最后还用「unknown method」盖掉真实报错。 */
+        if (aligned || handled) return aligned;
     }
-    {
-        cJSON *via_py = py_rpc_call(method, params);
-        if (via_py) return via_py;
-    }
-    pymcl_set_error("unknown method: %s", method);
-    return NULL;
+    /* py_rpc_call 失败时自带准确错误（含 py_rpc.py 对未知方法的报错），
+       不要再覆盖。 */
+    return py_rpc_call(method, params);
 }
