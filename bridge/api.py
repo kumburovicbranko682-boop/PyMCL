@@ -512,6 +512,9 @@ class BackendAPI:
         from mclauncher import saves as saves_mod
         return saves_mod.list_media(self._instance(instance), kind, version)
 
+    def open_media(self, path: str) -> bool:
+        return bool(open_path(path))
+
     def delete_modpack(self, instance: str, filename: str = ""):
         inst = self._instance(instance)
         meta = inst.meta() or {}
@@ -590,6 +593,48 @@ class BackendAPI:
 
     def terracotta_shutdown(self):
         terracotta_mod.stop()
+
+    def terracotta_enter_world(self):
+        info = self.terracotta_snapshot()
+        url = str(info.get("url") or "")
+        if info.get("state") != "guest-ok" or not url:
+            raise terracotta_mod.TerracottaError("还没连上房间。请先输入邀请码加入。")
+        return self._launch_into_server(url, "请到游戏「多人游戏」双击「陶瓦联机大厅」。")
+
+    def terracotta_direct_connect(self, address: str):
+        host, port = terracotta_mod.split_join_url(address)
+        if not host or host in ("127.0.0.1", "localhost"):
+            raise terracotta_mod.TerracottaError("请输入房主的公网地址，例如 1.2.3.4:25565")
+        return self._launch_into_server(f"{host}:{port}", "请到游戏「多人游戏」双击「陶瓦联机大厅」。")
+
+    def _launch_into_server(self, url: str, already_msg: str):
+        inst = self._instance()
+        terracotta_mod.remember_lobby(url, inst.path)
+        info = self.terracotta_snapshot()
+        if info.get("game_running"):
+            return already_msg
+        ids = inst.installed_ids()
+        if not ids:
+            raise LaunchError("请先到「启动」页安装一个版本。")
+        version = max(ids, key=lambda vid: (inst.versions_dir() / vid).stat().st_mtime)
+        host, port = terracotta_mod.split_join_url(url)
+        acc = self.accounts.get_active()
+        if acc and acc.get("type") == "microsoft":
+            account = acc.get("name") or "离线模式"
+            username = acc.get("name") or "Player"
+        else:
+            account = "离线模式"
+            username = (acc or {}).get("name") or self.terracotta_player()
+        return self.launch_game(
+            instance=inst.name,
+            version=version,
+            account=account,
+            username=username,
+            memory_mb=int(CONFIG.get("memory_mb") or 4096),
+            width=int(CONFIG.get("width") or 854),
+            height=int(CONFIG.get("height") or 480),
+            extra_game_args=["--server", host, "--port", str(port)],
+        )
 
     def launch_game(self, instance: str, version: str, account: str,
                     username: str, memory_mb: int, width: int, height: int,
@@ -713,8 +758,29 @@ class BackendAPI:
         """当前 mods 目录路径（版本隔离时为该版本独立目录），供 UI 显示与目录监视。"""
         return str(self._mods_folder(self._instance(instance), version))
 
-    def get_installed_mods(self, instance: str) -> list[str]:
-        return [p.name for p in mods_mod.list_instance_mods(self._instance(instance))]
+    def open_mods_folder(self, instance: str, version: str = "") -> str:
+        folder = self._mods_folder(self._instance(instance), version)
+        utils.ensure_dir(folder)
+        if not open_path(folder):
+            raise LaunchError(f"无法打开: {folder}")
+        return str(folder)
+
+    def get_mods_targets(self, instance: str) -> list[dict]:
+        """Mod 安装目标列表：实例共享 mods + 开了版本隔离的版本各自目录。"""
+        from mclauncher import version_settings as vs
+        inst = self._instance(instance)
+        rows = [{"label": "实例共享 mods 目录", "value": ""}]
+        for vid in inst.installed_ids():
+            iso = vs.load(inst, vid).get("isolation")
+            if iso in (vs.ISOLATION_MODS, vs.ISOLATION_ALL):
+                rows.append({"label": f"{vid} · 独立 mods", "value": vid})
+        return rows
+
+    def get_installed_mods(self, instance: str, version: str = "") -> list[str]:
+        inst = self._instance(instance)
+        return [r["filename"]
+                for r in mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
+                if r.get("enabled")]
 
     def scan_mod_conflicts(self, instance: str, version: str = "") -> dict:
         """扫描 mods：重复安装、加载器不匹配、缺依赖、互不兼容声明。"""
@@ -736,6 +802,16 @@ class BackendAPI:
 
     def get_installed_datapacks(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "datapacks")]
+
+    def get_installed_modpacks(self, instance: str) -> list[str]:
+        meta = self._instance(instance).meta() or {}
+        pack = meta.get("modpack")
+        if isinstance(pack, dict) and pack.get("name"):
+            label = pack.get("name")
+            if pack.get("version"):
+                label = f"{label} {pack.get('version')}"
+            return [label]
+        return []
 
     def delete_shader(self, instance: str, filename: str):
         mods_mod.delete_content_file(self._instance(instance), "shaderpacks", filename)
@@ -1117,8 +1193,9 @@ class BackendAPI:
         self._emit("ui_changed", {})
         return self.accounts.active
 
-    def add_offline_account(self, username: str):
-        acc = self.accounts.offline_account(username)
+    def add_offline_account(self, username: str, skin: str = ""):
+        acc = self.accounts.offline_account(
+            username, skin=skin or CONFIG.get("offline_skin") or "default")
         self.accounts.add_account({**acc, "type": "offline"})
         self._emit("ui_changed", {})
         return acc["name"]
@@ -1303,9 +1380,21 @@ class BackendAPI:
         from mclauncher import news as news_mod
         return news_mod.load_cached()
 
+    def skin_urls(self, account_name: str = "") -> dict:
+        from mclauncher import skin as skin_mod
+        if not account_name or account_name == "离线模式":
+            acc = {"type": "offline", "name": "Steve"}
+        else:
+            acc = self.accounts.get_account(account_name) or {"type": "offline", "name": account_name}
+        return {"avatar": skin_mod.avatar_url(acc), "body": skin_mod.body_url(acc)}
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)
+
+    def local_ips(self) -> list:
+        from mclauncher import lan as lan_mod
+        return lan_mod.local_ips()
 
     def authlib_presets(self) -> list:
         from mclauncher.authlib import PRESETS
@@ -2538,9 +2627,10 @@ class BackendAPI:
         from mclauncher.sysinfo import get_smart_recommendation
         return get_smart_recommendation()
 
-    def test_ai_connection(self) -> str:
+    def test_ai_connection(self, settings: dict | None = None) -> str:
+        """试连 AI。传 settings 就用它，让设置页能测「还没保存的值」而不必先落盘。"""
         from mclauncher.ai.client import test_connection
-        return test_connection(self.get_settings())
+        return test_connection(settings if settings is not None else self.get_settings())
 
     def ai_list_chats(self) -> dict:
         from mclauncher.ai import store as chat_store
