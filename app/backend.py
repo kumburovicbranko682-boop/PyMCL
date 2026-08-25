@@ -2098,7 +2098,11 @@ class BackendAPI(QObject):
             acc = self.accounts.get_account(account)
             if not acc:
                 raise LaunchError(f"账号不存在: {account}")
-            acc = self.accounts.ensure_valid(acc)
+            acc, auth_fallback = self.accounts.ensure_valid_or_fallback(acc)
+            if auth_fallback:
+                log(tr("账号令牌刷新失败：{err}").format(err=auth_fallback))
+                log(tr("已改用离线身份启动（保留原用户名与 UUID，单机可正常游玩；"
+                       "进正版验证服务器会被拒绝，网络恢复后重新启动即可恢复正版登录）。"))
         props = self.accounts.launch_props(acc)
         log(f"账号: {props.get('name')} ({self._account_kind(props, acc)})")
         log(f"内存: {memory_mb} MB | 分辨率: {width}x{height}")

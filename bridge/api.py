@@ -1686,7 +1686,11 @@ class BackendAPI:
             acc = self.accounts.get_account(account)
             if not acc:
                 raise LaunchError(f"账号不存在: {account}")
-            acc = self.accounts.ensure_valid(acc)
+            acc, auth_fallback = self.accounts.ensure_valid_or_fallback(acc)
+            if auth_fallback:
+                log(f"账号令牌刷新失败：{auth_fallback}")
+                log("已改用离线身份启动（保留原用户名与 UUID，单机可正常游玩；"
+                    "进正版验证服务器会被拒绝，网络恢复后重新启动即可恢复正版登录）。")
         props = self.accounts.launch_props(acc)
         kind = "正版" if props.get("user_type") == "msa" else (
             "皮肤站" if props.get("authlib_api") else (

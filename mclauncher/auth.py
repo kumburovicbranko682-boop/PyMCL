@@ -535,6 +535,29 @@ class AccountManager:
         account = MicrosoftAuthenticator(client_id=client_id).refresh(account)
         return self.add_account(account)
 
+    def ensure_valid_or_fallback(self, account):
+        """启动路径专用：令牌刷新失败（断网 / 认证服务故障）时降级为
+        离线凭据，保住单机可玩性（PCL2 / HMCL 同款行为）。
+
+        返回 (account, fallback_reason)。fallback_reason 非空表示已降级：
+        返回的是临时离线账号（保留原用户名与 UUID，存档玩家数据不变，
+        但进不了正版验证服务器），不写回账号存储。没有用户名的账号
+        无法降级，异常原样抛出。
+        """
+        try:
+            return self.ensure_valid(account), ""
+        except Exception as e:
+            acc = account or {}
+            if not str(acc.get("name") or "").strip():
+                raise
+            utils.log.warning("账号令牌刷新失败，降级为离线身份启动: %s", e)
+            fallback = {
+                "type": "offline",
+                "name": acc.get("name"),
+                "uuid": acc.get("uuid") or "",
+            }
+            return fallback, str(e)
+
     def launch_props(self, account):
         """转换为启动参数。"""
         if account.get("type") == "microsoft":
