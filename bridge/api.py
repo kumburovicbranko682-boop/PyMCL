@@ -567,10 +567,17 @@ class BackendAPI:
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
         from mclauncher import launcher
+        from mclauncher import version_settings as _vs
+        # 对齐 app/backend.py：版本绑定的认证服要体现在预览命令里，
+        # 否则预览与真实启动的 javaagent 参数不一致。
+        auth_server = str(_vs.load(inst, version).get("auth_server") or "").strip()
+        if auth_server and not props.get("authlib_api"):
+            props = dict(props)
+            props["authlib_api"] = auth_server
         java_exe = "自动选择" if java in ("自动选择", "") else java
         cmd, _natives, _vdir, _gdir = launcher.build_launch_command(
             inst, version, props, java_exe, memory_mb=memory_mb,
-            width=width, height=height)
+            width=width, height=height, authlib_api=props.get("authlib_api"))
         return cmd
 
     def start_microsoft_login(self) -> str:
@@ -1586,15 +1593,25 @@ class BackendAPI:
         log(f"Java -version: {ver_line}")
         log(f"使用 Java {java_mod.get_java_major(java_exe) or '?'}: {java_exe}")
         progress(2, 4, "构建启动参数")
+        # 对齐 app/backend.py：版本设置里的「认证服」在账号不是皮肤站时也按
+        # 自定义 Yggdrasil 注入。以前这里从不读 prep["auth_server"]，版本绑定
+        # 的皮肤站只在 Qt 生效，Python 桥（WinUI/WPF/EziApp）启动时静默走离线。
+        auth_server = str(prep.get("auth_server") or "").strip()
+        if auth_server and not props.get("authlib_api"):
+            props = dict(props)
+            props["authlib_api"] = auth_server
+            log(f"认证服: {auth_server}")
         if props.get("authlib_api"):
             from mclauncher import authlib as authlib_mod
             authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
+            log(f"皮肤站: {props.get('authlib_api')}")
         if props.get("nide8_id") or prep.get("nide8_id"):
             from mclauncher import nide8 as nide8_mod
             nide8_mod.ensure_jar(self._dm(progress, log), on_note=log)
             if prep.get("nide8_id") and not props.get("nide8_id"):
                 props = dict(props)
                 props["nide8_id"] = prep["nide8_id"]
+            log(f"统一通行证: {props.get('nide8_id')}")
         width, height = launch_flow.resolve_resolution(prep, width, height)
         cmd, _natives, _vdir, game_dir = build_launch_command(
             inst, version, props, java_exe,
