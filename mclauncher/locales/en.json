@@ -651,6 +651,8 @@
   "更新清单 URL": "Update manifest URL",
   "最小化": "Minimize",
   "最新": "Latest",
+  "推荐": "Recommended",
+  "测试版": "Beta",
   "最近提交": "Recent commits",
   "朋友是公网就直连": "Direct connect if your friend has a public IP",
   "朋友需先对局域网开放世界，并在路由器映射该端口。然后输入他的公网地址。": "Friend must open to LAN and port-forward, then enter their public address.",
