@@ -1761,6 +1761,11 @@ class BackendAPI(QObject):
         from mclauncher import lan as lan_mod
         return lan_mod.local_ips()
 
+    def network_diagnose(self) -> dict:
+        """联机网络检测（PCL CE 同款）：STUN 测 NAT 类型 + IPv6 可用性。"""
+        from mclauncher import net_diag
+        return net_diag.diagnose()
+
     def authlib_presets(self) -> list:
         from mclauncher.authlib import PRESETS
         return [{"name": a, "api": b} for a, b in PRESETS]
