@@ -7,8 +7,9 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QGuiApplication
 from qfluentwidgets import (
-    ComboBox, EditableComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
-    MessageBoxBase, PushButton, ScrollArea, TransparentPushButton, TransparentToolButton,
+    ComboBox, EditableComboBox, FluentIcon as FIF, HyperlinkButton, InfoBar,
+    InfoBarPosition, LineEdit, MessageBoxBase, PushButton, ScrollArea,
+    TransparentPushButton, TransparentToolButton,
 )
 
 from ..pcl_chrome import Theme, chip_qss, ghost_btn_qss, row_qss, _icon
@@ -103,7 +104,9 @@ class DetailDialog(MessageBoxBase):
             head.addWidget(IconTile(name, size=48))
         title_col = QVBoxLayout()
         title_col.setSpacing(2)
-        t = QLabel(name)
+        # mcmod 数据集的中文译名（对标 PCL2 详情页）
+        name_cn = str(self.detail.get("name_cn") or "").strip()
+        t = QLabel(f"{name_cn} ({name})" if name_cn and name_cn != name else name)
         t.setStyleSheet(
             f"color: {Theme.title}; font-size: 17px; font-weight: 700; background: transparent;")
         title_col.addWidget(t)
@@ -130,6 +133,11 @@ class DetailDialog(MessageBoxBase):
         if versions:
             shown = ", ".join(versions[:6]) + ("…" if len(versions) > 6 else "")
             meta.addWidget(_meta_chip(FIF.GAME, shown))
+        mcmod = str(self.detail.get("mcmod_url") or "")
+        if mcmod:
+            wiki = HyperlinkButton(mcmod, tr("mcmod 百科"), self)
+            wiki.setFixedHeight(26)
+            meta.addWidget(wiki)
         meta.addStretch(1)
         self.viewLayout.addLayout(meta)
 
@@ -234,7 +242,10 @@ class PclResultRow(QFrame):
         info.setSpacing(3)
         title_row = QHBoxLayout()
         title_row.setSpacing(6)
-        title = QLabel(name)
+        # mcmod 数据集的中文译名（对标 PCL2 / HMCL 下载列表），有则主标题显示中文
+        name_cn = str(item.get("name_cn") or "").strip()
+        shown_name = f"{name_cn} ({name})" if name_cn and name_cn != name else name
+        title = QLabel(shown_name)
         title.setStyleSheet(
             f"color: {Theme.title}; font-size: 14px; font-weight: 700; background: transparent;")
         title_row.addWidget(title)

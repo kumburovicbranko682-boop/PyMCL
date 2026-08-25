@@ -125,6 +125,228 @@ static cJSON *row_from_cf(cJSON *m) {
     return row;
 }
 
+/* ============ 中文模组名数据集（HMCL mod_data.txt / mcmod.cn，对齐 Python mod_translations） ============ */
+
+#define MOD_DATA_URL "https://raw.githubusercontent.com/HMCL-dev/HMCL/main/HMCL/src/main/resources/assets/mod_data.txt"
+#define MOD_DATA_MIN 100000                       /* 完整性下限，防代理半截响应 */
+#define MOD_DATA_TTL_100NS (7LL * 24 * 3600 * 10000000LL)  /* 7 天，FILETIME 100ns */
+
+static char *g_mod_data = NULL;                   /* 惰性加载，进程内驻留 */
+static int g_mod_data_failed = 0;
+
+static int has_cjk(const char *s) {
+    /* U+3000–U+9FFF 的 UTF-8 首字节是 0xE3..0xE9，够判定「查询里有中文」 */
+    for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++)
+        if (*p >= 0xE3 && *p <= 0xE9) return 1;
+    return 0;
+}
+
+static void mod_data_path(char *out, size_t n) {
+    char cache[PYMCL_PATH];
+    pymcl_cache_dir(cache, sizeof(cache));
+    pymcl_path_join(out, n, cache, "mod_data.txt");
+}
+
+static int mod_data_fresh(const char *path) {
+    wchar_t *w = pymcl_u8_to_wide(path);
+    if (!w) return 0;
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    BOOL ok = GetFileAttributesExW(w, GetFileExInfoStandard, &fad);
+    free(w);
+    if (!ok) return 0;
+    FILETIME now;
+    GetSystemTimeAsFileTime(&now);
+    ULARGE_INTEGER a, b;
+    a.LowPart = fad.ftLastWriteTime.dwLowDateTime;
+    a.HighPart = fad.ftLastWriteTime.dwHighDateTime;
+    b.LowPart = now.dwLowDateTime;
+    b.HighPart = now.dwHighDateTime;
+    if (b.QuadPart <= a.QuadPart) return 1;
+    return (long long)(b.QuadPart - a.QuadPart) < MOD_DATA_TTL_100NS;
+}
+
+static const char *mod_data_get(void) {
+    if (g_mod_data) return g_mod_data;
+    if (g_mod_data_failed) return NULL;
+    char path[PYMCL_PATH];
+    mod_data_path(path, sizeof(path));
+    size_t len = 0;
+    if (pymcl_file_size(path) > MOD_DATA_MIN && mod_data_fresh(path) &&
+        pymcl_read_file(path, &g_mod_data, &len) == 0 && g_mod_data)
+        return g_mod_data;
+    g_mod_data = NULL;
+    const char *urls[] = { MOD_DATA_URL };      /* expand_urls 自动套 GitHub 国内代理 */
+    char *text = fetch_text_mirrors(urls, 1, 60);
+    if (text && strlen(text) > MOD_DATA_MIN) {
+        pymcl_write_file(path, text, strlen(text));
+        g_mod_data = text;
+        return g_mod_data;
+    }
+    free(text);
+    /* 下载失败：过期缓存好过没有 */
+    if (pymcl_file_size(path) > MOD_DATA_MIN &&
+        pymcl_read_file(path, &g_mod_data, &len) == 0 && g_mod_data)
+        return g_mod_data;
+    g_mod_data = NULL;
+    g_mod_data_failed = 1;                      /* 本进程内不再重试 */
+    return NULL;
+}
+
+typedef struct {
+    char slug[128];
+    char name_cn[256];
+    char mcmod[16];
+    int score;
+    size_t cn_len;
+} mod_data_hit;
+
+/* 行格式: curseforge_slug;mcmod_id;modids;中文名;英文名;缩写 */
+static int mod_data_split(char *line, char *f[6]) {
+    int n = 0;
+    f[n++] = line;
+    for (char *p = line; *p && n < 6; p++)
+        if (*p == ';') { *p = 0; f[n++] = p + 1; }
+    return n;
+}
+
+static int mod_data_search(const char *q, mod_data_hit *out, int max) {
+    const char *data = mod_data_get();
+    if (!data || !q || !q[0] || max <= 0) return 0;
+    size_t qlen = strlen(q);
+    int n = 0;
+    const char *p = data;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        size_t ll = eol ? (size_t)(eol - p) : strlen(p);
+        if (ll > 8 && ll < 2048 && p[0] != '#') {
+            char line[2048];
+            memcpy(line, p, ll);
+            line[ll] = 0;
+            if (line[ll - 1] == '\r') line[ll - 1] = 0;
+            char *f[6] = {0};
+            if (mod_data_split(line, f) == 6 && f[0][0]) {
+                const char *cn = f[3], *abbr = f[5];
+                int score;
+                if (strcmp(cn, q) == 0 || (abbr[0] && pymcl_ieq(abbr, q))) score = 0;
+                else if (strncmp(cn, q, qlen) == 0) score = 1;
+                else if (strstr(cn, q)) score = 2;
+                else if (abbr[0] && pymcl_icontains(abbr, q)) score = 3;
+                else score = -1;
+                if (score >= 0) {
+                    /* 同一 slug 多条（匠魂/匠魂2/…）只留最优的一条 */
+                    int dup = -1;
+                    for (int i = 0; i < n; i++)
+                        if (strcmp(out[i].slug, f[0]) == 0) { dup = i; break; }
+                    size_t cl = strlen(cn);
+                    if (dup < 0 || score < out[dup].score ||
+                        (score == out[dup].score && cl < out[dup].cn_len)) {
+                        mod_data_hit h;
+                        snprintf(h.slug, sizeof(h.slug), "%s", f[0]);
+                        snprintf(h.name_cn, sizeof(h.name_cn), "%s", cn);
+                        snprintf(h.mcmod, sizeof(h.mcmod), "%s", f[1]);
+                        h.score = score;
+                        h.cn_len = cl;
+                        if (dup >= 0) {
+                            out[dup] = h;
+                        } else if (n < max) {
+                            out[n++] = h;
+                        } else {
+                            /* 满了就替换掉最差的一条 */
+                            int worst = 0;
+                            for (int i = 1; i < n; i++)
+                                if (out[i].score > out[worst].score ||
+                                    (out[i].score == out[worst].score &&
+                                     out[i].cn_len > out[worst].cn_len))
+                                    worst = i;
+                            if (h.score < out[worst].score ||
+                                (h.score == out[worst].score && h.cn_len < out[worst].cn_len))
+                                out[worst] = h;
+                        }
+                    }
+                }
+            }
+        }
+        if (!eol) break;
+        p = eol + 1;
+    }
+    /* 按 (score, 中文名长度) 升序：精确命中在前、短名在前 */
+    for (int i = 1; i < n; i++)
+        for (int j = i; j > 0; j--) {
+            if (out[j].score < out[j - 1].score ||
+                (out[j].score == out[j - 1].score && out[j].cn_len < out[j - 1].cn_len)) {
+                mod_data_hit t = out[j];
+                out[j] = out[j - 1];
+                out[j - 1] = t;
+            } else break;
+        }
+    return n;
+}
+
+static void mod_data_annotate(cJSON *row, const mod_data_hit *h) {
+    if (has_cjk(h->name_cn))
+        cJSON_AddStringToObject(row, "name_cn", h->name_cn);
+    int digits = h->mcmod[0] != 0;
+    for (const char *p = h->mcmod; *p; p++)
+        if (*p < '0' || *p > '9') { digits = 0; break; }
+    if (digits) {
+        char url[128];
+        snprintf(url, sizeof(url), "https://www.mcmod.cn/class/%s.html", h->mcmod);
+        cJSON_AddStringToObject(row, "mcmod_url", url);
+    }
+}
+
+/* 中文查询：数据集候选 → Modrinth 项目直查，miss 再按 slug 查 CurseForge（最多 3 次） */
+static void mod_data_chinese_hits(cJSON *out, const char *q, int want_mr, int want_cf) {
+    mod_data_hit hits[6];
+    int hn = mod_data_search(q, hits, 6);
+    int cf_used = 0;
+    for (int i = 0; i < hn; i++) {
+        int added = 0;
+        if (want_mr) {
+            char url[256];
+            snprintf(url, sizeof(url), MODRINTH_API "/project/%s", hits[i].slug);
+            cJSON *p = http_get_json(url, 30);
+            if (p && cJSON_GetStringValue(cJSON_GetObjectItem(p, "slug"))) {
+                cJSON *row = cJSON_CreateObject();
+                cJSON_AddStringToObject(row, "name",
+                    cJSON_GetStringValue(cJSON_GetObjectItem(p, "title")) ?: hits[i].slug);
+                cJSON_AddStringToObject(row, "author", "?");
+                cJSON_AddNumberToObject(row, "downloads",
+                    cJSON_GetNumberValue(cJSON_GetObjectItem(p, "downloads")));
+                cJSON_AddStringToObject(row, "slug",
+                    cJSON_GetStringValue(cJSON_GetObjectItem(p, "slug")));
+                cJSON_AddStringToObject(row, "source", "modrinth");
+                const char *desc = cJSON_GetStringValue(cJSON_GetObjectItem(p, "description"));
+                if (desc) {
+                    char d[161];
+                    snprintf(d, sizeof(d), "%s", desc);
+                    cJSON_AddStringToObject(row, "description", d);
+                }
+                mod_data_annotate(row, &hits[i]);
+                cJSON_AddItemToArray(out, row);
+                added = 1;
+            }
+            cJSON_Delete(p);
+        }
+        if (!added && want_cf && cf_used < 3) {
+            cf_used++;
+            char queryp[512];
+            snprintf(queryp, sizeof(queryp),
+                     "gameId=432&classId=%d&slug=%s&pageSize=1&index=0",
+                     CF_CLASS_MOD, hits[i].slug);
+            cJSON *d = cf_get("/mods/search", queryp);
+            cJSON *items = cf_items(d);
+            cJSON *m = items ? cJSON_GetArrayItem(items, 0) : NULL;
+            if (cJSON_IsObject(m)) {
+                cJSON *row = row_from_cf(m);
+                mod_data_annotate(row, &hits[i]);
+                cJSON_AddItemToArray(out, row);
+            }
+            cJSON_Delete(d);
+        }
+    }
+}
+
 cJSON *search_mods(const char *query, const char *source) {
     const char *q = query ? query : "";
     int want_cf = 0, want_mr = 1;
@@ -157,6 +379,11 @@ cJSON *search_mods(const char *query, const char *source) {
         cJSON_Delete(d);
     }
     if (cJSON_GetArraySize(out) > 0) return out;
+    if (has_cjk(q)) {
+        /* 中文查询：mcmod 数据集（对齐 Python 端 search_mods_chinese），全文接口对中文无结果 */
+        mod_data_chinese_hits(out, q, want_mr, want_cf);
+        if (cJSON_GetArraySize(out) > 0) return out;
+    }
     if (want_mr) {
         cJSON *j = mr_search(q, "mod", 30);
         cJSON *hits = j ? cJSON_GetObjectItem(j, "hits") : NULL;

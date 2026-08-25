@@ -1451,21 +1451,34 @@ class BackendAPI:
         if isinstance(gv, str) and gv.startswith("全部"):
             gv = ""
         from mclauncher.catalog_files import category_facets
+        from mclauncher import mod_translations
         cats = category_facets(extra.get("category") or extra.get("type") or "")
-        try:
-            if src == "curseforge":
-                hits = mods_mod.search_curseforge(
+        if mod_translations.has_cjk(q):
+            # 中文查询：别名目录 + mcmod 数据集（对标 PCL2 / HMCL 中文搜索），
+            # Modrinth/CF 全文接口对中文基本无结果
+            if offset:
+                return []   # 中文解析结果只有一页
+            try:
+                hits = mods_mod.search_mods_chinese(
                     dm, q, limit=30, api_key=CONFIG.get("curseforge_api_key"),
-                    class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None,
-                    offset=offset)
-            else:
-                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None,
-                                            categories=cats, offset=offset)
-        except Exception:
-            hits = []
+                    sources=(src,))
+            except Exception:
+                hits = []
+        else:
+            try:
+                if src == "curseforge":
+                    hits = mods_mod.search_curseforge(
+                        dm, q, limit=30, api_key=CONFIG.get("curseforge_api_key"),
+                        class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None,
+                        offset=offset)
+                else:
+                    hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None,
+                                                categories=cats, offset=offset)
+            except Exception:
+                hits = []
         rows = []
         for h in hits:
-            rows.append({
+            row = {
                 "name": h.get("title") or h.get("name") or "?",
                 "author": h.get("author") or "?",
                 "downloads": int(h.get("downloads") or 0),
@@ -1475,7 +1488,13 @@ class BackendAPI:
                 "description": h.get("description") or h.get("summary") or "",
                 "tags": h.get("tags") or [],
                 "updated": h.get("updated") or "",
-            })
+            }
+            # 中文译名 / mcmod.cn 百科（核心层注解，见 mod_translations）
+            if h.get("name_cn"):
+                row["name_cn"] = h["name_cn"]
+            if h.get("mcmod_url"):
+                row["mcmod_url"] = h["mcmod_url"]
+            rows.append(row)
         # 翻页时追加缓存，第一页的条目安装时还要按名字反查
         self._mod_cache = (self._mod_cache + rows) if offset else rows
         return rows

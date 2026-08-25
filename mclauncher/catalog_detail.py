@@ -22,6 +22,16 @@ def project_detail(dm: DownloadManager, source_kind: str, ident,
     return _modrinth_detail(dm, ident)
 
 
+def _annotate_mod(detail: dict):
+    """中文译名 + mcmod.cn 百科链接（对标 PCL2 详情页「百科」入口）。
+
+    译名数据集只收录 Mod，调用方需保证 detail 是 Mod 类项目；
+    数据集未加载时只触发后台预热，不阻塞详情弹窗。
+    """
+    from . import mod_translations
+    mod_translations.annotate_hits([detail])
+
+
 # ---------------------------------------------------------------- Modrinth
 
 def _modrinth_detail(dm: DownloadManager, slug) -> dict:
@@ -44,7 +54,7 @@ def _modrinth_detail(dm: DownloadManager, slug) -> dict:
     gallery = [{"url": g.get("url") or "", "title": g.get("title") or ""}
                for g in data.get("gallery") or [] if g.get("url")]
     versions = data.get("game_versions") or []
-    return {
+    detail = {
         "source": "modrinth",
         "id": str(data.get("id") or ""),
         "slug": data.get("slug") or slug,
@@ -72,6 +82,9 @@ def _modrinth_detail(dm: DownloadManager, slug) -> dict:
             "discord": data.get("discord_url"),
         }),
     }
+    if ptype == "mod":
+        _annotate_mod(detail)
+    return detail
 
 
 # ---------------------------------------------------------------- CurseForge
@@ -123,7 +136,7 @@ def _curseforge_detail(dm: DownloadManager, mod_id, api_key: str = "") -> dict:
         if loader_name and loader_name not in loaders:
             loaders.append(loader_name)
     authors = ", ".join(a.get("name") or "" for a in data.get("authors") or [])
-    return {
+    detail = {
         "source": "curseforge",
         "id": str(data.get("id") or mod_id),
         "slug": data.get("slug") or "",
@@ -151,6 +164,9 @@ def _curseforge_detail(dm: DownloadManager, mod_id, api_key: str = "") -> dict:
             "wiki": links.get("wikiUrl"),
         }),
     }
+    if data.get("classId") == 6:   # CF_CLASS_MOD：数据集只收录 Mod
+        _annotate_mod(detail)
+    return detail
 
 
 def _clean_links(links: dict) -> dict:
