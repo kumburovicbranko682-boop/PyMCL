@@ -1835,7 +1835,18 @@ class BackendAPI:
         servers_mod.delete_server(inst, index)
 
     def import_servers(self, instance: str, text: str) -> int:
+        # 与 app/backend.py 同步：EziApp 的导入框写明「粘贴 servers.txt 或
+        # JSON 内容」，以前桥上只解析 txt——粘 JSON 会被逐行当地址导进垃圾条目。
         from mclauncher import servers as servers_mod
+        import json as _json
+        stripped = (text or "").lstrip()
+        if stripped.startswith("["):
+            try:
+                data = _json.loads(text)
+            except _json.JSONDecodeError:
+                data = None
+            if isinstance(data, list):
+                return servers_mod.import_servers_json(self._instance(instance), data)
         inst = self._instance(instance)
         return servers_mod.import_servers_txt(inst, text)
 
