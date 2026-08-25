@@ -139,8 +139,17 @@ static cJSON *vs_defaults(void) {
         "\"skip_assets\":false,\"offline_skin\":\"default\"}");
 }
 
-static int set_mod_enabled(const char *instance, const char *filename, int enabled) {
+/* 语义对齐 mclauncher/mods.py set_mod_enabled，结果文件名写进 out。
+ * 以前「enable + 基础名」「disable + .disabled 名」两个分支无条件返回成功，
+ * WinUI 的开关先关后开（列表未刷新，仍拿旧文件名）必然落进这两个分支：
+ * 界面显示已切换，磁盘上文件根本没动——假成功。 */
+static int set_mod_enabled(const char *instance, const char *filename, int enabled,
+                           char *out, size_t out_n) {
     if (!filename || !filename[0]) { pymcl_set_error("缺少文件名"); return -1; }
+    if (strchr(filename, '/') || strchr(filename, '\\')) {
+        pymcl_set_error("非法模组路径: %s", filename);
+        return -1;
+    }
     char dir[PYMCL_PATH], src[PYMCL_PATH], dst[PYMCL_PATH];
     char ip[PYMCL_PATH];
     instance_path(instance, ip, sizeof(ip));
@@ -149,24 +158,50 @@ static int set_mod_enabled(const char *instance, const char *filename, int enabl
 
     char name[512];
     snprintf(name, sizeof(name), "%s", filename);
-    size_t len = strlen(name);
-    int is_dis = (len > 9 && pymcl_endswith(name, ".disabled"));
-    if (enabled) {
-        if (!is_dis) return 0;
-        name[len - 9] = 0;
-        pymcl_path_join(src, sizeof(src), dir, filename);
-        pymcl_path_join(dst, sizeof(dst), dir, name);
-    } else {
-        if (is_dis) return 0;
-        pymcl_path_join(src, sizeof(src), dir, filename);
-        snprintf(name, sizeof(name), "%s.disabled", filename);
-        pymcl_path_join(dst, sizeof(dst), dir, name);
+    int is_dis = pymcl_endswith(name, ".disabled");
+    pymcl_path_join(src, sizeof(src), dir, name);
+    if (!pymcl_file_exists(src)) {
+        /* Python 同款回退：enable 时给的是基础名而实际文件是 xxx.disabled */
+        if (enabled && !is_dis) {
+            snprintf(name, sizeof(name), "%s.disabled", filename);
+            pymcl_path_join(src, sizeof(src), dir, name);
+            is_dis = 1;
+        }
+        if (!pymcl_file_exists(src)) {
+            pymcl_set_error("模组文件不存在: %s", filename);
+            return -1;
+        }
     }
-    if (!pymcl_file_exists(src)) { pymcl_set_error("模组不存在: %s", filename); return -1; }
-    if (MoveFileExA(src, dst, MOVEFILE_REPLACE_EXISTING) == 0) {
+    if (enabled) {
+        if (!is_dis) {
+            /* 文件确实存在且已启用，真 no-op */
+            if (out) snprintf(out, out_n, "%s", name);
+            return 0;
+        }
+        name[strlen(name) - 9] = 0;
+        pymcl_path_join(dst, sizeof(dst), dir, name);
+        if (pymcl_file_exists(dst)) {
+            pymcl_set_error("启用失败，已存在: %s", name);
+            return -1;
+        }
+    } else {
+        if (is_dis) {
+            if (out) snprintf(out, out_n, "%s", name);
+            return 0;
+        }
+        size_t n = strlen(name);
+        snprintf(name + n, sizeof(name) - n, ".disabled");
+        pymcl_path_join(dst, sizeof(dst), dir, name);
+        if (pymcl_file_exists(dst)) {
+            pymcl_set_error("禁用失败，已存在: %s", name);
+            return -1;
+        }
+    }
+    if (MoveFileExA(src, dst, 0) == 0) {
         pymcl_set_error("重命名失败");
         return -1;
     }
+    if (out) snprintf(out, out_n, "%s", name);
     return 0;
 }
 
@@ -367,16 +402,21 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
 
     /* ---- mods ---- */
     if (strcmp(method, "enable_mod") == 0) {
-        if (set_mod_enabled(pstr(params, "instance", "default"), pstr(params, "filename", ""), 1) != 0)
+        char result[512] = {0};
+        if (set_mod_enabled(pstr(params, "instance", "default"), pstr(params, "filename", ""), 1,
+                            result, sizeof(result)) != 0)
             return NULL;
         if (emit) emit("ui_changed", cJSON_CreateObject());
-        return cJSON_CreateString(pstr(params, "filename", ""));
+        /* Python 契约返回改名后的文件名，不是调用方传进来的旧名 */
+        return cJSON_CreateString(result);
     }
     if (strcmp(method, "disable_mod") == 0) {
-        if (set_mod_enabled(pstr(params, "instance", "default"), pstr(params, "filename", ""), 0) != 0)
+        char result[512] = {0};
+        if (set_mod_enabled(pstr(params, "instance", "default"), pstr(params, "filename", ""), 0,
+                            result, sizeof(result)) != 0)
             return NULL;
         if (emit) emit("ui_changed", cJSON_CreateObject());
-        return cJSON_CreateString(pstr(params, "filename", ""));
+        return cJSON_CreateString(result);
     }
     if (strcmp(method, "get_installed_mod_entries") == 0)
         return list_mod_entries(pstr(params, "instance", "default"));
