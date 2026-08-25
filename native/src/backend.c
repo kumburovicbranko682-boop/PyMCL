@@ -40,7 +40,8 @@ static int find_python(char *out, size_t n) {
     return 0;
 }
 
-static cJSON *analyze_game_crash(const char *inst, const char *ver, long code,
+static cJSON *analyze_game_crash(const char *inst, const char *ver,
+                                 const char *game_dir, long code,
                                  char **tail, int tn, int ts, double started) {
     char py[PYMCL_PATH], outf[PYMCL_PATH], jsonf[PYMCL_PATH], codebuf[32], startbuf[32];
     find_python(py, sizeof(py));
@@ -75,6 +76,12 @@ static cJSON *analyze_game_crash(const char *inst, const char *ver, long code,
     argv[argc++] = jsonf;
     argv[argc++] = "--started-at";
     argv[argc++] = startbuf;
+    /* 隔离目录：日志/崩溃报告在 versions/<id> 下时，不带这个参数
+     * 分析只扫实例根，结果永远是「未能找到相关记录文件」。 */
+    if (game_dir && game_dir[0]) {
+        argv[argc++] = "--game-dir";
+        argv[argc++] = game_dir;
+    }
     pymcl_run_process(argv, argc, g_root, NULL, NULL, 45);
     cJSON *rep = pymcl_read_json(jsonf);
     if (rep) {
@@ -484,7 +491,7 @@ static void *task_run(void *p) {
                         else {
                             /* 退出后命令：与 Python 一致，取消时不执行。 */
                             run_launch_hook(t, hooks.post_launch, ip, 1);
-                            cJSON *rep = analyze_game_crash(inst, ver, scode, tail, tn, ts, started);
+                            cJSON *rep = analyze_game_crash(inst, ver, ip, scode, tail, tn, ts, started);
                             int crashed = 0;
                             const char *summary = NULL;
                             if (rep) {

@@ -1402,6 +1402,10 @@ def main(argv=None) -> int:
     p.add_argument("--exit-code", type=int, default=0)
     p.add_argument("--output", default="", help="游戏输出末尾行文件")
     p.add_argument("--started-at", type=float, default=0)
+    # 版本隔离时日志/崩溃报告写在隔离目录（versions/<id>），不在实例根。
+    # 两个 Python 门面直接给 analyze_launch 传 extra_roots；C 桥只能走这个
+    # CLI，以前没有该参数，隔离版本一崩就「未能找到相关记录文件」。
+    p.add_argument("--game-dir", default="", help="隔离后的游戏目录（额外扫描日志）")
     p.add_argument("--json-out", default="")
     p.add_argument("--from-json", default="")
     p.add_argument("--export", default="")
@@ -1423,6 +1427,7 @@ def main(argv=None) -> int:
             output_lines=lines,
             started_at=args.started_at or None,
             version=args.version,
+            extra_roots=[args.game_dir] if args.game_dir else None,
         )
     if args.json_out and report:
         Path(args.json_out).write_text(
