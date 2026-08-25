@@ -526,11 +526,32 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
 
     /* ---- playtime ---- */
     if (strcmp(method, "get_all_playtime") == 0) {
+        /* 契约（mclauncher/playtime.get_all_playtime）返回的是 instances 映射
+         * 本身 {实例名: {total, versions, sessions}}。以前把整个文件原样返回，
+         * 多包一层 {"instances": …}：WinUI/EziApp 把 "instances" 当实例名遍历，
+         * 时长页在 C 桥下永远空白——而且这个原生分支先于 py_rpc，装了 Python
+         * 也救不回来。 */
         char path[PYMCL_PATH];
         playtime_path(path, sizeof(path));
         cJSON *j = pymcl_read_json(path);
-        if (!j) j = cJSON_Parse("{\"instances\":{}}");
-        return j;
+        cJSON *insts = j ? cJSON_DetachItemFromObject(j, "instances") : NULL;
+        cJSON_Delete(j);
+        if (!cJSON_IsObject(insts)) { cJSON_Delete(insts); insts = cJSON_CreateObject(); }
+        return insts;
+    }
+    if (strcmp(method, "get_total_playtime") == 0) {
+        /* EziApp 时长页的第二个调用；同一个文件，原生算总和即可。 */
+        char path[PYMCL_PATH];
+        playtime_path(path, sizeof(path));
+        cJSON *j = pymcl_read_json(path);
+        long long total = 0;
+        cJSON *it;
+        cJSON_ArrayForEach(it, cJSON_GetObjectItem(j, "instances")) {
+            cJSON *t = cJSON_GetObjectItem(it, "total");
+            if (cJSON_IsNumber(t)) total += (long long)t->valuedouble;
+        }
+        cJSON_Delete(j);
+        return cJSON_CreateNumber((double)total);
     }
     if (strcmp(method, "format_playtime") == 0) {
         long long sec = 0;
