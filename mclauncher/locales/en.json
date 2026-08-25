@@ -987,5 +987,10 @@
   "将把「{name}」恢复为默认皮肤。": "This will restore “{name}” to the default skin.",
   "获取披风失败": "Failed to fetch capes",
   "皮肤操作失败": "Skin operation failed",
-  "请先添加账号": "Add an account first"
+  "请先添加账号": "Add an account first",
+  "刷新状态": "Refresh Status",
+  "状态": "Status",
+  "查询中…": "Checking…",
+  "版本: {v}": "Version: {v}",
+  "在线: {names}": "Online: {names}"
 }

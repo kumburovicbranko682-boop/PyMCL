@@ -1377,6 +1377,12 @@ class BackendAPI(QObject):
         self._emit_ui_changed()
         return tr("披风已更换") if cape_id else tr("披风已隐藏")
 
+    def ping_server(self, host: str, port: int = 25565,
+                    timeout: float = 5.0) -> dict:
+        """查询 Minecraft 服务器状态（在线 / 延迟 / MOTD / 人数 / 图标）。"""
+        from mclauncher import server_ping
+        return server_ping.ping(host, port, timeout=timeout)
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)

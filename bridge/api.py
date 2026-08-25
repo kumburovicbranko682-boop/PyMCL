@@ -973,6 +973,11 @@ class BackendAPI:
         from mclauncher import news as news_mod
         return news_mod.load_cached()
 
+    def ping_server(self, host: str, port: int = 25565,
+                    timeout: float = 5.0) -> dict:
+        from mclauncher import server_ping
+        return server_ping.ping(host, port, timeout=timeout)
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)
