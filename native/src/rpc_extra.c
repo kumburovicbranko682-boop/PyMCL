@@ -526,6 +526,29 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         return NULL;
     }
 
+    /* ---- 陶瓦联机同理：模块级状态 + 常驻内核子进程，一次性 py_rpc 每次都是
+     * 全新进程。以前 host/join 在孤儿进程里改状态、prepare 的任务随进程消失、
+     * snapshot 永远回「空闲」——全是貌似成功的空操作。 ---- */
+    if (strcmp(method, "terracotta_host") == 0 || strcmp(method, "terracotta_join") == 0
+        || strcmp(method, "terracotta_idle") == 0 || strcmp(method, "terracotta_prepare") == 0) {
+        pymcl_set_error("陶瓦联机需要常驻 Python 桥：请用 python main.py 启动，"
+                        "或设置 PYMCL_BRIDGE=python 后重开启动器");
+        return NULL;
+    }
+    if (strcmp(method, "terracotta_shutdown") == 0)
+        return cJSON_CreateTrue();  /* C 桥下不可能有在跑的内核，确保停止=已满足 */
+    if (strcmp(method, "terracotta_snapshot") == 0) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddBoolToObject(o, "supported", 0);  /* false 才不会自动触发注定失败的 prepare */
+        cJSON_AddBoolToObject(o, "installed", 0);
+        cJSON_AddBoolToObject(o, "running", 0);
+        cJSON_AddStringToObject(o, "state", "unsupported");
+        cJSON_AddStringToObject(o, "label", "陶瓦联机需要常驻 Python 桥（python main.py）");
+        cJSON_AddStringToObject(o, "room", "");
+        cJSON_AddStringToObject(o, "error", "");
+        return o;
+    }
+
     /* ---- feedback / help / news / update / cleaner / AI / terracotta ---- */
     if (strcmp(method, "submit_feedback") == 0 || strcmp(method, "help_articles") == 0
         || strcmp(method, "help_article") == 0 || strcmp(method, "cached_news") == 0
@@ -533,12 +556,10 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         || strcmp(method, "cleaner_preview") == 0 || strcmp(method, "cleaner_apply") == 0
         || strcmp(method, "test_ai_connection") == 0 || strcmp(method, "ai_list_chats") == 0
         || strcmp(method, "ai_new_chat") == 0 || strcmp(method, "ai_delete_chat") == 0
-        || strcmp(method, "ai_set_active") == 0 || strcmp(method, "terracotta_snapshot") == 0
-        || strcmp(method, "terracotta_host") == 0 || strcmp(method, "terracotta_join") == 0
-        || strcmp(method, "terracotta_idle") == 0 || strcmp(method, "terracotta_prepare") == 0
+        || strcmp(method, "ai_set_active") == 0
         || strcmp(method, "terracotta_allow_firewall") == 0
         || strcmp(method, "terracotta_open_firewall_settings") == 0
-        || strcmp(method, "terracotta_shutdown") == 0 || strcmp(method, "lan_hint") == 0
+        || strcmp(method, "lan_hint") == 0
         || strcmp(method, "list_loader_versions") == 0 || strcmp(method, "list_catalog_files") == 0
         || strcmp(method, "search_worlds") == 0 || strcmp(method, "install_world") == 0
         || strcmp(method, "repair_version") == 0 || strcmp(method, "export_modpack") == 0
@@ -551,12 +572,6 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
             || strcmp(method, "fetch_news") == 0 || strcmp(method, "list_loader_versions") == 0
             || strcmp(method, "list_catalog_files") == 0 || strcmp(method, "search_worlds") == 0)
             return cJSON_CreateArray();
-        if (strcmp(method, "terracotta_snapshot") == 0) {
-            cJSON *o = cJSON_CreateObject();
-            cJSON_AddStringToObject(o, "state", "idle");
-            cJSON_AddStringToObject(o, "message", "陶瓦联机需要 Python 后端");
-            return o;
-        }
         if (strcmp(method, "lan_hint") == 0)
             return cJSON_CreateString("联机功能在纯 C 桥下有限，请安装 Python 环境以启用陶瓦。");
         if (strcmp(method, "ai_list_chats") == 0 || strcmp(method, "ai_new_chat") == 0
