@@ -499,9 +499,25 @@ void backend_shutdown(void) {
     if (g_game) game_kill(g_game);
 }
 
+/* save_settings 的局部更新辅助：键不在（或类型不对）就完全不动配置。 */
+static void cfg_patch_bool(cJSON *d, const char *from, const char *key) {
+    cJSON *v = cJSON_GetObjectItem(d, from);
+    if (cJSON_IsBool(v)) config_set_bool(key, cJSON_IsTrue(v));
+}
+static void cfg_patch_int(cJSON *d, const char *from, const char *key) {
+    cJSON *v = cJSON_GetObjectItem(d, from);
+    if (cJSON_IsNumber(v)) config_set_int(key, (int)v->valuedouble);
+}
+static void cfg_patch_str(cJSON *d, const char *from, const char *key) {
+    cJSON *v = cJSON_GetObjectItem(d, from);
+    if (cJSON_IsString(v)) config_set_str(key, v->valuestring);
+}
+
 cJSON *backend_call(const char *method, cJSON *params) {
     if (!method) return NULL;
     if (strcmp(method, "get_settings") == 0) {
+        /* WinUI 的 SettingsDto 读的键必须都带出去：以前只回 8 个，
+         * AI / 隔离 / 下载源 / 动画等控件在 C 桥下永远显示默认值。 */
         cJSON *o = cJSON_CreateObject();
         cJSON_AddBoolToObject(o, "share_libraries", config_bool("shared_libraries", 0));
         cJSON_AddBoolToObject(o, "share_assets", config_bool("shared_assets", 0));
@@ -513,6 +529,30 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_AddItemToObject(o, "default_resolution", res);
         cJSON_AddStringToObject(o, "ms_client_id", config_str("microsoft_client_id", ""));
         cJSON_AddStringToObject(o, "curseforge_api_key", config_str("curseforge_api_key", ""));
+        cJSON_AddStringToObject(o, "ai_mode", config_str("ai_mode", "public"));
+        cJSON_AddStringToObject(o, "ai_gateway_url", config_str("ai_gateway_url", ""));
+        cJSON_AddStringToObject(o, "ai_base_url", config_str("ai_base_url", ""));
+        cJSON_AddStringToObject(o, "ai_api_key", config_str("ai_api_key", ""));
+        cJSON_AddStringToObject(o, "ai_model", config_str("ai_model", "deepseek-v4-flash"));
+        cJSON_AddStringToObject(o, "default_isolation", config_str("default_isolation", "none"));
+        cJSON_AddStringToObject(o, "default_jvm_args", config_str("default_jvm_args", ""));
+        cJSON_AddStringToObject(o, "update_url", config_str("update_url", ""));
+        cJSON_AddStringToObject(o, "download_source", config_str("download_source", "auto"));
+        cJSON_AddStringToObject(o, "launcher_visibility", config_str("launcher_visibility", "keep"));
+        cJSON_AddStringToObject(o, "gc_preset", config_str("gc_preset", "auto"));
+        cJSON_AddNumberToObject(o, "download_limit_kbps", config_int("download_limit_kbps", 0));
+        cJSON_AddBoolToObject(o, "auto_check_update", config_bool("auto_check_update", 1));
+        cJSON_AddStringToObject(o, "custom_homepage", config_str("custom_homepage", ""));
+        cJSON_AddStringToObject(o, "homepage_mode", config_str("homepage_mode", "news"));
+        cJSON_AddStringToObject(o, "window_mode", config_str("window_mode", "window"));
+        cJSON_AddBoolToObject(o, "ui_fly_animation", config_bool("ui_fly_animation", 1));
+        cJSON_AddNumberToObject(o, "ui_fly_duration_ms", config_int("ui_fly_duration_ms", 620));
+        cJSON_AddBoolToObject(o, "ui_motion", config_bool("ui_motion", 1));
+        {
+            char gd[PYMCL_PATH];
+            pymcl_path_join(gd, sizeof(gd), g_root, config_str("instances_dir", ".minecraft"));
+            cJSON_AddStringToObject(o, "game_dir", gd);
+        }
         cJSON_AddStringToObject(o, "root", g_root);
         return o;
     }
@@ -521,21 +561,39 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON *inner = cJSON_GetObjectItem(d, "data");
         if (!cJSON_IsObject(inner)) inner = cJSON_GetObjectItem(d, "settings");
         if (cJSON_IsObject(inner)) d = inner;
-        config_set_bool("shared_libraries", cJSON_IsTrue(cJSON_GetObjectItem(d, "share_libraries")));
-        config_set_bool("shared_assets", cJSON_IsTrue(cJSON_GetObjectItem(d, "share_assets")));
-        if (cJSON_IsNumber(cJSON_GetObjectItem(d, "download_threads")))
-            config_set_int("download_threads", (int)cJSON_GetObjectItem(d, "download_threads")->valuedouble);
-        if (cJSON_IsNumber(cJSON_GetObjectItem(d, "default_memory_mb")))
-            config_set_int("memory_mb", (int)cJSON_GetObjectItem(d, "default_memory_mb")->valuedouble);
+        /* 局部更新：没提交的键必须原样保留。以前 share_* 不看键在不在、
+         * 直接按 IsTrue(NULL)=false 落盘，前端只保存 AI 三键（测试连接）
+         * 就会把共享库/共享资源静默关掉。 */
+        cfg_patch_bool(d, "share_libraries", "shared_libraries");
+        cfg_patch_bool(d, "share_assets", "shared_assets");
+        cfg_patch_int(d, "download_threads", "download_threads");
+        cfg_patch_int(d, "default_memory_mb", "memory_mb");
         cJSON *res = cJSON_GetObjectItem(d, "default_resolution");
         if (cJSON_IsArray(res) && cJSON_GetArraySize(res) >= 2) {
             config_set_int("width", (int)cJSON_GetArrayItem(res, 0)->valuedouble);
             config_set_int("height", (int)cJSON_GetArrayItem(res, 1)->valuedouble);
         }
-        if (cJSON_IsString(cJSON_GetObjectItem(d, "ms_client_id")))
-            config_set_str("microsoft_client_id", cJSON_GetObjectItem(d, "ms_client_id")->valuestring);
-        if (cJSON_IsString(cJSON_GetObjectItem(d, "curseforge_api_key")))
-            config_set_str("curseforge_api_key", cJSON_GetObjectItem(d, "curseforge_api_key")->valuestring);
+        cfg_patch_str(d, "ms_client_id", "microsoft_client_id");
+        cfg_patch_str(d, "curseforge_api_key", "curseforge_api_key");
+        /* WinUI 设置页提交、以前被静默丢弃的键 */
+        cfg_patch_str(d, "ai_mode", "ai_mode");
+        cfg_patch_str(d, "ai_gateway_url", "ai_gateway_url");
+        cfg_patch_str(d, "ai_base_url", "ai_base_url");
+        cfg_patch_str(d, "ai_api_key", "ai_api_key");
+        cfg_patch_str(d, "ai_model", "ai_model");
+        cfg_patch_str(d, "default_isolation", "default_isolation");
+        cfg_patch_str(d, "default_jvm_args", "default_jvm_args");
+        cfg_patch_str(d, "launcher_visibility", "launcher_visibility");
+        cfg_patch_str(d, "gc_preset", "gc_preset");
+        cfg_patch_str(d, "download_source", "download_source");
+        cfg_patch_int(d, "download_limit_kbps", "download_limit_kbps");
+        cfg_patch_str(d, "homepage_mode", "homepage_mode");
+        cfg_patch_str(d, "custom_homepage", "custom_homepage");
+        cfg_patch_bool(d, "auto_check_update", "auto_check_update");
+        cfg_patch_str(d, "window_mode", "window_mode");
+        cfg_patch_bool(d, "ui_fly_animation", "ui_fly_animation");
+        cfg_patch_int(d, "ui_fly_duration_ms", "ui_fly_duration_ms");
+        cfg_patch_bool(d, "ui_motion", "ui_motion");
         config_save();
         return cJSON_CreateTrue();
     }

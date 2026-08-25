@@ -715,6 +715,10 @@ class BackendAPI:
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
+            # WinUI 设置页有对应开关；不带出去它永远显示 DTO 默认值
+            "ui_fly_animation": bool(CONFIG.get("ui_fly_animation", True)),
+            "ui_fly_duration_ms": int(CONFIG.get("ui_fly_duration_ms", 620)),
+            "ui_motion": bool(CONFIG.get("ui_motion", True)),
         }
 
     def save_settings(self, data: dict):
@@ -781,6 +785,13 @@ class BackendAPI:
             patch["skip_assets"] = bool(data.get("skip_assets"))
         if "ui_dark" in data:
             patch["ui_dark"] = bool(data.get("ui_dark"))
+        # WinUI 设置页一直在提交这三个键，以前被这里静默丢掉（土司还提示已保存）
+        if "ui_fly_animation" in data:
+            patch["ui_fly_animation"] = bool(data.get("ui_fly_animation"))
+        if "ui_fly_duration_ms" in data:
+            patch["ui_fly_duration_ms"] = int(data.get("ui_fly_duration_ms") or 620)
+        if "ui_motion" in data:
+            patch["ui_motion"] = bool(data.get("ui_motion"))
         CONFIG.update(patch)
         CONFIG.save()
 
