@@ -19,6 +19,19 @@ from . import modconfig as modconfig_mod
 from .defaults import MAX_TOOL_RESULT, WRITE_TOOLS
 
 
+def _notify_ui(backend):
+    """两个后端的 ui_changed 通知方式不同：Qt 门面是 Signal，桥接层走事件总线。
+    以前直接 backend.ui_changed.emit()，在桥后端（EziApp/WinUI/WPF 的 AI）
+    必抛 AttributeError——工具已生效却报失败。"""
+    sig = getattr(backend, "ui_changed", None)
+    if hasattr(sig, "emit"):
+        sig.emit()
+        return
+    emitter = getattr(backend, "_emit", None)
+    if callable(emitter):
+        emitter("ui_changed", {})
+
+
 def _schema(name, desc, props, required=None):
     params = {
         "type": "object",
@@ -491,7 +504,7 @@ def execute_tool(backend, name: str, args: dict, wait=True, cancelled=None):
         raw = args.get("name") or "游戏"
         inst = Instance(unique_instance_name(raw))
         inst.create()
-        backend.ui_changed.emit()
+        _notify_ui(backend)
         return f"已创建实例 {inst.name}"
     if name == "delete_instance":
         backend.delete_instance(args.get("name"))
@@ -500,12 +513,11 @@ def execute_tool(backend, name: str, args: dict, wait=True, cancelled=None):
         backend.delete_mod(inst_name, args.get("filename"))
         return f"已删除 {args.get('filename')}"
     if name == "disable_mod":
-        new = mods_mod.set_mod_enabled(backend._instance(inst_name), args.get("filename"), False)
-        backend.ui_changed.emit()
+        # 走后端公开方法：两个后端都有，且各自负责发 ui_changed
+        new = backend.disable_mod(inst_name, args.get("filename"))
         return f"已禁用 → {new}"
     if name == "enable_mod":
-        new = mods_mod.set_mod_enabled(backend._instance(inst_name), args.get("filename"), True)
-        backend.ui_changed.emit()
+        new = backend.enable_mod(inst_name, args.get("filename"))
         return f"已启用 → {new}"
     if name == "get_java_list":
         return backend.get_java_list(False)
