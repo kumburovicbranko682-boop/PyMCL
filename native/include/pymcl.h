@@ -257,6 +257,7 @@ cJSON *backend_call(const char *method, cJSON *params);
 void backend_shutdown(void);
 int server_run(const char *host, int port, const char *token);
 cJSON *py_rpc_call(const char *method, cJSON *params);
+cJSON *py_rpc_call_t(const char *method, cJSON *params, int timeout_secs);
 cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit);
 
 #ifdef __cplusplus

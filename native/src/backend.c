@@ -371,6 +371,18 @@ static void *task_run(void *p) {
             snprintf(msg, sizeof(msg), "已登录 %s", cJSON_GetStringValue(cJSON_GetObjectItem(acc, "name")) ?: "");
             cJSON_Delete(acc);
         }
+    } else {
+        /* 皮肤站/统一通行证登录、自更新、模组更新、装世界、修复、导出整合包：
+         * C 侧没有原生实现。任务线程里同步走 py_rpc（py_rpc.py 会等 Python
+         * 侧任务真正结束再返回）。进度/日志事件带不回来，但成败是真的。 */
+        ctx_log(t, "任务交由 Python 后端执行…");
+        cJSON *r = py_rpc_call_t(t->method, t->args, 3600);
+        ok = r != NULL;
+        if (ok) {
+            const char *s = cJSON_GetStringValue(r);
+            snprintf(msg, sizeof(msg), "%s", (s && s[0]) ? s : "任务完成");
+            cJSON_Delete(r);
+        }
     }
     if (!msg[0]) snprintf(msg, sizeof(msg), "%s", ok ? "任务完成" : (t->cancelled ? "已取消" : pymcl_error()));
     finish_task(t, ok && !t->cancelled, t->cancelled ? "已取消" : msg);
@@ -838,6 +850,23 @@ cJSON *backend_call(const char *method, cJSON *params) {
         return start_task("启动游戏", method, params);
     if (strcmp(method, "start_microsoft_login") == 0)
         return start_task("微软登录", method, params);
+    /* 下面这批以前直接丢给一次性 py_rpc：Python 侧 start_task 起线程就返回，
+     * 子进程一退出任务就死——UI 拿到 task id 却永远等不到结果。
+     * 现在包成 C 侧原生任务，在任务线程里同步等 Python 跑完。 */
+    if (strcmp(method, "start_authlib_login") == 0)
+        return start_task("皮肤站登录", method, params);
+    if (strcmp(method, "start_nide8_login") == 0)
+        return start_task("统一通行证登录", method, params);
+    if (strcmp(method, "start_self_update") == 0)
+        return start_task("更新启动器", method, params);
+    if (strcmp(method, "start_mod_updates") == 0)
+        return start_task("检查模组更新", method, params);
+    if (strcmp(method, "install_world") == 0)
+        return start_task("安装世界", method, params);
+    if (strcmp(method, "repair_version") == 0)
+        return start_task("修复版本", method, params);
+    if (strcmp(method, "export_modpack") == 0)
+        return start_task("导出整合包", method, params);
 
     /* Align remaining RPC with Python bridge/api.py (native first, then py_rpc). */
     {

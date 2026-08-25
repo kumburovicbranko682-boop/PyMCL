@@ -22,6 +22,10 @@ static int find_python(char *out, size_t n) {
 }
 
 cJSON *py_rpc_call(const char *method, cJSON *params) {
+    return py_rpc_call_t(method, params, 120);
+}
+
+cJSON *py_rpc_call_t(const char *method, cJSON *params, int timeout_secs) {
     char py[PYMCL_PATH], script[PYMCL_PATH], pin[PYMCL_PATH], pout[PYMCL_PATH], tmpdir[PYMCL_PATH];
     find_python(py, sizeof(py));
     pymcl_path_join3(script, sizeof(script), g_root, "native\\tools", "py_rpc.py");
@@ -33,8 +37,13 @@ cJSON *py_rpc_call(const char *method, cJSON *params) {
         return NULL;
     }
     GetTempPathA(sizeof(tmpdir), tmpdir);
-    snprintf(pin, sizeof(pin), "%spymcl-rpc-in-%u.json", tmpdir, (unsigned)GetCurrentProcessId());
-    snprintf(pout, sizeof(pout), "%spymcl-rpc-out-%u.json", tmpdir, (unsigned)GetCurrentProcessId() ^ 0xA5A5u);
+    /* 任务线程里的长调用和 UI 线程的快调用会并发；文件名只按 pid 会互踩。 */
+    {
+        static volatile LONG seq;
+        unsigned n = (unsigned)InterlockedIncrement((volatile LONG *)&seq);
+        snprintf(pin, sizeof(pin), "%spymcl-rpc-in-%u-%u.json", tmpdir, (unsigned)GetCurrentProcessId(), n);
+        snprintf(pout, sizeof(pout), "%spymcl-rpc-out-%u-%u.json", tmpdir, (unsigned)GetCurrentProcessId(), n);
+    }
 
     cJSON *body = params ? cJSON_Duplicate(params, 1) : cJSON_CreateObject();
     if (!cJSON_IsObject(body)) {
@@ -62,7 +71,8 @@ cJSON *py_rpc_call(const char *method, cJSON *params) {
     argv[argc++] = pin;
     argv[argc++] = "--out";
     argv[argc++] = pout;
-    int rc = pymcl_run_process(argv, argc, g_root, NULL, NULL, 120);
+    int rc = pymcl_run_process(argv, argc, g_root, NULL, NULL,
+                               timeout_secs > 0 ? timeout_secs : 120);
     DeleteFileA(pin);
     cJSON *wrap = pymcl_read_json(pout);
     DeleteFileA(pout);
@@ -561,10 +571,7 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         || strcmp(method, "terracotta_open_firewall_settings") == 0
         || strcmp(method, "lan_hint") == 0
         || strcmp(method, "list_loader_versions") == 0 || strcmp(method, "list_catalog_files") == 0
-        || strcmp(method, "search_worlds") == 0 || strcmp(method, "install_world") == 0
-        || strcmp(method, "repair_version") == 0 || strcmp(method, "export_modpack") == 0
-        || strcmp(method, "start_authlib_login") == 0 || strcmp(method, "start_nide8_login") == 0
-        || strcmp(method, "start_self_update") == 0 || strcmp(method, "start_mod_updates") == 0) {
+        || strcmp(method, "search_worlds") == 0) {
         cJSON *r = py_rpc_call(method, params);
         if (r) return r;
         /* graceful empty fallbacks so UI stays usable without Python */

@@ -71,6 +71,15 @@ def main() -> int:
                 if name in params:
                     kwargs[name] = params[name]
         result = fn(**kwargs)
+        # start_* 一类方法只把任务丢进后台线程就立刻返回 task id。本进程是
+        # 一次性的：直接退出线程就死、任务假成功。等它真正跑完再带回最终结果。
+        if isinstance(result, str) and (
+            result in getattr(api, "_workers", {}) or result in getattr(api, "_task_results", {})
+        ):
+            done = api.wait_task(result)
+            if not done.get("ok"):
+                return write({"ok": False, "error": done.get("message") or "任务失败"})
+            result = done.get("message") or "任务完成"
         return write({"ok": True, "result": result})
     except Exception as exc:  # noqa: BLE001
         return write({"ok": False, "error": str(exc)})
