@@ -238,7 +238,8 @@ class BackendAPI(QObject):
     @staticmethod
     def is_download_title(title: str) -> bool:
         t = str(title or "")
-        return not (t.startswith(tr("启动游戏")) or t.startswith(tr("微软登录")) or t.startswith(tr("皮肤站登录")))
+        return not (t.startswith(tr("启动游戏")) or t.startswith(tr("微软登录"))
+                    or t.startswith(tr("皮肤站登录")) or t.startswith(tr("皮肤")))
 
     def _download_task_count(self) -> int:
         n = 0
@@ -1293,6 +1294,88 @@ class BackendAPI(QObject):
         else:
             acc = self.accounts.get_account(account_name) or {"type": "offline", "name": account_name}
         return {"avatar": skin_mod.avatar_url(acc), "body": skin_mod.body_url(acc)}
+
+    # ---- 皮肤更换（微软正版 / authlib 皮肤站）
+
+    def skin_capabilities(self, account_name: str = "") -> dict:
+        """账号支持哪些皮肤操作，UI 据此启用按钮。"""
+        acc = self.accounts.get_account(account_name) if account_name else self.accounts.get_active()
+        kind = (acc or {}).get("type") or "offline"
+        if kind == "microsoft":
+            return {"can_upload": True, "can_reset": True, "can_cape": True, "reason": ""}
+        if kind == "authlib":
+            return {"can_upload": True, "can_reset": True, "can_cape": False,
+                    "reason": tr("皮肤站披风请到站点网页管理")}
+        return {"can_upload": False, "can_reset": False, "can_cape": False,
+                "reason": tr("离线 / 通行证账号没有云端皮肤，请使用微软或皮肤站账号")}
+
+    def _skin_account(self, account_name: str) -> dict:
+        from mclauncher.skin import SkinError
+        acc = (self.accounts.get_account(account_name) if account_name
+               else self.accounts.get_active())
+        if not acc:
+            raise SkinError(tr("账号不存在: {name}").format(name=account_name))
+        return self.accounts.ensure_valid(acc)
+
+    def get_skin_profile(self, account_name: str = "") -> dict:
+        """微软账号的皮肤 / 披风清单（含当前模型与激活披风）。"""
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        if acc.get("type") != "microsoft":
+            raise skin_mod.SkinError(tr("只有微软正版账号能查询皮肤与披风清单"))
+        return skin_mod.fetch_ms_profile(acc.get("access_token") or "")
+
+    def upload_skin(self, account_name: str, file_path: str,
+                    variant: str = "classic") -> str:
+        return self.start_task(
+            tr("皮肤上传"), self._upload_skin_impl, account_name, file_path, variant)
+
+    def _upload_skin_impl(self, progress, log, account_name, file_path, variant):
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        log(tr("正在上传皮肤…"))
+        if acc.get("type") == "microsoft":
+            skin_mod.upload_ms_skin(acc.get("access_token") or "", file_path, variant)
+        elif acc.get("type") == "authlib":
+            skin_mod.upload_ygg_skin(
+                acc.get("api") or "", acc.get("access_token") or "",
+                acc.get("uuid") or "", file_path, variant)
+        else:
+            raise skin_mod.SkinError(tr("离线 / 通行证账号没有云端皮肤，请使用微软或皮肤站账号"))
+        self._emit_ui_changed()
+        return tr("皮肤已更新。第三方预览有缓存，可能要几分钟才能看到新皮肤")
+
+    def reset_skin(self, account_name: str) -> str:
+        return self.start_task(tr("皮肤重置"), self._reset_skin_impl, account_name)
+
+    def _reset_skin_impl(self, progress, log, account_name):
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        log(tr("正在重置皮肤…"))
+        if acc.get("type") == "microsoft":
+            skin_mod.reset_ms_skin(acc.get("access_token") or "")
+        elif acc.get("type") == "authlib":
+            skin_mod.reset_ygg_skin(
+                acc.get("api") or "", acc.get("access_token") or "",
+                acc.get("uuid") or "")
+        else:
+            raise skin_mod.SkinError(tr("离线 / 通行证账号没有云端皮肤，请使用微软或皮肤站账号"))
+        self._emit_ui_changed()
+        return tr("已恢复默认皮肤")
+
+    def set_cape(self, account_name: str, cape_id: str = "") -> str:
+        """cape_id 为空表示隐藏披风。仅微软账号。"""
+        return self.start_task(tr("皮肤披风"), self._set_cape_impl, account_name, cape_id)
+
+    def _set_cape_impl(self, progress, log, account_name, cape_id):
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        if acc.get("type") != "microsoft":
+            raise skin_mod.SkinError(tr("只有微软正版账号支持更换披风"))
+        log(tr("正在更新披风…"))
+        skin_mod.set_ms_cape(acc.get("access_token") or "", cape_id or "")
+        self._emit_ui_changed()
+        return tr("披风已更换") if cape_id else tr("披风已隐藏")
 
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod

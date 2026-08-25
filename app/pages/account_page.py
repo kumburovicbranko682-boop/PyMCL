@@ -1,17 +1,67 @@
 # -*- coding: utf-8 -*-
-"""账号页：微软 / 离线 / 皮肤站，带皮肤预览。"""
+"""账号页：微软 / 离线 / 皮肤站，带皮肤预览与皮肤 / 披风更换。"""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
-    LineEdit, PasswordLineEdit, PrimaryPushButton, PushButton, SimpleCardWidget,
-    StrongBodyLabel, SubtitleLabel, TransparentPushButton,
+    LineEdit, MessageBoxBase, PasswordLineEdit, PrimaryPushButton, PushButton,
+    SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentPushButton,
 )
 
 from ..widgets import DeviceCodeDialog, IconTile, Pill, ThumbnailTile
 from ..pcl_chrome import Theme
 from mclauncher.i18n import tr
+
+
+class SkinVariantDialog(MessageBoxBase):
+    """上传皮肤前选手臂模型（经典 / 纤细）。"""
+
+    def __init__(self, file_name: str, current: str = "classic", parent=None):
+        super().__init__(parent)
+        self.viewLayout.addWidget(SubtitleLabel(tr("上传皮肤"), self))
+        self.viewLayout.addWidget(BodyLabel(tr("文件: {name}").format(name=file_name), self))
+        row = QHBoxLayout()
+        row.addWidget(BodyLabel(tr("手臂模型"), self))
+        self.variant_box = ComboBox(self)
+        self.variant_box.addItem(tr("经典（Steve，粗臂）"), userData="classic")
+        self.variant_box.addItem(tr("纤细（Alex，细臂）"), userData="slim")
+        self.variant_box.setCurrentIndex(1 if current == "slim" else 0)
+        row.addWidget(self.variant_box, 1)
+        self.viewLayout.addLayout(row)
+        self.viewLayout.addWidget(CaptionLabel(tr("要求 64×64（或旧版 64×32）PNG"), self))
+        self.yesButton.setText(tr("上传"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(360)
+
+    def variant(self) -> str:
+        return self.variant_box.currentData() or "classic"
+
+
+class CapeDialog(MessageBoxBase):
+    """选择要展示的披风，或隐藏披风。"""
+
+    def __init__(self, capes: list[dict], active_cape: str, parent=None):
+        super().__init__(parent)
+        self.viewLayout.addWidget(SubtitleLabel(tr("更换披风"), self))
+        self.cape_box = ComboBox(self)
+        self.cape_box.addItem(tr("不展示披风"), userData="")
+        current_idx = 0
+        for i, cape in enumerate(capes):
+            self.cape_box.addItem(cape.get("alias") or cape.get("id") or "?",
+                                  userData=cape.get("id") or "")
+            if cape.get("id") == active_cape:
+                current_idx = i + 1
+        self.cape_box.setCurrentIndex(current_idx)
+        self.viewLayout.addWidget(self.cape_box)
+        if not capes:
+            self.viewLayout.addWidget(CaptionLabel(tr("这个账号还没有获得任何披风"), self))
+        self.yesButton.setText(tr("应用"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(320)
+
+    def cape_id(self) -> str:
+        return self.cape_box.currentData() or ""
 
 
 class AccountPage(QWidget):
@@ -23,6 +73,8 @@ class AccountPage(QWidget):
         self._login_task = None
         self._pix_token = 0
         self._auth_busy = False
+        self._skin_task = None
+        self._active_name = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 20, 28, 20)
@@ -42,6 +94,17 @@ class AccountPage(QWidget):
         self.skin_name = StrongBodyLabel(tr("未登录"))
         self.skin_name.setAlignment(Qt.AlignCenter)
         sl.addWidget(self.skin_name)
+        self.skin_change_btn = PushButton(FIF.EDIT, tr("更换皮肤…"))
+        self.skin_change_btn.clicked.connect(self._change_skin)
+        sl.addWidget(self.skin_change_btn)
+        skin_ops = QHBoxLayout()
+        self.skin_reset_btn = TransparentPushButton(tr("重置"))
+        self.skin_reset_btn.clicked.connect(self._reset_skin)
+        self.cape_btn = TransparentPushButton(tr("披风…"))
+        self.cape_btn.clicked.connect(self._cape)
+        skin_ops.addWidget(self.skin_reset_btn)
+        skin_ops.addWidget(self.cape_btn)
+        sl.addLayout(skin_ops)
         top.addWidget(skin_card)
 
         list_card = SimpleCardWidget(self)
@@ -192,6 +255,17 @@ class AccountPage(QWidget):
         active = next((r for r in rows if r.get("active")), None) or (rows[0] if rows else None)
         self.skin_name.setText(active["name"] if active else "Steve")
         self._load_skin(active["body"] if active else "")
+        self._active_name = active["name"] if active else ""
+        caps = self.backend.skin_capabilities(self._active_name) if active else {
+            "can_upload": False, "can_reset": False, "can_cape": False,
+            "reason": tr("请先添加账号")}
+        busy = self._skin_task is not None
+        self.skin_change_btn.setEnabled(bool(caps.get("can_upload")) and not busy)
+        self.skin_reset_btn.setEnabled(bool(caps.get("can_reset")) and not busy)
+        self.cape_btn.setEnabled(bool(caps.get("can_cape")) and not busy)
+        reason = caps.get("reason") or ""
+        for b in (self.skin_change_btn, self.skin_reset_btn, self.cape_btn):
+            b.setToolTip("" if b.isEnabled() else reason)
 
     def restyle(self):
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
@@ -217,6 +291,86 @@ class AccountPage(QWidget):
                 self.skin.setPixmap(pix.scaled(140, 260, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         self.backend.call_async(fetch, ok, lambda *_: None)
+
+    # ---- 皮肤 / 披风操作
+
+    def _start_skin_task(self, task_id: str):
+        self._skin_task = task_id
+        for b in (self.skin_change_btn, self.skin_reset_btn, self.cape_btn):
+            b.setEnabled(False)
+
+    def _change_skin(self):
+        if self._skin_task or not self._active_name:
+            return
+        path, _f = QFileDialog.getOpenFileName(
+            self, tr("选择皮肤文件"), "", "PNG (*.png)")
+        if not path:
+            return
+        name = self._active_name
+        row = next((r for r in self.backend.get_account_rows()
+                    if r["name"] == name), None)
+        if row and row.get("type") == "microsoft":
+            # 后台预取当前手臂模型作为默认值；拿不到就按经典
+            self.backend.call_async(
+                lambda: (self.backend.get_skin_profile(name) or {}).get("variant") or "classic",
+                lambda v: self._ask_variant(path, v),
+                lambda *_: self._ask_variant(path, "classic"))
+        else:
+            self._ask_variant(path, "classic")
+
+    def _ask_variant(self, path: str, current: str):
+        if self._skin_task:
+            return
+        import os
+        dlg = SkinVariantDialog(os.path.basename(path), current, self.window())
+        if not dlg.exec():
+            return
+        self._start_skin_task(
+            self.backend.upload_skin(self._active_name, path, dlg.variant()))
+
+    def _reset_skin(self):
+        if self._skin_task or not self._active_name:
+            return
+        from qfluentwidgets import MessageBox
+        box = MessageBox(
+            tr("重置皮肤"),
+            tr("将把「{name}」恢复为默认皮肤。").format(name=self._active_name),
+            self,
+        )
+        box.yesButton.setText(tr("重置"))
+        box.cancelButton.setText(tr("取消"))
+        if not box.exec():
+            return
+        self._start_skin_task(self.backend.reset_skin(self._active_name))
+
+    def _cape(self):
+        if self._skin_task or not self._active_name:
+            return
+        name = self._active_name
+        self.cape_btn.setEnabled(False)
+        self.cape_btn.setText(tr("加载中…"))
+
+        def fetch():
+            return self.backend.get_skin_profile(name)
+
+        def ok(profile):
+            self.cape_btn.setText(tr("披风…"))
+            self.cape_btn.setEnabled(True)
+            dlg = CapeDialog(profile.get("capes") or [],
+                             profile.get("active_cape") or "", self.window())
+            if not dlg.exec():
+                return
+            if dlg.cape_id() == (profile.get("active_cape") or ""):
+                return
+            self._start_skin_task(self.backend.set_cape(name, dlg.cape_id()))
+
+        def err(message):
+            self.cape_btn.setText(tr("披风…"))
+            self.cape_btn.setEnabled(True)
+            InfoBar.error(tr("获取披风失败"), str(message), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        self.backend.call_async(fetch, ok, err)
 
     def _delete(self, name):
         from qfluentwidgets import MessageBox
@@ -296,6 +450,16 @@ class AccountPage(QWidget):
             self._login_dlg.show_status(text)
 
     def _on_finished(self, task_id, success, message):
+        if task_id == self._skin_task:
+            self._skin_task = None
+            if success:
+                InfoBar.success(tr("皮肤"), message, parent=self,
+                                position=InfoBarPosition.TOP, duration=4000)
+            else:
+                InfoBar.error(tr("皮肤操作失败"), message, parent=self,
+                              position=InfoBarPosition.TOP, duration=5000)
+            self.reload()
+            return
         if task_id != self._login_task:
             return
         if self._auth_busy:
