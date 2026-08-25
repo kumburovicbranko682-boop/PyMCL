@@ -272,6 +272,22 @@ static void *task_run(void *p) {
                 char ip[PYMCL_PATH];
                 instance_path(inst, ip, sizeof(ip));
                 if (jexe && build_launch_command(inst, ver, props, jexe, mem, w, h, &argv, &argc, natives, sizeof(natives)) == 0) {
+                    /* WinUI 的「服务器直连」走 extra_game_args（--server/--port 或
+                     * --quickPlayMultiplayer）；以前 C 桥直接丢弃，游戏照常启动
+                     * 但永远停在主菜单。 */
+                    cJSON *xargs = cJSON_GetObjectItem(t->args, "extra_game_args");
+                    int xn = cJSON_IsArray(xargs) ? cJSON_GetArraySize(xargs) : 0;
+                    if (xn > 0) {
+                        char **bigger = (char **)realloc(argv, sizeof(char *) * (size_t)(argc + xn));
+                        if (bigger) {
+                            argv = bigger;
+                            cJSON *xa;
+                            cJSON_ArrayForEach(xa, xargs) {
+                                const char *s = cJSON_GetStringValue(xa);
+                                if (s) argv[argc++] = pymcl_strdup(s);
+                            }
+                        }
+                    }
                     ctx_log(t, "正在启动游戏进程…");
                     HANDLE rd = NULL;
                     HANDLE proc = game_spawn((const char **)argv, argc, ip, &rd);
