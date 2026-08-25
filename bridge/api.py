@@ -1121,9 +1121,18 @@ class BackendAPI:
             "description": hit.get("description") or "",
         }
 
-    def search_modpacks(self, query: str, source: str) -> list[dict]:
+    def search_modpacks(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
+        # WinUI / EziApp 的整合包搜索和其他目录页一样带 extra={game_version, category}，
+        # 这里以前不收 extra（服务器绑参时静默丢掉），筛选框在这两个前端形同虚设。
+        # 与 app/backend.py 的同名方法保持同步。
         src = "curseforge" if (source or "").lower().startswith("curse") else "modrinth"
         q = (query or "").strip()
+        extra = extra or {}
+        gv = extra.get("game_version") or extra.get("version") or ""
+        if isinstance(gv, str) and gv.startswith("全部"):
+            gv = ""
+        from mclauncher.catalog_files import category_facets
+        cats = category_facets(extra.get("category") or extra.get("type") or "")
         if not q:
             rows = []
             seen = set()
@@ -1155,7 +1164,9 @@ class BackendAPI:
         key = CONFIG.get("curseforge_api_key")
         hits = []
         try:
-            hits = modpack_mod.search_modpacks_chinese(dm, q, limit=25, api_key=key)
+            hits = modpack_mod.search_modpacks_chinese(
+                dm, q, limit=25, api_key=key, game_version=gv or None,
+                categories=cats or None)
         except Exception:
             hits = []
         if hits and any(h.get("matched_alias") for h in hits):
@@ -1165,9 +1176,13 @@ class BackendAPI:
         if not hits:
             try:
                 if src == "curseforge":
-                    hits = modpack_mod.search_cf_modpacks(dm, q, limit=25, api_key=key)
+                    hits = modpack_mod.search_cf_modpacks(
+                        dm, q, limit=25, api_key=key, game_version=gv or None,
+                        categories=cats or None)
                 else:
-                    hits = modpack_mod.modrinth_search(dm, q, limit=25)
+                    hits = modpack_mod.modrinth_search(
+                        dm, q, limit=25, game_version=gv or None,
+                        categories=cats or None)
             except Exception:
                 hits = []
         else:
