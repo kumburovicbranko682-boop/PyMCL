@@ -992,5 +992,9 @@
   "状态": "Status",
   "查询中…": "Checking…",
   "版本: {v}": "Version: {v}",
-  "在线: {names}": "Online: {names}"
+  "在线: {names}": "Online: {names}",
+  "按启动时的系统可用内存自动分配": "Allocate automatically from available system memory at launch",
+  "自动 ≈ {mb} MB": "Auto ≈ {mb} MB",
+  "自动分配内存: {mb} MB（系统可用 {avail} MB / 共 {total} MB）": "Auto memory: {mb} MB (available {avail} MB / total {total} MB)",
+  "读不到系统内存，自动分配回退为 {mb} MB": "Cannot read system memory; auto allocation falls back to {mb} MB"
 }

@@ -238,6 +238,33 @@ class LaunchPage(QWidget):
         self.memory_label.setText(f"{value} MB")
         self._persist_launch_defaults()
 
+    # ---- 内存自动分配
+
+    def _memory_auto_on(self) -> bool:
+        box = getattr(self, "memory_auto_check", None)
+        return bool(box and box.isChecked())
+
+    def _effective_memory_mb(self) -> int:
+        """0 表示自动，由后端按系统可用内存分配。"""
+        return 0 if self._memory_auto_on() else int(self.memory_slider.value())
+
+    def _apply_memory_auto_ui(self):
+        auto = self._memory_auto_on()
+        self.memory_slider.setEnabled(not auto)
+        if auto:
+            try:
+                mb = self.backend.auto_memory().get("memory_mb", 0)
+                self.memory_label.setText(tr("自动 ≈ {mb} MB").format(mb=mb))
+            except Exception:
+                self.memory_label.setText(tr("自动"))
+        else:
+            self.memory_label.setText(f"{self.memory_slider.value()} MB")
+
+    def _on_memory_auto_toggled(self, checked: bool):
+        CONFIG.set("memory_auto", bool(checked))
+        CONFIG.save()
+        self._apply_memory_auto_ui()
+
     def _persist_launch_defaults(self, *_args):
         """启动页改的内存 / 分辨率写回 CONFIG（防抖入口）。
 
@@ -372,7 +399,7 @@ class LaunchPage(QWidget):
         self._flush_launch_defaults()
         instance = self.instance_box.currentText() or "default"
         version = self.version_box.currentText()
-        memory_mb = self.memory_slider.value()
+        memory_mb = self._effective_memory_mb()
         java = self._selected_java()
         try:
             pf = self.backend.preflight_launch(
@@ -444,7 +471,7 @@ class LaunchPage(QWidget):
                 version=self.version_box.currentText(),
                 account=self.account_box.currentText(),
                 username=self.username_edit.text().strip(),
-                memory_mb=self.memory_slider.value(),
+                memory_mb=self._effective_memory_mb(),
                 width=self.width_spin.value(),
                 height=self.height_spin.value(),
                 java=self._selected_java(),

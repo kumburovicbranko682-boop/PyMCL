@@ -973,6 +973,17 @@ class BackendAPI:
         from mclauncher import news as news_mod
         return news_mod.load_cached()
 
+    def auto_memory(self) -> dict:
+        from mclauncher import memory as memory_mod
+        return memory_mod.auto_memory()
+
+    @staticmethod
+    def _default_memory_mb() -> int:
+        """配置的默认内存；开了自动分配就返回 0（各处 0 = 自动）。"""
+        if CONFIG.get("memory_auto", True):
+            return 0
+        return int(CONFIG.get("memory_mb") or 4096)
+
     def ping_server(self, host: str, port: int = 25565,
                     timeout: float = 5.0) -> dict:
         from mclauncher import server_ping
@@ -1589,11 +1600,18 @@ class BackendAPI:
             "皮肤站" if props.get("authlib_api") else (
                 "统一通行证" if props.get("nide8_id") else "离线"))
         log(f"账号: {props.get('name')} ({kind})")
-        log(f"内存: {memory_mb} MB | 分辨率: {width}x{height}")
 
         from mclauncher import launch_flow
         prep = launch_flow.prepare(inst, version, extra_game_args=extra_game_args, memory_mb=memory_mb)
         memory_mb = prep["memory_mb"] or memory_mb
+        if prep.get("memory_auto"):
+            auto = prep["memory_auto"]
+            if auto.get("fallback"):
+                log(f"读不到系统内存，自动分配回退为 {memory_mb} MB")
+            else:
+                log(f"自动分配内存: {memory_mb} MB"
+                    f"（系统可用 {auto.get('avail_mb')} MB / 共 {auto.get('total_mb')} MB）")
+        log(f"内存: {memory_mb} MB | 分辨率: {width}x{height}")
         extra_game_args = prep["extra_game_args"]
         game_dir = prep["game_dir"]
         launch_flow.run_hook(
@@ -1793,7 +1811,7 @@ class BackendAPI:
         if not acc:
             acc = self.accounts.offline_account("Player")
         props = self.accounts.launch_props(acc)
-        prep = launch_flow.prepare(inst, version, memory_mb=int(CONFIG.get("memory_mb") or 4096))
+        prep = launch_flow.prepare(inst, version, memory_mb=self._default_memory_mb())
         java_exe = java_mod.resolve_launch_java(inst.version_json(version) or {}, on_note=log)
         cmd, _n, _v, gdir = build_launch_command(
             inst, version, props, java_exe,
@@ -2058,7 +2076,7 @@ class BackendAPI:
             else:
                 acc = self.accounts.offline_account(username or "Player")
         props = self.accounts.launch_props(acc)
-        prep = launch_flow.prepare(inst, version, memory_mb=memory_mb or int(CONFIG.get("memory_mb") or 4096))
+        prep = launch_flow.prepare(inst, version, memory_mb=memory_mb or self._default_memory_mb())
         cmd, _n, _v, _g = build_launch_command(
             inst, version, props, java_exe,
             memory_mb=prep["memory_mb"],

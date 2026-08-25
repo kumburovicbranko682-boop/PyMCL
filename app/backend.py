@@ -779,6 +779,9 @@ class BackendAPI(QObject):
             props = dict(props)
             props["authlib_api"] = auth_server
         java_exe = tr("自动选择") if java in (tr("自动选择"), "") else java
+        if int(memory_mb or 0) <= 0:
+            from mclauncher import memory as memory_mod
+            memory_mb = memory_mod.auto_memory_mb()
         cmd, _natives, _vdir, _gdir = launcher.build_launch_command(
             inst, version, props, java_exe, memory_mb=memory_mb,
             width=width, height=height, authlib_api=props.get("authlib_api"))
@@ -1376,6 +1379,18 @@ class BackendAPI(QObject):
         skin_mod.set_ms_cape(acc.get("access_token") or "", cape_id or "")
         self._emit_ui_changed()
         return tr("披风已更换") if cape_id else tr("披风已隐藏")
+
+    def auto_memory(self) -> dict:
+        """按系统当前可用内存计算自动分配值 {memory_mb, total_mb, avail_mb}。"""
+        from mclauncher import memory as memory_mod
+        return memory_mod.auto_memory()
+
+    @staticmethod
+    def _default_memory_mb() -> int:
+        """配置的默认内存；开了自动分配就返回 0（各处 0 = 自动）。"""
+        if CONFIG.get("memory_auto", True):
+            return 0
+        return int(CONFIG.get("memory_mb") or 4096)
 
     def ping_server(self, host: str, port: int = 25565,
                     timeout: float = 5.0) -> dict:
@@ -1979,7 +1994,6 @@ class BackendAPI(QObject):
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
         log(f"账号: {props.get('name')} ({self._account_kind(props, acc)})")
-        log(f"内存: {memory_mb} MB | 分辨率: {width}x{height}")
 
         mods_dir = inst.path / "mods"
         jar_count = 0
@@ -1993,6 +2007,14 @@ class BackendAPI(QObject):
         from mclauncher import launch_flow
         prep = launch_flow.prepare(inst, version, extra_game_args=extra_game_args, memory_mb=memory_mb)
         memory_mb = prep["memory_mb"] or memory_mb
+        if prep.get("memory_auto"):
+            auto = prep["memory_auto"]
+            if auto.get("fallback"):
+                log(tr("读不到系统内存，自动分配回退为 {mb} MB").format(mb=memory_mb))
+            else:
+                log(tr("自动分配内存: {mb} MB（系统可用 {avail} MB / 共 {total} MB）").format(
+                    mb=memory_mb, avail=auto.get("avail_mb"), total=auto.get("total_mb")))
+        log(f"内存: {memory_mb} MB | 分辨率: {width}x{height}")
         extra_game_args = prep["extra_game_args"]
         game_dir = prep["game_dir"]
         if prep["settings"].get("isolation") != "none":
@@ -2213,7 +2235,7 @@ class BackendAPI(QObject):
         if not acc:
             acc = self.accounts.offline_account("Player")
         props = self.accounts.launch_props(acc)
-        prep = launch_flow.prepare(inst, version, memory_mb=int(CONFIG.get("memory_mb") or 4096))
+        prep = launch_flow.prepare(inst, version, memory_mb=self._default_memory_mb())
         java_exe = java_mod.resolve_launch_java(inst.version_json(version) or {}, on_note=log)
         auth_server = str(prep.get("auth_server") or "").strip()
         if auth_server and not props.get("authlib_api"):
@@ -2502,7 +2524,7 @@ class BackendAPI(QObject):
             else:
                 acc = self.accounts.offline_account(username or "Player")
         props = self.accounts.launch_props(acc)
-        prep = launch_flow.prepare(inst, version, memory_mb=memory_mb or int(CONFIG.get("memory_mb") or 4096))
+        prep = launch_flow.prepare(inst, version, memory_mb=memory_mb or self._default_memory_mb())
         cmd, _n, _v, _g = build_launch_command(
             inst, version, props, java_exe,
             memory_mb=prep["memory_mb"],

@@ -155,9 +155,16 @@ class ConfigBody(QWidget):
         page.memory_slider.setValue(int(CONFIG.get("memory_mb", 4096)))
         page.memory_label = CaptionLabel(f"{page.memory_slider.value()} MB")
         page.memory_slider.valueChanged.connect(page._on_memory_changed)
+        from qfluentwidgets import CheckBox
+        page.memory_auto_check = CheckBox(tr("自动"))
+        page.memory_auto_check.setChecked(bool(CONFIG.get("memory_auto", True)))
+        page.memory_auto_check.setToolTip(tr("按启动时的系统可用内存自动分配"))
+        page.memory_auto_check.toggled.connect(page._on_memory_auto_toggled)
         mem_row = QHBoxLayout()
+        mem_row.addWidget(page.memory_auto_check)
         mem_row.addWidget(page.memory_slider, 1)
         mem_row.addWidget(page.memory_label)
+        page._apply_memory_auto_ui()
 
         page.width_spin = SpinBox()
         page.width_spin.setRange(320, 7680)

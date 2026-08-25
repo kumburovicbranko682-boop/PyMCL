@@ -15,6 +15,12 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     gdir = version_settings.apply_isolation(instance, version_id, settings)
     n = global_mods.apply(gdir / "mods")
     mem = settings.get("memory_mb") or memory_mb
+    mem_auto = None
+    if not mem or int(mem) <= 0:
+        # memory_mb <= 0 表示自动：按系统当前可用内存动态分配
+        from . import memory as memory_mod
+        mem_auto = memory_mod.auto_memory()
+        mem = mem_auto["memory_mb"]
     extras = [str(a) for a in (extra_game_args or []) if a not in (None, "")]
     extras += split_args(settings.get("game_args"))
     if settings.get("server") and "--server" not in extras:
@@ -30,6 +36,7 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "settings": settings,
         "game_dir": gdir,
         "memory_mb": mem,
+        "memory_auto": mem_auto,
         "extra_game_args": extras,
         "jvm_args": jvm,
         "priority": settings.get("process_priority") or CONFIG.get("default_priority") or "normal",
