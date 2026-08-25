@@ -619,27 +619,34 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     if (strcmp(method, "preflight_launch") == 0) {
         cJSON *r = py_rpc_call(method, params);
         if (r) return r;
-        /* C-only: basic existence check */
+        /* C-only 兜底：基本存在性检查。返回形状必须与
+         * mclauncher/preflight.py 的 {ok, items:[{level,code,title,detail}]}
+         * 一致——以前这里编了一套 {issues:[{message}]} 的私有格式，
+         * Qt/WinUI/EziApp 全读 items[].title/detail，等于预检永远「无问题」，
+         * 该在预检拦下的「版本未安装」直接漏到启动失败才报错。 */
         const char *inst = pstr(params, "instance", "default");
         const char *ver = pstr(params, "version", "");
         cJSON *out = cJSON_CreateObject();
-        cJSON *issues = cJSON_CreateArray();
+        cJSON *items = cJSON_CreateArray();
         if (!ver[0]) {
             cJSON *iss = cJSON_CreateObject();
             cJSON_AddStringToObject(iss, "level", "error");
             cJSON_AddStringToObject(iss, "code", "no_version");
-            cJSON_AddStringToObject(iss, "message", "请先选择版本");
-            cJSON_AddItemToArray(issues, iss);
+            cJSON_AddStringToObject(iss, "title", "未选择版本");
+            cJSON_AddStringToObject(iss, "detail", "请先到「下载 → 原版游戏」安装版本");
+            cJSON_AddItemToArray(items, iss);
         } else if (!instance_has_version(inst, ver)) {
             cJSON *iss = cJSON_CreateObject();
             cJSON_AddStringToObject(iss, "level", "error");
-            cJSON_AddStringToObject(iss, "code", "missing_version");
-            cJSON_AddStringToObject(iss, "message", "版本未安装");
-            cJSON_AddItemToArray(issues, iss);
+            cJSON_AddStringToObject(iss, "code", "no_version_json");
+            char detail[320];
+            snprintf(detail, sizeof(detail), "找不到 %s 的版本 JSON", ver);
+            cJSON_AddStringToObject(iss, "title", "版本未安装");
+            cJSON_AddStringToObject(iss, "detail", detail);
+            cJSON_AddItemToArray(items, iss);
         }
-        cJSON_AddItemToObject(out, "issues", issues);
-        cJSON_AddBoolToObject(out, "ok", cJSON_GetArraySize(issues) == 0);
-        cJSON_AddBoolToObject(out, "can_launch", cJSON_GetArraySize(issues) == 0);
+        cJSON_AddBoolToObject(out, "ok", cJSON_GetArraySize(items) == 0);
+        cJSON_AddItemToObject(out, "items", items);
         return out;
     }
     if (strcmp(method, "apply_crash_action") == 0) {
