@@ -809,6 +809,17 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         return o;
     }
 
+    /* AI 对话是常驻会话：流式 delta 与停止/确认/追问都依赖同一进程的内存态，
+       一次性 py_rpc 子进程做不到——ai_send 返回后子进程退出会当场杀掉 AI 线程，
+       UI 只会永远停在「正在想…」。宁可明确报错，也不能假装已发送。
+       （ai_list_chats 等纯磁盘操作仍可走 py_rpc。） */
+    if (strcmp(method, "ai_send") == 0 || strcmp(method, "ai_stop") == 0
+        || strcmp(method, "ai_confirm") == 0 || strcmp(method, "ai_answer") == 0) {
+        pymcl_set_error("AI 对话需要 Python 桥进程：请设置 PYMCL_BRIDGE=python 后重启，"
+                        "或直接运行 bridge/server.py");
+        return NULL;
+    }
+
     /* ---- feedback / help / news / update / cleaner / AI / terracotta ---- */
     if (strcmp(method, "help_articles") == 0
         || strcmp(method, "help_article") == 0 || strcmp(method, "cached_news") == 0
@@ -816,9 +827,7 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         || strcmp(method, "cleaner_preview") == 0 || strcmp(method, "cleaner_apply") == 0
         || strcmp(method, "test_ai_connection") == 0 || strcmp(method, "ai_list_chats") == 0
         || strcmp(method, "ai_new_chat") == 0 || strcmp(method, "ai_delete_chat") == 0
-        || strcmp(method, "ai_set_active") == 0 || strcmp(method, "ai_send") == 0
-        || strcmp(method, "ai_stop") == 0 || strcmp(method, "ai_confirm") == 0
-        || strcmp(method, "ai_answer") == 0 || strcmp(method, "terracotta_snapshot") == 0
+        || strcmp(method, "ai_set_active") == 0 || strcmp(method, "terracotta_snapshot") == 0
         || strcmp(method, "terracotta_host") == 0 || strcmp(method, "terracotta_join") == 0
         || strcmp(method, "terracotta_idle") == 0 || strcmp(method, "terracotta_prepare") == 0
         || strcmp(method, "terracotta_allow_firewall") == 0
