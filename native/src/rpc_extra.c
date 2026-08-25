@@ -1,5 +1,6 @@
 #include "pymcl.h"
 #include <pthread.h>
+#include <time.h>
 
 /* ---------- python one-shot RPC (full parity with bridge.api) ---------- */
 
@@ -181,6 +182,165 @@ static void format_playtime(long long sec, char *out, size_t n) {
 }
 
 /* Prefer native; on failure or complexity, Python. */
+/* ---------- feedback submission without Python ---------- */
+
+static void feedback_base_url(char *out, size_t n) {
+    const char *url = config_str("feedback_url", "");
+    if (!url[0]) {
+        const char *env = getenv("PYMCL_FEEDBACK_URL");
+        /* 默认地址与 mclauncher/feedback_defaults.py 保持一致 */
+        url = (env && env[0]) ? env : "http://114.66.28.184:53611";
+    }
+    snprintf(out, n, "%s", url);
+    for (size_t len = strlen(out); len > 0 && out[len - 1] == '/'; len--)
+        out[len - 1] = 0;
+}
+
+static void feedback_device_id(char *out, size_t n) {
+    const char *stored = config_str("device_id", "");
+    if (stored[0]) {
+        snprintf(out, n, "%s", stored);
+        return;
+    }
+    char path[PYMCL_PATH];
+    pymcl_path_join(path, sizeof(path), g_root, "device_id");
+    char *txt = NULL;
+    size_t len = 0;
+    if (pymcl_read_file(path, &txt, &len) == 0 && txt) {
+        while (len > 0 && (unsigned char)txt[len - 1] <= ' ')
+            len--;
+        if (len > 0 && len < n) {
+            snprintf(out, n, "%.*s", (int)len, txt);
+            free(txt);
+            return;
+        }
+        free(txt);
+    }
+    {
+        static const char hex[] = "0123456789abcdef";
+        unsigned seed = (unsigned)(GetTickCount64() ^ GetCurrentProcessId() ^ (uintptr_t)out);
+        srand(seed);
+        size_t i;
+        for (i = 0; i < 32 && i + 1 < n; i++)
+            out[i] = hex[rand() & 15];
+        out[i] = 0;
+    }
+    pymcl_write_file(path, out, strlen(out));
+    config_set_str("device_id", out);
+    config_save();
+}
+
+static void feedback_history_add(const char *id, const char *category, const char *title) {
+    char path[PYMCL_PATH];
+    pymcl_path_join(path, sizeof(path), g_root, "feedback_history.json");
+    cJSON *rows = pymcl_read_json(path);
+    if (!cJSON_IsArray(rows)) {
+        cJSON_Delete(rows);
+        rows = cJSON_CreateArray();
+    }
+    cJSON *row = cJSON_CreateObject();
+    cJSON_AddStringToObject(row, "id", id ? id : "");
+    cJSON_AddNumberToObject(row, "ts", (double)time(NULL));
+    cJSON_AddStringToObject(row, "category", category ? category : "other");
+    cJSON_AddStringToObject(row, "title", title ? title : "");
+    cJSON_AddBoolToObject(row, "ok", 1);
+    cJSON_InsertItemInArray(rows, 0, row);
+    while (cJSON_GetArraySize(rows) > 30)
+        cJSON_DeleteItemFromArray(rows, cJSON_GetArraySize(rows) - 1);
+    pymcl_write_json(path, rows);
+    cJSON_Delete(rows);
+}
+
+static cJSON *feedback_submit_native(cJSON *params) {
+    if (!config_bool("feedback_consent", 0)) {
+        pymcl_set_error("需要先同意上传诊断数据。第一次打开启动器时会询问，也可在设置里开启。");
+        return NULL;
+    }
+    static const char *cats[] = {"bug", "crash", "download", "multiplayer", "ai", "ui", "suggest", "other"};
+    const char *cat = pstr(params, "category", "other");
+    int known = 0;
+    for (size_t i = 0; i < sizeof(cats) / sizeof(cats[0]); i++)
+        if (strcmp(cat, cats[i]) == 0) { known = 1; break; }
+    if (!known) cat = "other";
+    const char *title = pstr(params, "title", "");
+    const char *body = pstr(params, "body", "");
+    const char *contact = pstr(params, "contact", "");
+    while (*title && (unsigned char)*title <= ' ') title++;
+    while (*body && (unsigned char)*body <= ' ') body++;
+    if (!title[0] && !body[0]) {
+        pymcl_set_error("请填写标题或内容");
+        return NULL;
+    }
+    char tbuf[121];
+    if (title[0]) {
+        snprintf(tbuf, sizeof(tbuf), "%.120s", title);
+    } else {
+        size_t i = 0;
+        while (body[i] && body[i] != '\n' && body[i] != '\r' && i < 80)
+            i++;
+        snprintf(tbuf, sizeof(tbuf), "%.*s", (int)i, body);
+        if (!tbuf[0])
+            snprintf(tbuf, sizeof(tbuf), "未命名反馈");
+    }
+    char dev[64];
+    feedback_device_id(dev, sizeof(dev));
+
+    cJSON *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(payload, "device_id", dev);
+    cJSON_AddStringToObject(payload, "category", cat);
+    cJSON_AddStringToObject(payload, "title", tbuf);
+    cJSON_AddStringToObject(payload, "body", body);
+    cJSON_AddStringToObject(payload, "contact", contact);
+    cJSON_AddStringToObject(payload, "app_version", PYMCL_APP_VERSION);
+    cJSON_AddNullToObject(payload, "crash");
+    char *txt = cJSON_PrintUnformatted(payload);
+    cJSON_Delete(payload);
+    if (!txt) {
+        pymcl_set_error("反馈内容序列化失败");
+        return NULL;
+    }
+
+    char base[512], url[600], hdr[128];
+    feedback_base_url(base, sizeof(base));
+    if (!base[0]) {
+        free(txt);
+        pymcl_set_error("未配置反馈服务器。开发者请启动 feedback_hub，并在设置里填写地址。");
+        return NULL;
+    }
+    snprintf(url, sizeof(url), "%s/api/v1/feedback", base);
+    snprintf(hdr, sizeof(hdr), "X-PyMCL-Client: PyMCL/%s\nUser-Agent: PyMCL/%s",
+             PYMCL_APP_VERSION, PYMCL_APP_VERSION);
+    http_resp resp;
+    int rc = http_post_json(url, txt, &resp, hdr, 25);
+    free(txt);
+    if (rc != 0) {
+        char emsg[256];
+        snprintf(emsg, sizeof(emsg), "%s", pymcl_error());
+        http_resp_free(&resp);
+        pymcl_set_error("连不上反馈服务器: %s", emsg);
+        return NULL;
+    }
+    cJSON *data = cJSON_Parse(resp.body ? resp.body : "");
+    http_resp_free(&resp);
+    if (!cJSON_IsObject(data)) {
+        cJSON_Delete(data);
+        pymcl_set_error("反馈服务器返回了无法解析的内容");
+        return NULL;
+    }
+    cJSON *okv = cJSON_GetObjectItem(data, "ok");
+    if (okv && cJSON_IsFalse(okv)) {
+        const char *err = cJSON_GetStringValue(cJSON_GetObjectItem(data, "error"));
+        pymcl_set_error("%s", (err && err[0]) ? err : "提交失败");
+        cJSON_Delete(data);
+        return NULL;
+    }
+    {
+        const char *fid = cJSON_GetStringValue(cJSON_GetObjectItem(data, "id"));
+        feedback_history_add(fid ? fid : "", cat, tbuf);
+    }
+    return data;
+}
+
 cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     if (!method) return NULL;
 
@@ -455,6 +615,25 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         return cur;
     }
 
+    /* ---- feedback: history is a plain file, submission has a real native path ---- */
+    if (strcmp(method, "feedback_history") == 0) {
+        char path[PYMCL_PATH];
+        pymcl_path_join(path, sizeof(path), g_root, "feedback_history.json");
+        cJSON *rows = pymcl_read_json(path);
+        if (!cJSON_IsArray(rows)) {
+            cJSON_Delete(rows);
+            rows = cJSON_CreateArray();
+        }
+        return rows;
+    }
+    if (strcmp(method, "submit_feedback") == 0) {
+        /* Python 优先（会附带 sysinfo）；没有 Python 时用原生 HTTP 真正提交，
+           绝不能假装成功把用户反馈丢掉。 */
+        cJSON *r = py_rpc_call(method, params);
+        if (r) return r;
+        return feedback_submit_native(params);
+    }
+
     /* ---- preflight / crash (python preferred, safe stub fallback) ---- */
     if (strcmp(method, "preflight_launch") == 0) {
         cJSON *r = py_rpc_call(method, params);
@@ -506,7 +685,7 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     }
 
     /* ---- feedback / help / news / update / cleaner / AI / terracotta ---- */
-    if (strcmp(method, "submit_feedback") == 0 || strcmp(method, "help_articles") == 0
+    if (strcmp(method, "help_articles") == 0
         || strcmp(method, "help_article") == 0 || strcmp(method, "cached_news") == 0
         || strcmp(method, "fetch_news") == 0 || strcmp(method, "check_update") == 0
         || strcmp(method, "cleaner_preview") == 0 || strcmp(method, "cleaner_apply") == 0
@@ -555,8 +734,6 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         }
         if (strcmp(method, "test_ai_connection") == 0)
             return cJSON_CreateString("AI 需要 Python 桥（未找到可用 Python）");
-        if (strcmp(method, "submit_feedback") == 0)
-            return cJSON_CreateTrue();
         if (strcmp(method, "terracotta_allow_firewall") == 0)
             return cJSON_CreateString("请手动放行防火墙，或安装 Python 后端");
         /* async-looking methods: return fake task id string won't work — return error */
