@@ -499,6 +499,24 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_AddItemToObject(o, "default_resolution", res);
         cJSON_AddStringToObject(o, "ms_client_id", config_str("microsoft_client_id", ""));
         cJSON_AddStringToObject(o, "curseforge_api_key", config_str("curseforge_api_key", ""));
+        /* WinUI 设置页/主页还绑定这些键；漏掉会让界面永远显示默认值 */
+        cJSON_AddStringToObject(o, "ai_mode", config_str("ai_mode", "public"));
+        cJSON_AddStringToObject(o, "ai_gateway_url", config_str("ai_gateway_url", ""));
+        cJSON_AddStringToObject(o, "ai_base_url", config_str("ai_base_url", ""));
+        cJSON_AddStringToObject(o, "ai_api_key", config_str("ai_api_key", ""));
+        cJSON_AddStringToObject(o, "ai_model", config_str("ai_model", "deepseek-v4-flash"));
+        cJSON_AddStringToObject(o, "default_isolation", config_str("default_isolation", "none"));
+        cJSON_AddStringToObject(o, "default_jvm_args", config_str("default_jvm_args", ""));
+        cJSON_AddStringToObject(o, "launcher_visibility", config_str("launcher_visibility", "keep"));
+        cJSON_AddStringToObject(o, "gc_preset", config_str("gc_preset", "auto"));
+        cJSON_AddStringToObject(o, "download_source", config_str("download_source", "auto"));
+        cJSON_AddNumberToObject(o, "download_limit_kbps", config_int("download_limit_kbps", 0));
+        cJSON_AddStringToObject(o, "homepage_mode", config_str("homepage_mode", "news"));
+        cJSON_AddStringToObject(o, "custom_homepage", config_str("custom_homepage", ""));
+        cJSON_AddBoolToObject(o, "auto_check_update", config_bool("auto_check_update", 1));
+        cJSON_AddBoolToObject(o, "ui_fly_animation", config_bool("ui_fly_animation", 1));
+        cJSON_AddNumberToObject(o, "ui_fly_duration_ms", config_int("ui_fly_duration_ms", 620));
+        cJSON_AddBoolToObject(o, "ui_dark", config_bool("ui_dark", 0));
         cJSON_AddStringToObject(o, "root", g_root);
         return o;
     }
@@ -507,8 +525,12 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON *inner = cJSON_GetObjectItem(d, "data");
         if (!cJSON_IsObject(inner)) inner = cJSON_GetObjectItem(d, "settings");
         if (cJSON_IsObject(inner)) d = inner;
-        config_set_bool("shared_libraries", cJSON_IsTrue(cJSON_GetObjectItem(d, "share_libraries")));
-        config_set_bool("shared_assets", cJSON_IsTrue(cJSON_GetObjectItem(d, "share_assets")));
+        /* 局部更新语义（对齐 bridge/api.py）：只写提交了的键。
+         * 早先 bool 不判存在性，部分提交会把没带的开关静默写成 false。 */
+        if (cJSON_IsBool(cJSON_GetObjectItem(d, "share_libraries")))
+            config_set_bool("shared_libraries", cJSON_IsTrue(cJSON_GetObjectItem(d, "share_libraries")));
+        if (cJSON_IsBool(cJSON_GetObjectItem(d, "share_assets")))
+            config_set_bool("shared_assets", cJSON_IsTrue(cJSON_GetObjectItem(d, "share_assets")));
         if (cJSON_IsNumber(cJSON_GetObjectItem(d, "download_threads")))
             config_set_int("download_threads", (int)cJSON_GetObjectItem(d, "download_threads")->valuedouble);
         if (cJSON_IsNumber(cJSON_GetObjectItem(d, "default_memory_mb")))
@@ -522,6 +544,28 @@ cJSON *backend_call(const char *method, cJSON *params) {
             config_set_str("microsoft_client_id", cJSON_GetObjectItem(d, "ms_client_id")->valuestring);
         if (cJSON_IsString(cJSON_GetObjectItem(d, "curseforge_api_key")))
             config_set_str("curseforge_api_key", cJSON_GetObjectItem(d, "curseforge_api_key")->valuestring);
+        /* WinUI 设置页其余键：以前直接丢弃，界面提示“已保存”但什么都没写。 */
+        {
+            static const char *str_keys[] = {
+                "ai_mode", "ai_gateway_url", "ai_base_url", "ai_api_key", "ai_model",
+                "default_isolation", "default_jvm_args", "launcher_visibility",
+                "gc_preset", "download_source", "homepage_mode", "custom_homepage",
+            };
+            for (size_t i = 0; i < sizeof(str_keys) / sizeof(str_keys[0]); i++) {
+                cJSON *v = cJSON_GetObjectItem(d, str_keys[i]);
+                if (cJSON_IsString(v)) config_set_str(str_keys[i], v->valuestring);
+            }
+        }
+        if (cJSON_IsNumber(cJSON_GetObjectItem(d, "download_limit_kbps")))
+            config_set_int("download_limit_kbps", (int)cJSON_GetObjectItem(d, "download_limit_kbps")->valuedouble);
+        if (cJSON_IsNumber(cJSON_GetObjectItem(d, "ui_fly_duration_ms")))
+            config_set_int("ui_fly_duration_ms", (int)cJSON_GetObjectItem(d, "ui_fly_duration_ms")->valuedouble);
+        if (cJSON_IsBool(cJSON_GetObjectItem(d, "auto_check_update")))
+            config_set_bool("auto_check_update", cJSON_IsTrue(cJSON_GetObjectItem(d, "auto_check_update")));
+        if (cJSON_IsBool(cJSON_GetObjectItem(d, "ui_fly_animation")))
+            config_set_bool("ui_fly_animation", cJSON_IsTrue(cJSON_GetObjectItem(d, "ui_fly_animation")));
+        if (cJSON_IsBool(cJSON_GetObjectItem(d, "ui_dark")))
+            config_set_bool("ui_dark", cJSON_IsTrue(cJSON_GetObjectItem(d, "ui_dark")));
         config_save();
         return cJSON_CreateTrue();
     }
