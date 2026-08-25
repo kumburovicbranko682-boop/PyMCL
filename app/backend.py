@@ -578,6 +578,24 @@ class BackendAPI(QObject):
         self._emit_ui_changed()
         return out
 
+    def get_version_icon(self, instance: str, version: str) -> str:
+        """版本自定义图标路径（PCL2/HMCL 版本图标同款）；没设置返回空串。"""
+        from mclauncher import version_ops as vops
+        return vops.icon_path(self._instance(instance), version)
+
+    def set_version_icon(self, instance: str, version: str, path: str) -> str:
+        """给版本设置自定义图标（png/jpg/gif/webp/bmp，≤4MB）。"""
+        from mclauncher import version_ops as vops
+        out = vops.set_icon(self._instance(instance), version, path)
+        self._emit_ui_changed()
+        return out
+
+    def clear_version_icon(self, instance: str, version: str):
+        """清除版本自定义图标，恢复默认样式。"""
+        from mclauncher import version_ops as vops
+        vops.clear_icon(self._instance(instance), version)
+        self._emit_ui_changed()
+
     def open_version_folder(self, instance: str, version: str = "", which: str = "root") -> str:
         from mclauncher import version_ops as vops
         return vops.open_folder(self._instance(instance), version, which)

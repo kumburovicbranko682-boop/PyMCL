@@ -85,6 +85,52 @@ def _rewrite_ids(dest: Path, old_id: str, new_id: str):
         utils.write_json(settings, stored)
 
 
+# ---------------------------------------------------------------- 版本图标
+# PCL2「版本设置 → 版本图标」/ HMCL 版本图标同款：每个版本可自选一张图。
+# 图放版本文件夹里（.version_icon.*），重命名/复制版本时自动跟着走。
+
+ICON_STEM = ".version_icon"
+_ICON_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+_ICON_MAX_BYTES = 4 * 1024 * 1024
+
+
+def icon_path(instance: Instance, version_id: str) -> str:
+    """版本自定义图标路径；没设置返回空串。"""
+    try:
+        vdir = _vdir(instance, version_id)
+    except VersionOpError:
+        return ""
+    for suffix in _ICON_SUFFIXES:
+        p = vdir / f"{ICON_STEM}{suffix}"
+        if p.is_file():
+            return str(p)
+    return ""
+
+
+def set_icon(instance: Instance, version_id: str, src) -> str:
+    src = Path(src)
+    if not src.is_file():
+        raise VersionOpError(f"图片不存在: {src}")
+    suffix = src.suffix.lower()
+    if suffix not in _ICON_SUFFIXES:
+        raise VersionOpError(f"不支持的图片格式: {suffix or src.name}")
+    if src.stat().st_size > _ICON_MAX_BYTES:
+        raise VersionOpError("图片太大（超过 4 MB）")
+    vdir = _vdir(instance, version_id)
+    clear_icon(instance, version_id)
+    dest = vdir / f"{ICON_STEM}{suffix}"
+    shutil.copyfile(src, dest)
+    return str(dest)
+
+
+def clear_icon(instance: Instance, version_id: str):
+    vdir = _vdir(instance, version_id)
+    for suffix in _ICON_SUFFIXES:
+        p = vdir / f"{ICON_STEM}{suffix}"
+        if p.is_file():
+            p.unlink(missing_ok=True)
+
+
 def set_hidden(instance: Instance, version_id: str, hidden: bool) -> dict:
     _vdir(instance, version_id)
     return vs.save(instance, version_id, {"hidden": bool(hidden)})

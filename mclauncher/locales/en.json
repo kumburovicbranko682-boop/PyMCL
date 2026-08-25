@@ -1221,5 +1221,10 @@
   "编辑值": "Edit value",
   "启动器日志": "Launcher logs",
   "每次运行一个文件，保留最近 5 次；崩溃日志也在这里": "One file per run, last 5 kept; crash logs live here too",
-  "打开日志文件夹": "Open logs folder"
+  "打开日志文件夹": "Open logs folder",
+  "设置版本图标…": "Set version icon…",
+  "清除版本图标": "Clear version icon",
+  "选择版本图标": "Select version icon",
+  "图片 (*.png *.jpg *.jpeg *.gif *.webp *.bmp)": "Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)",
+  "设置失败": "Failed to set"
 }

@@ -247,6 +247,23 @@ class VersionPage(QWidget):
         ids = sorted(ids, key=lambda vid: -(stats.get(vid, {}).get("last") or 0))
         for v in ids:
             row = QHBoxLayout()
+            # 版本自定义图标（PCL2/HMCL 版本图标同款）：设置过就摆在最前
+            try:
+                icon_file = self.backend.get_version_icon(instance, v)
+            except Exception:
+                icon_file = ""
+            if icon_file:
+                from PySide6.QtCore import Qt as _Qt
+                from PySide6.QtGui import QPixmap
+                from PySide6.QtWidgets import QLabel
+                pix = QPixmap(icon_file)
+                if not pix.isNull():
+                    icon_label = QLabel()
+                    icon_label.setPixmap(pix.scaled(
+                        22, 22, _Qt.KeepAspectRatio, _Qt.SmoothTransformation))
+                    icon_label.setFixedSize(24, 24)
+                    icon_label.setStyleSheet("background: transparent;")
+                    row.addWidget(icon_label)
             cb = CheckBox(v)
             low = v.lower()
             color = "#7C5CD6" if "fabric" in low else (
@@ -322,6 +339,9 @@ class VersionPage(QWidget):
         add(tr("原理图管理…"), lambda: self._schematics(instance, version))
         add(tr("重命名"), lambda: self._rename(instance, version))
         add(tr("复制"), lambda: self._copy(instance, version))
+        add(tr("设置版本图标…"), lambda: self._set_icon(instance, version))
+        if self.backend.get_version_icon(instance, version):
+            add(tr("清除版本图标"), lambda: self._clear_icon(instance, version))
         add(tr("隐藏 / 取消隐藏"), lambda: self._hide(instance, version))
         add(tr("创建桌面快捷方式"), lambda: self._shortcut(instance, version))
         add(tr("导出启动脚本"), lambda: self.backend.export_launch_script(instance, version))
@@ -348,6 +368,28 @@ class VersionPage(QWidget):
     def _schematics(self, instance, version):
         from .schematics_dialog import SchematicsDialog
         SchematicsDialog(self.backend, instance, version, self).exec()
+
+    def _set_icon(self, instance, version):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选择版本图标"), "",
+            tr("图片 (*.png *.jpg *.jpeg *.gif *.webp *.bmp)") + ";;" + tr("所有文件 (*)"))
+        if not path:
+            return
+        try:
+            self.backend.set_version_icon(instance, version, path)
+        except Exception as e:
+            MessageBox(tr("设置失败"), str(e), self).exec()
+            return
+        self._reload_installed()
+
+    def _clear_icon(self, instance, version):
+        try:
+            self.backend.clear_version_icon(instance, version)
+        except Exception as e:
+            MessageBox(tr("操作失败"), str(e), self).exec()
+            return
+        self._reload_installed()
 
     def _rename(self, instance, version):
         from ..widgets import InputDialog
