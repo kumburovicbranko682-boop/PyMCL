@@ -4,7 +4,8 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, FluentIcon as FIF, MessageBox, ScrollArea, SimpleCardWidget,
+    CaptionLabel, FluentIcon as FIF, InfoBar, InfoBarPosition, MessageBox,
+    ScrollArea, SimpleCardWidget,
     StrongBodyLabel, SubtitleLabel, TransparentToolButton,
 )
 
@@ -61,6 +62,12 @@ class InstanceCard(SimpleCardWidget):
         actions.addWidget(saves_btn)
         actions.addWidget(java_btn)
         actions.addWidget(rename_btn)
+        if info.get("pack"):
+            update_btn = TransparentToolButton(
+                FIF.UPDATE if hasattr(FIF, "UPDATE") else FIF.SYNC)
+            update_btn.setToolTip(tr("检查整合包更新"))
+            update_btn.clicked.connect(lambda: page.check_pack_update(info["name"]))
+            actions.addWidget(update_btn)
         actions.addWidget(export_btn)
         actions.addWidget(delete_btn)
         layout.addLayout(actions)
@@ -174,6 +181,33 @@ class InstancePage(QWidget):
 
     def export_pack(self, name: str):
         self.backend.export_modpack(name)
+
+    def check_pack_update(self, name: str):
+        def ok(info):
+            if info.get("has_update"):
+                box = MessageBox(
+                    tr("发现整合包新版本"),
+                    tr("{n}\n当前 {a} → 最新 {b}\n\n更新会按新版本重装整合包：存档保留，config 等会被新包覆盖。继续？").format(
+                        n=info.get("name"), a=info.get("current"),
+                        b=info.get("latest")),
+                    self)
+                box.yesButton.setText(tr("更新"))
+                if box.exec():
+                    self.backend.start_modpack_update(name)
+                    InfoBar.success(
+                        tr("已开始更新"), tr("进度见下载任务。"), parent=self,
+                        position=InfoBarPosition.TOP, duration=4000)
+            else:
+                InfoBar.success(
+                    tr("已是最新"),
+                    f"{info.get('name')} {info.get('current')}", parent=self,
+                    position=InfoBarPosition.TOP, duration=4000)
+
+        def fail(message):
+            MessageBox(tr("无法检查整合包更新"), str(message), self).exec()
+
+        self.backend.call_async(
+            lambda: self.backend.check_modpack_update(name), ok, fail)
 
     def pick_java(self, name: str):
         if self._picking_java:

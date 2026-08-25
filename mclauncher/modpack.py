@@ -235,7 +235,12 @@ def install_cf_modpack(dm: DownloadManager, addon_id, instance: Instance,
     else:
         raise ModpackError(f"整合包下载失败: {last_err}")
     try:
-        return install_cf_zip(dm, tmp, instance, on_progress=on_progress, cancel=cancel)
+        return install_cf_zip(dm, tmp, instance, on_progress=on_progress, cancel=cancel,
+                              source_meta={
+                                  "addon_id": str(addon_id),
+                                  "file_id": str(file_id or ""),
+                                  "cf_slug": info.get("slug") or cf_slug or "",
+                              })
     finally:
         try:
             tmp.unlink(missing_ok=True)
@@ -685,7 +690,12 @@ def install_mrpack_by_slug(dm: DownloadManager, slug, instance: Instance,
         try:
             return install_mrpack(dm, pack_file.get("url"), instance,
                                   on_progress=on_progress, cancel=cancel,
-                                  force=force, java=java)
+                                  force=force, java=java,
+                                  source_meta={
+                                      "slug": str(slug),
+                                      "version_id": str(v.get("id") or ""),
+                                      "version_number": v.get("version_number") or "",
+                                  })
         except (ModpackError, InstallError, manifest_mod.VersionNotFound) as e:
             last_err = e
             _emit(on_progress, f"{label} 安装失败: {e}")
@@ -710,8 +720,12 @@ def _fetch_mrpack(dm: DownloadManager, source):
 
 
 def install_mrpack(dm: DownloadManager, source, instance: Instance,
-                   on_progress=None, cancel=None, force=False, java=None):
-    """安装 .mrpack 整合包到指定实例。"""
+                   on_progress=None, cancel=None, force=False, java=None,
+                   source_meta=None):
+    """安装 .mrpack 整合包到指定实例。
+
+    source_meta 用于记录来源身份（slug / version_id），供整合包更新检查。
+    """
     downloaded = bool(re.match(r"^https?://", str(source)))
     _emit(on_progress, f"{'下载' if downloaded else '读取'}整合包: {source}")
     pack_path = _fetch_mrpack(dm, source)
@@ -843,6 +857,8 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
             "source": "modrinth",
             "instance": instance.name,
         }
+        if source_meta:
+            pack_meta.update({k: v for k, v in source_meta.items() if v})
         instance.set_meta("modpack", pack_meta)
         instance.set_meta("mc_version", loader_vid or mc_version)
         _emit(on_progress, f"整合包 {pack_meta['name']} 安装完成 -> 实例 {instance.name}")
@@ -859,8 +875,12 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
 # ================================================================ CurseForge
 
 def install_cf_zip(dm: DownloadManager, source, instance: Instance,
-                   on_progress=None, cancel=None, force=False, java=None):
-    """安装 CurseForge 整合包 zip（本地文件或直链）。"""
+                   on_progress=None, cancel=None, force=False, java=None,
+                   source_meta=None):
+    """安装 CurseForge 整合包 zip（本地文件或直链）。
+
+    source_meta 用于记录来源身份（addon_id / file_id），供整合包更新检查。
+    """
     downloaded = False
     if re.match(r"^https?://", str(source)):
         tmp = Path(tempfile.gettempdir()) / f"pymcl_cfpack_{abs(hash(str(source)))}.zip"
@@ -978,6 +998,8 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             "source": "curseforge",
             "instance": instance.name,
         }
+        if source_meta:
+            pack_meta.update({k: v for k, v in source_meta.items() if v})
         instance.set_meta("modpack", pack_meta)
         instance.set_meta("mc_version", loader_vid or mc_version)
         _emit(on_progress, f"整合包 {pack_meta['name']} 安装完成 -> 实例 {instance.name}")

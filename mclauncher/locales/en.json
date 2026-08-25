@@ -1047,5 +1047,14 @@
   "披风: {c}": "Cape: {c}",
   "有": "Yes",
   "保存皮肤 PNG…": "Save skin PNG…",
-  "玩家 {n} 用的是默认皮肤，没有自定义皮肤可下载": "Player {n} uses the default skin; there is no custom skin to download"
+  "玩家 {n} 用的是默认皮肤，没有自定义皮肤可下载": "Player {n} uses the default skin; there is no custom skin to download",
+  "检查整合包更新": "Check modpack update",
+  "发现整合包新版本": "Modpack update available",
+  "{n}\n当前 {a} → 最新 {b}\n\n更新会按新版本重装整合包：存档保留，config 等会被新包覆盖。继续？": "{n}\nCurrent {a} → latest {b}\n\nUpdating reinstalls the modpack at the new version: saves are kept, config etc. will be overwritten by the new pack. Continue?",
+  "更新": "Update",
+  "已开始更新": "Update started",
+  "进度见下载任务。": "See the download tasks for progress.",
+  "无法检查整合包更新": "Cannot check modpack update",
+  "整合包已更新: {n} {a} → {b}": "Modpack updated: {n} {a} → {b}",
+  "整合包已是最新: {n} {v}": "Modpack is up to date: {n} {v}"
 }

@@ -1287,6 +1287,31 @@ class BackendAPI(QObject):
 
         return {"ok": False, "message": f"未知动作: {aid}"}
 
+    def check_modpack_update(self, instance: str) -> dict:
+        """检查实例安装的整合包是否有新版本（对标 HMCL 更新整合包）。"""
+        from mclauncher import modpack_update as mpu
+        return mpu.check_pack_update(self._instance(instance))
+
+    def start_modpack_update(self, instance: str) -> str:
+        """把整合包更新到最新版本（同一实例，保留存档）。返回任务 ID。"""
+        return self.start_task(f"更新整合包 {instance}",
+                               self._modpack_update_impl, instance)
+
+    def _modpack_update_impl(self, progress, log, instance):
+        from mclauncher import modpack_update as mpu
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        info = mpu.apply_pack_update(inst, dm=dm, on_progress=dm.on_progress,
+                                     cancel=dm.cancel)
+        if info.get("updated"):
+            msg = tr("整合包已更新: {n} {a} → {b}").format(
+                n=info["name"], a=info["current"], b=info["latest"])
+        else:
+            msg = tr("整合包已是最新: {n} {v}").format(
+                n=info["name"], v=info["current"])
+        log(msg)
+        return msg
+
     def check_mod_updates(self, instance: str) -> list:
         from mclauncher.mod_update import check_updates
         return check_updates(self._instance(instance))
