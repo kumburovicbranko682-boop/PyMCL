@@ -567,6 +567,102 @@ public sealed partial class MainWindow : Window
         catch { }
     }
 
+    // ------------------------------------------------------------------
+    // 拖拽导入（对标 PCL2：文件拖进窗口自动识别安装；与 PySide6 主窗口一致）
+    // ------------------------------------------------------------------
+    private static readonly string[] ImportExts = { ".mrpack", ".jar", ".litemod", ".zip" };
+
+    private void Root_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy;
+            try
+            {
+                e.DragUIOverride.Caption = "拖拽导入";
+                e.DragUIOverride.IsCaptionVisible = true;
+            }
+            catch { }
+        }
+    }
+
+    private async void Root_Drop(object sender, DragEventArgs e)
+    {
+        try
+        {
+            if (AppServices.Client is null) return;
+            if (!e.DataView.Contains(Windows.ApplicationModel.DataTransfer.StandardDataFormats.StorageItems)) return;
+            var items = await e.DataView.GetStorageItemsAsync();
+            var paths = items.OfType<Windows.Storage.StorageFile>()
+                .Select(f => f.Path)
+                .Where(p => !string.IsNullOrEmpty(p)
+                            && ImportExts.Contains(System.IO.Path.GetExtension(p).ToLowerInvariant()))
+                .ToList();
+            if (paths.Count == 0)
+            {
+                ShowToast("无法识别", "支持整合包(.mrpack/.zip)、模组(.jar)、世界、资源包、光影包、数据包",
+                          InfoBarSeverity.Warning);
+                return;
+            }
+            var known = new List<ImportInfo>();
+            var skipped = new List<string>();
+            foreach (var p in paths)
+            {
+                var info = await AppServices.Client.CallAsync<ImportInfo>("classify_import", new { path = p });
+                if (info is null || info.Kind == "unknown")
+                    skipped.Add(System.IO.Path.GetFileName(p));
+                else
+                {
+                    info.Path = p;
+                    known.Add(info);
+                }
+            }
+            if (known.Count == 0)
+            {
+                ShowToast("无法识别", "支持整合包(.mrpack/.zip)、模组(.jar)、世界、资源包、光影包、数据包",
+                          InfoBarSeverity.Warning);
+                return;
+            }
+            var lines = string.Join("\n", known.Select(i => $"· {i.Name} → {i.Label}"));
+            if (skipped.Count > 0)
+                lines += "\n" + string.Join("\n", skipped.Select(n => $"· {n} → 无法识别，跳过"));
+            var dlg = new ContentDialog
+            {
+                Title = "拖拽导入",
+                Content = new TextBlock
+                {
+                    Text = $"检测到 {known.Count} 个可导入文件：\n{lines}\n\n整合包会安装对应游戏版本，其余直接放入当前实例对应目录。确认导入？",
+                    TextWrapping = TextWrapping.Wrap,
+                },
+                PrimaryButtonText = "导入",
+                CloseButtonText = "取消",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = Content.XamlRoot,
+            };
+            if (await dlg.ShowAsync() != ContentDialogResult.Primary) return;
+            var started = 0;
+            foreach (var i in known)
+            {
+                try
+                {
+                    await AppServices.Client.StartTaskAsync(
+                        "import_local_file", new { path = i.Path, kind = i.Kind });
+                    started++;
+                }
+                catch (Exception ex)
+                {
+                    ShowToast("导入失败", $"{i.Name}: {ex.Message}", InfoBarSeverity.Error);
+                }
+            }
+            if (started > 0)
+                ShowToast("已开始导入", $"共 {started} 个任务，进度见「下载任务」", InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowToast("导入失败", ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
     private bool _quitOnExit;
 
     private async Task ApplyLauncherVisibility(bool started)

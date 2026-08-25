@@ -30,6 +30,15 @@ public sealed class ModpackUpdateInfo
     public string Source { get; set; } = "";
 }
 
+/// <summary>classify_import 的识别结果（拖拽导入）。</summary>
+public sealed class ImportInfo
+{
+    public string Kind { get; set; } = "unknown";
+    public string Name { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string Path { get; set; } = "";
+}
+
 public sealed class CatalogItem
 {
     public string Name { get; set; } = "";
