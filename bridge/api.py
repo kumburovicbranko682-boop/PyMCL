@@ -851,6 +851,10 @@ class BackendAPI:
         from mclauncher import skin as skin_mod
         return skin_mod.skin_site_url(self.accounts.get_account(account_name))
 
+    def ping_server(self, address: str, port: int = 0) -> dict:
+        from mclauncher import server_ping
+        return server_ping.ping_address(address, port=port)
+
     def remove_account(self, name: str):
         self.accounts.remove_account(name)
         self._emit("ui_changed", {})

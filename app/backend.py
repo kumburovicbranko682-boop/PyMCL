@@ -1336,6 +1336,11 @@ class BackendAPI(QObject):
         from mclauncher import skin as skin_mod
         return skin_mod.skin_site_url(self.accounts.get_account(account_name))
 
+    def ping_server(self, address: str, port: int = 0) -> dict:
+        """查询服务器状态（Server List Ping）。同步网络调用，UI 请走 call_async。"""
+        from mclauncher import server_ping
+        return server_ping.ping_address(address, port=port)
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)
