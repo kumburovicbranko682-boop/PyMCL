@@ -999,5 +999,13 @@
   "读不到系统内存，自动分配回退为 {mb} MB": "Cannot read system memory; auto allocation falls back to {mb} MB",
   "详情": "Details",
   "在浏览器打开": "Open in Browser",
-  "获取详情失败": "Failed to fetch details"
+  "获取详情失败": "Failed to fetch details",
+  "添加 Java…": "Add Java…",
+  "校验中…": "Verifying…",
+  "手动添加": "Manual",
+  "移除": "Remove",
+  "选择 Java 可执行文件": "Choose Java executable",
+  "Java 可执行文件 (java.exe javaw.exe)": "Java executable (java.exe javaw.exe)",
+  "Java 可执行文件 (java)": "Java executable (java)",
+  "Java {major}: {path}": "Java {major}: {path}"
 }

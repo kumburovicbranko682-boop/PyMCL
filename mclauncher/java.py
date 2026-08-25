@@ -291,9 +291,57 @@ def warm_system_javas_async():
     return threading.Thread(target=_run, name="pymcl-java-warmup", daemon=True).start()
 
 
+class JavaError(Exception):
+    """Java 注册 / 校验失败，消息可直接展示。"""
+
+
+def custom_javas() -> list[dict]:
+    """用户手动添加的 Java。路径暂时不存在（可移动盘）就跳过但保留配置。"""
+    out = []
+    for p in CONFIG.get("custom_javas") or []:
+        path = Path(str(p))
+        if not path.is_file():
+            continue
+        major = get_java_major(path)
+        out.append({
+            "name": f"自定义 Java {major or '?'}",
+            "exe": str(path),
+            "major": major,
+            "custom": True,
+        })
+    return out
+
+
+def add_custom_java(path) -> dict:
+    """校验并登记一个手动选择的 Java 可执行文件。"""
+    p = Path(str(path or "").strip()).expanduser()
+    if not p.is_file():
+        raise JavaError(f"找不到文件: {p}")
+    out = java_version_output(p)
+    if "version" not in out.lower():
+        raise JavaError("这个文件不是可用的 Java（java -version 没有输出版本号）")
+    major = get_java_major(p)
+    entry = str(p)
+    saved = [str(x) for x in (CONFIG.get("custom_javas") or [])]
+    if entry not in saved:
+        saved.append(entry)
+        CONFIG.set("custom_javas", saved)
+        CONFIG.save()
+    return {"name": f"自定义 Java {major or '?'}", "exe": entry,
+            "major": major, "custom": True}
+
+
+def remove_custom_java(path):
+    entry = str(path or "")
+    saved = [str(x) for x in (CONFIG.get("custom_javas") or [])
+             if str(x) != entry]
+    CONFIG.set("custom_javas", saved)
+    CONFIG.save()
+
+
 def all_javas():
-    """系统 Java + 启动器自带 Java。"""
-    result = list_installed_javas() + find_system_javas()
+    """系统 Java + 启动器自带 Java + 手动添加的 Java。"""
+    result = list_installed_javas() + find_system_javas() + custom_javas()
     seen = set()
     unique = []
     for j in result:

@@ -13,7 +13,7 @@ from mclauncher.i18n import tr
 
 
 class JavaCard(SimpleCardWidget):
-    def __init__(self, info: dict, parent=None):
+    def __init__(self, info: dict, parent=None, on_remove=None):
         super().__init__(parent)
         self.setFixedHeight(76)
         layout = QHBoxLayout(self)
@@ -26,10 +26,16 @@ class JavaCard(SimpleCardWidget):
         title_row = QHBoxLayout()
         title_row.addWidget(StrongBodyLabel(f'Java {info["major"]}'))
         title_row.addWidget(Pill(tr("可用"), "#2FA36B"))
+        if info.get("custom"):
+            title_row.addWidget(Pill(tr("手动添加"), "#7C5CD6"))
         title_row.addStretch(1)
         info_box.addLayout(title_row)
         info_box.addWidget(CaptionLabel(info.get("path") or info.get("name") or ""))
         layout.addLayout(info_box, 1)
+        if info.get("custom") and on_remove:
+            rm = TransparentPushButton(FIF.DELETE, tr("移除"))
+            rm.clicked.connect(lambda: on_remove(info))
+            layout.addWidget(rm)
 
 
 class JavaDownloadTile(SimpleCardWidget):
@@ -73,6 +79,9 @@ class JavaPage(QWidget):
         title_box.addWidget(SubtitleLabel("Java"))
         title_box.addWidget(CaptionLabel(tr("Minecraft 所需 Java 会在启动时自动匹配下载；也可在实例页为每个实例单独指定")))
         head.addLayout(title_box, 1)
+        self.add_btn = TransparentPushButton(FIF.ADD, tr("添加 Java…"))
+        self.add_btn.clicked.connect(self._add_java)
+        head.addWidget(self.add_btn, 0)
         self.refresh_btn = TransparentPushButton(FIF.SYNC, tr("重新检测"))
         head.addWidget(self.refresh_btn, 0)
         root.addLayout(head)
@@ -167,7 +176,47 @@ class JavaPage(QWidget):
             self.env_layout.addWidget(EmptyState(FIF.CODE, tr("未检测到 Java，请从下方下载")))
             return
         for j in javas:
-            self.env_layout.addWidget(JavaCard(j))
+            self.env_layout.addWidget(JavaCard(j, on_remove=self._remove_java))
+
+    def _add_java(self):
+        from PySide6.QtWidgets import QFileDialog
+        import os
+        filt = tr("Java 可执行文件 (java.exe javaw.exe)") if os.name == "nt" else tr("Java 可执行文件 (java)")
+        path, _f = QFileDialog.getOpenFileName(self, tr("选择 Java 可执行文件"), "", filt + ";;" + tr("所有文件 (*)"))
+        if not path:
+            return
+        self.add_btn.setEnabled(False)
+        self.add_btn.setText(tr("校验中…"))
+
+        def done_ui():
+            self.add_btn.setEnabled(True)
+            self.add_btn.setText(tr("添加 Java…"))
+
+        def ok(info):
+            done_ui()
+            InfoBar.success(
+                tr("已添加"), tr("Java {major}: {path}").format(
+                    major=info.get("major") or "?", path=info.get("exe") or path),
+                parent=self, position=InfoBarPosition.TOP, duration=3000)
+            self.reload(scan_system=True)
+
+        def err(message):
+            done_ui()
+            InfoBar.error(tr("添加失败"), str(message), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(lambda: self.backend.add_custom_java(path), ok, err)
+        else:
+            try:
+                ok(self.backend.add_custom_java(path))
+            except Exception as exc:
+                err(exc)
+
+    def _remove_java(self, info: dict):
+        self.backend.remove_custom_java(info.get("path") or "")
+        self.reload(scan_system=True)
 
     def _download(self, major: str, source=None):
         win = self.window()
