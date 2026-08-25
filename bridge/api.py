@@ -1457,6 +1457,9 @@ class BackendAPI:
         log(f"整合包安装完成: {(meta or {}).get('name') or name}")
 
     def _install_mod_impl(self, progress, log, name, instance, extra=None):
+        # 与 app/backend.py 同步：extra["version"] 是版本隔离的安装目标
+        # （装进 versions/<id>/mods）。以前桥上没有这段，隔离实例装模组
+        # 落到共享 mods/，游戏根本不会加载。
         extra = extra or {}
         inst = self._instance(instance or extra.get("instance"))
         dm = self._dm(progress, log)
@@ -1465,27 +1468,33 @@ class BackendAPI:
         vid = extra.get("version_id")
         fid = extra.get("file_id")
         gv = extra.get("game_version") or extra.get("mc_version")
+        target = str(extra.get("version") or "").strip()
+        mods_dir = self._mods_folder(inst, target) if target else None
+        if target:
+            log(f"安装目标: {inst.name} / {target}")
         if extra.get("path") or extra.get("url"):
             source = extra.get("path") or extra.get("url")
             log(f"安装模组: {source}")
             mods_mod.install_mod_from_source(dm, str(source), inst, on_progress=on_progress,
-                                             version_id=vid)
+                                             version_id=vid, mods_dir=mods_dir)
         elif src_kind.startswith("curse") and extra.get("id"):
             log(f"从 CurseForge 安装模组 id={extra.get('id')}")
             mods_mod.install_curseforge_mod(
-                dm, extra["id"], inst, mc_version=gv, on_progress=on_progress, file_id=fid)
+                dm, extra["id"], inst, mc_version=gv, on_progress=on_progress, file_id=fid,
+                mods_dir=mods_dir)
         else:
             hit = extra if extra.get("slug") else self._lookup_mod(str(name), extra.get("source") or "Modrinth")
             if hit.get("id") and str(hit.get("source") or src_kind).lower().startswith("curse"):
                 log(f"从 CurseForge 安装模组 id={hit.get('id')}")
                 mods_mod.install_curseforge_mod(
                     dm, hit["id"], inst, mc_version=gv, on_progress=on_progress,
-                    file_id=fid or extra.get("version_id"))
+                    file_id=fid or extra.get("version_id"), mods_dir=mods_dir)
             else:
                 slug = hit.get("slug") or name
                 log(f"从 Modrinth 安装模组 {slug}")
                 mods_mod.install_mod_from_source(
-                    dm, str(slug), inst, mc_version=gv, on_progress=on_progress, version_id=vid)
+                    dm, str(slug), inst, mc_version=gv, on_progress=on_progress,
+                    version_id=vid, mods_dir=mods_dir)
         log("模组安装完成")
 
     def _install_content_impl(self, progress, log, kind, name, instance, extra=None):
@@ -1501,7 +1510,16 @@ class BackendAPI:
         files = (result or {}).get("files") or []
         log(f"完成: {', '.join(files) or name}")
         if kind == "datapack":
-            log("数据包已放到实例 datapacks 目录，请复制到对应存档的 datapacks 文件夹后进入世界。")
+            # 与 app/backend.py 同步：带 save/world 时直接装进指定存档，
+            # 而不是只留一句提示让用户自己拷文件。
+            save_name = extra.get("save") or extra.get("world")
+            if save_name:
+                from mclauncher import saves as saves_mod
+                dest = saves_mod.install_datapack_into_save(
+                    inst, (files or [name])[0], save_name, extra.get("version") or "")
+                log(f"已放入存档: {dest}")
+            else:
+                log("数据包已放到实例 datapacks 目录。可在存档管理里选世界安装进去。")
 
     def _download_java_impl(self, progress, log, major):
         dm = self._dm(progress, log)
