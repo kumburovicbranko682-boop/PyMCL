@@ -171,6 +171,28 @@ function debounce(fn: () => void, wait: number) {
 
 const reloadInitialData = debounce(() => { void loadInitialData(); }, 280);
 
+/**
+ * 任务列表只靠实时事件攒（task_added/progress/finished），页面刷新后
+ * 正在跑的下载就从任务页整个消失了。启动时用 list_tasks 补一次快照；
+ * 只补 map 里没有的 id，不覆盖事件已带来的更新。
+ */
+async function hydrateTasks() {
+  try {
+    const rows = await bridge.call<{ id?: string; title?: string; status?: string;
+      success?: boolean; message?: string }[]>('list_tasks');
+    if (!Array.isArray(rows)) return;
+    for (const r of rows) {
+      if (!r?.id || store.tasks.has(r.id)) continue;
+      const running = r.status === 'running' || r.status === 'cancelling';
+      store.updateTask(r.id, {
+        title: r.title || '',
+        success: running ? undefined : !!r.success,
+        finishedMessage: running ? '' : (r.message || ''),
+      });
+    }
+  } catch { /* 老版本桥没有 list_tasks：保持原有纯事件行为 */ }
+}
+
 async function init() {
   renderShell();
   renderPage(router.page);
@@ -223,6 +245,7 @@ async function init() {
       }
     });
 
+    void hydrateTasks();
     loadInitialData();
   });
 }
