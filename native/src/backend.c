@@ -188,14 +188,31 @@ static void *task_run(void *p) {
         const char *loader = pstr(t->args, "loader", "无");
         const char *lv = pstr(t->args, "loader_version", "");
         const char *inst = pstr(t->args, "instance", config_str("default_instance", "default"));
-        ctx_log(t, "安装到实例");
-        if (loader && loader[0] && strcmp(loader, "无") != 0) {
-            char vid[256];
-            ok = install_loader(inst, loader, lv[0] ? lv : NULL, ver, &ctx, vid, sizeof(vid)) == 0;
-            if (ok) snprintf(msg, sizeof(msg), "加载器安装完成: %s", vid);
+        cJSON *extra = cJSON_GetObjectItem(t->args, "extra");
+        int want_combo = cJSON_IsTrue(cJSON_GetObjectItem(extra, "optifine"))
+                      || cJSON_IsTrue(cJSON_GetObjectItem(extra, "liteloader"))
+                      || pymcl_ieq(loader, "optifine") || pymcl_ieq(loader, "liteloader");
+        if (want_combo) {
+            /* OptiFine / LiteLoader 组合装只有 Python 侧有实现；原生路径
+             * 以前直接忽略这两个勾选，装个原版还报「安装完成」。 */
+            ctx_log(t, "OptiFine/LiteLoader 组合安装交由 Python 后端…");
+            cJSON *r = py_rpc_call_t(t->method, t->args, 3600);
+            ok = r != NULL;
+            if (ok) {
+                const char *s = cJSON_GetStringValue(r);
+                snprintf(msg, sizeof(msg), "%s", (s && s[0]) ? s : "任务完成");
+                cJSON_Delete(r);
+            }
         } else {
-            ok = install_version(inst, ver, &ctx) == 0;
-            if (ok) snprintf(msg, sizeof(msg), "版本 %s 安装完成", ver);
+            ctx_log(t, "安装到实例");
+            if (loader && loader[0] && strcmp(loader, "无") != 0) {
+                char vid[256];
+                ok = install_loader(inst, loader, lv[0] ? lv : NULL, ver, &ctx, vid, sizeof(vid)) == 0;
+                if (ok) snprintf(msg, sizeof(msg), "加载器安装完成: %s", vid);
+            } else {
+                ok = install_version(inst, ver, &ctx) == 0;
+                if (ok) snprintf(msg, sizeof(msg), "版本 %s 安装完成", ver);
+            }
         }
     } else if (strcmp(t->method, "download_java") == 0) {
         int maj = pint(t->args, "major", 17);
