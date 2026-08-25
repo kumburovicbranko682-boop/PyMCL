@@ -1229,6 +1229,30 @@ class BackendAPI:
     def start_mod_updates(self, instance: str) -> str:
         return self.start_task(f"检查模组更新 {instance}", self._mod_update_impl, instance)
 
+    def check_mod_updates(self, instance: str, include_ignored: bool = False) -> list:
+        from mclauncher.mod_update import check_updates
+        return check_updates(self._instance(instance), include_ignored=include_ignored)
+
+    def apply_mod_update(self, instance: str, row: dict) -> str:
+        from mclauncher.mod_update import apply_update
+        name = apply_update(self._instance(instance), row)
+        self._bus.emit("ui_changed", {})
+        return name
+
+    def list_mod_update_ignores(self, instance: str) -> dict:
+        """更新忽略表：{project: "*"（不再提醒）或 具体版本串（忽略此版本）}。"""
+        from mclauncher import mod_update
+        return mod_update.ignores(self._instance(instance))
+
+    def ignore_mod_update(self, instance: str, project: str, latest: str = "*") -> dict:
+        """忽略某模组的更新（PCL2 同款：latest='*' 不再提醒，否则只忽略该版本）。"""
+        from mclauncher import mod_update
+        return mod_update.set_ignore(self._instance(instance), project, latest)
+
+    def unignore_mod_update(self, instance: str, project: str) -> dict:
+        from mclauncher import mod_update
+        return mod_update.clear_ignore(self._instance(instance), project)
+
     def cleaner_preview(self) -> dict:
         from mclauncher import cleaner as cleaner_mod
         return cleaner_mod.preview()

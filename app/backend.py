@@ -1406,9 +1406,9 @@ class BackendAPI(QObject):
         """把实例整合包升级到最新版本（重装文件并清理旧版残留 mods）。"""
         return self.start_task(f"更新整合包 {instance}", self._update_modpack_impl, instance)
 
-    def check_mod_updates(self, instance: str) -> list:
+    def check_mod_updates(self, instance: str, include_ignored: bool = False) -> list:
         from mclauncher.mod_update import check_updates
-        return check_updates(self._instance(instance))
+        return check_updates(self._instance(instance), include_ignored=include_ignored)
 
     def start_mod_updates(self, instance: str) -> str:
         return self.start_task(f"检查模组更新 {instance}", self._mod_update_impl, instance)
@@ -1418,6 +1418,20 @@ class BackendAPI(QObject):
         name = apply_update(self._instance(instance), row)
         self._emit_ui_changed()
         return name
+
+    def list_mod_update_ignores(self, instance: str) -> dict:
+        """更新忽略表：{project: "*"（不再提醒）或 具体版本串（忽略此版本）}。"""
+        from mclauncher import mod_update
+        return mod_update.ignores(self._instance(instance))
+
+    def ignore_mod_update(self, instance: str, project: str, latest: str = "*") -> dict:
+        """忽略某模组的更新（PCL2 同款：latest='*' 不再提醒，否则只忽略该版本）。"""
+        from mclauncher import mod_update
+        return mod_update.set_ignore(self._instance(instance), project, latest)
+
+    def unignore_mod_update(self, instance: str, project: str) -> dict:
+        from mclauncher import mod_update
+        return mod_update.clear_ignore(self._instance(instance), project)
 
     def cleaner_preview(self) -> dict:
         from mclauncher import cleaner as cleaner_mod

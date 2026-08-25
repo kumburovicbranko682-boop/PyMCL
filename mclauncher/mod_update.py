@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""已装模组更新：按 sha1 查 Modrinth，比出版本。"""
+"""已装模组更新：按 sha1 查 Modrinth，比出版本。支持忽略（PCL2 同款）。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,32 +12,74 @@ from .mods import list_instance_mod_entries
 
 API = "https://api.modrinth.com/v2"
 
+# 更新忽略表：{project_id: "*"（永不提醒）或 具体 latest 版本串（只忽略这个版本）}
+IGNORE_FILE = "pymcl_mod_ignores.json"
+
 
 def _game_mods(instance: Instance, mods_path: Path | None = None) -> Path:
     return Path(mods_path) if mods_path else instance.path / "mods"
 
 
+def _ignore_file(instance: Instance) -> Path:
+    return Path(instance.path) / IGNORE_FILE
+
+
+def ignores(instance: Instance) -> dict:
+    data = utils.read_json(_ignore_file(instance), None)
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if k}
+
+
+def set_ignore(instance: Instance, project, latest: str = "*") -> dict:
+    """忽略某个 mod 的更新。latest='*' 永不提醒；否则只忽略该 latest 版本，
+    下次出更新的版本仍会提醒（PCL2「忽略此版本 / 不再提醒」两档）。"""
+    project = str(project or "").strip()
+    if not project:
+        raise ValueError("project 不能为空")
+    data = ignores(instance)
+    data[project] = str(latest or "*").strip() or "*"
+    utils.write_json(_ignore_file(instance), data)
+    return data
+
+
+def clear_ignore(instance: Instance, project) -> dict:
+    data = ignores(instance)
+    data.pop(str(project or "").strip(), None)
+    utils.write_json(_ignore_file(instance), data)
+    return data
+
+
+def is_ignored(row: dict, ignore_map: dict) -> bool:
+    v = ignore_map.get(str(row.get("project") or ""))
+    if v is None:
+        return False
+    return v == "*" or v == str(row.get("latest") or "")
+
+
 def check_updates(instance: Instance, dm: DownloadManager | None = None,
                   mods_path: Path | None = None, mc_version: str = "",
-                  loader: str = "") -> list:
+                  loader: str = "", include_ignored: bool = False) -> list:
     dm = dm or DownloadManager(threads=4)
     rows = []
     folder = _game_mods(instance, mods_path)
     if not folder.is_dir():
         return rows
+    ignore_map = ignores(instance)
     for entry in list_instance_mod_entries(instance) if mods_path is None else _entries(folder):
         path = folder / entry["filename"]
         if not path.is_file() or not entry.get("enabled"):
             continue
         info = inspect_jar(path)
         digest = utils.sha1_file(path)
-        row = _modrinth_update(dm, path, digest, mc_version, loader, info)
-        if row:
-            rows.append(row)
+        row = (_modrinth_update(dm, path, digest, mc_version, loader, info)
+               or _curseforge_update(dm, path, mc_version, loader, info))
+        if not row:
             continue
-        row = _curseforge_update(dm, path, mc_version, loader, info)
-        if row:
-            rows.append(row)
+        row["ignored"] = is_ignored(row, ignore_map)
+        if row["ignored"] and not include_ignored:
+            continue
+        rows.append(row)
     return rows
 
 

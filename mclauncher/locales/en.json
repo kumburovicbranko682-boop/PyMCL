@@ -1144,5 +1144,22 @@
   "锁定难度": "Lock difficulty",
   "允许作弊": "Allow cheats",
   "编辑失败": "Edit failed",
-  "存档不存在": "World not found"
+  "存档不存在": "World not found",
+  "模组更新": "Mod Updates",
+  "正在检查更新…": "Checking for updates…",
+  "更新所选": "Update Selected",
+  "检查更新失败：{err}": "Update check failed: {err}",
+  "共 {n} 个可更新，已忽略 {m} 个": "{n} updates available, {m} ignored",
+  "已忽略": "Ignored",
+  "取消忽略": "Unignore",
+  "忽略此版本": "Skip This Version",
+  "这次的新版本不再提醒；再出更新的版本仍会提醒": "Stop reminding about this version; newer releases will still be shown",
+  "不再提醒": "Don't Remind Again",
+  "这个模组以后所有更新都不再提醒": "Never remind about updates for this mod",
+  "忽略失败": "Ignore failed",
+  "请先勾选要更新的模组。": "Please tick the mods to update first.",
+  "更新中…": "Updating…",
+  "部分更新失败": "Some updates failed",
+  "模组已更新": "Mods updated",
+  "已更新 {n} 个模组": "Updated {n} mod(s)"
 }

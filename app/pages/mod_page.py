@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
-    MessageBox, MessageBoxBase, PushButton, SubtitleLabel, SwitchButton,
+    CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
+    LineEdit, MessageBox, MessageBoxBase, PushButton, SubtitleLabel, SwitchButton,
     TransparentPushButton, TransparentToolButton,
 )
 
@@ -191,6 +191,189 @@ class ConflictReportDialog(MessageBoxBase):
             box.addWidget(cap)
         lay.addLayout(box, 1)
         return row
+
+
+class ModUpdateDialog(MessageBoxBase):
+    """模组更新列表（PCL2 同款）：勾选要更新的项，可「忽略此版本 / 不再提醒」。
+
+    检查与批量更新都在后台线程跑，对话框保持可响应；
+    已忽略的项默认不勾选、带「已忽略」标记，可一键取消忽略。
+    """
+
+    def __init__(self, page, instance: str):
+        super().__init__(page.window())
+        self.page = page
+        self.backend = page.backend
+        self.instance = instance
+        self._rows: list[dict] = []
+        self._checks: list = []           # [(CheckBox, row)]
+        self._busy = False
+
+        self.viewLayout.addWidget(SubtitleLabel(tr("模组更新"), self))
+        self.head = CaptionLabel(tr("正在检查更新…"), self)
+        self.head.setWordWrap(True)
+        self.head.setStyleSheet(f"color: {Theme.muted}; background: transparent;")
+        self.viewLayout.addWidget(self.head)
+
+        self.scroll = QScrollArea(self)
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        host = QWidget(self)
+        self.list_lay = QVBoxLayout(host)
+        self.list_lay.setContentsMargins(0, 0, 0, 0)
+        self.list_lay.setSpacing(6)
+        self.scroll.setWidget(host)
+        self.scroll.setMinimumHeight(180)
+        self.viewLayout.addWidget(self.scroll)
+
+        self.yesButton.setText(tr("更新所选"))
+        self.yesButton.setEnabled(False)
+        self.cancelButton.setText(tr("关闭"))
+        self.widget.setMinimumWidth(640)
+
+        self.backend.call_async(
+            lambda: self.backend.check_mod_updates(self.instance, True),
+            guard(self, self._filled), guard(self, self._failed))
+
+    # ------------------------------------------------------------------
+    def _filled(self, rows):
+        self._rows = list(rows or [])
+        self._refill()
+
+    def _failed(self, err):
+        self.head.setText(tr("检查更新失败：{err}").format(err=err))
+
+    def _refill(self):
+        self._checks = []
+        while self.list_lay.count():
+            item = self.list_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if not self._rows:
+            self.head.setText(tr("已装模组都是最新"))
+            self.list_lay.addWidget(EmptyState(FIF.COMPLETED, tr("已装模组都是最新")))
+            self.list_lay.addStretch(1)
+            self.yesButton.setEnabled(False)
+            return
+        ignored = sum(1 for r in self._rows if r.get("ignored"))
+        self.head.setText(tr("共 {n} 个可更新，已忽略 {m} 个").format(
+            n=len(self._rows), m=ignored))
+        for row in self._rows:
+            self.list_lay.addWidget(self._row_widget(row))
+        self.list_lay.addStretch(1)
+        self.yesButton.setEnabled(not self._busy)
+
+    def _row_widget(self, row: dict) -> QWidget:
+        frame = QFrame(self)
+        frame.setObjectName("modUpdRow")
+        frame.setStyleSheet(row_qss("modUpdRow"))
+        lay = QHBoxLayout(frame)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(10)
+
+        cb = CheckBox()
+        cb.setChecked(not row.get("ignored"))
+        lay.addWidget(cb)
+        self._checks.append((cb, row))
+
+        box = QVBoxLayout()
+        box.setSpacing(1)
+        title = QLabel(str(row.get("name") or row.get("filename") or "?"))
+        title.setStyleSheet(
+            f"color: {Theme.title}; font-size: 13px; font-weight: 600; background: transparent;")
+        box.addWidget(title)
+        cap = CaptionLabel(f"{row.get('current') or '?'}  →  {row.get('latest') or '?'}"
+                           f"  ·  {row.get('source') or ''}")
+        cap.setStyleSheet(f"color: {Theme.muted}; font-size: 11px; background: transparent;")
+        box.addWidget(cap)
+        lay.addLayout(box, 1)
+
+        if row.get("ignored"):
+            lay.addWidget(Pill(tr("已忽略"), "#9E9E9E"))
+            undo = TransparentPushButton(tr("取消忽略"))
+            undo.clicked.connect(lambda _=False, r=row: self._unignore(r))
+            lay.addWidget(undo)
+        else:
+            skip = TransparentPushButton(tr("忽略此版本"))
+            skip.setToolTip(tr("这次的新版本不再提醒；再出更新的版本仍会提醒"))
+            skip.clicked.connect(
+                lambda _=False, r=row: self._ignore(r, str(r.get("latest") or "*")))
+            mute = TransparentPushButton(tr("不再提醒"))
+            mute.setToolTip(tr("这个模组以后所有更新都不再提醒"))
+            mute.clicked.connect(lambda _=False, r=row: self._ignore(r, "*"))
+            lay.addWidget(skip)
+            lay.addWidget(mute)
+        return frame
+
+    # ------------------------------------------------------------------
+    def _ignore(self, row: dict, latest: str):
+        try:
+            self.backend.ignore_mod_update(self.instance, row.get("project"), latest)
+        except Exception as e:
+            InfoBar.error(tr("忽略失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+            return
+        row["ignored"] = True
+        self._refill()
+
+    def _unignore(self, row: dict):
+        try:
+            self.backend.unignore_mod_update(self.instance, row.get("project"))
+        except Exception as e:
+            InfoBar.error(tr("操作失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+            return
+        row["ignored"] = False
+        self._refill()
+
+    # ------------------------------------------------------------------
+    def validate(self) -> bool:
+        """点「更新所选」：后台逐个下载替换，完成后自己关对话框。"""
+        if self._busy:
+            return False
+        picked = [r for cb, r in self._checks if cb.isChecked()]
+        if not picked:
+            InfoBar.warning(tr("未选择"), tr("请先勾选要更新的模组。"), parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)
+            return False
+        self._busy = True
+        self.yesButton.setEnabled(False)
+        self.yesButton.setText(tr("更新中…"))
+        self.cancelButton.setEnabled(False)
+
+        def work():
+            done, fails = [], []
+            for r in picked:
+                try:
+                    done.append(self.backend.apply_mod_update(self.instance, r))
+                except Exception as e:                      # noqa: BLE001
+                    fails.append(f"{r.get('name') or r.get('filename')}: {e}")
+            return done, fails
+
+        def finish(result):
+            done, fails = result
+            self._busy = False
+            self.page.reload_list()
+            parent = self.page
+            if fails:
+                InfoBar.error(tr("部分更新失败"), "；".join(fails)[:400], parent=parent,
+                              position=InfoBarPosition.TOP, duration=6000)
+            if done:
+                InfoBar.success(tr("模组已更新"),
+                                tr("已更新 {n} 个模组").format(n=len(done)), parent=parent,
+                                position=InfoBarPosition.TOP, duration=4000)
+            self.accept()
+
+        def fail(err):
+            self._busy = False
+            self.yesButton.setEnabled(True)
+            self.yesButton.setText(tr("更新所选"))
+            self.cancelButton.setEnabled(True)
+            InfoBar.error(tr("更新失败"), str(err), parent=self,
+                          position=InfoBarPosition.TOP, duration=5000)
+
+        self.backend.call_async(work, guard(self, finish), guard(self, fail))
+        return False
 
 
 class ModManagerPage(QWidget):
@@ -479,7 +662,7 @@ class ModManagerPage(QWidget):
 
     def _check_updates(self):
         try:
-            self.backend.start_mod_updates(self._current_instance())
+            ModUpdateDialog(self, self._current_instance()).exec()
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
