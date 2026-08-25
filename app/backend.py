@@ -689,6 +689,18 @@ class BackendAPI(QObject):
     def open_media(self, path: str) -> bool:
         return bool(open_path(path))
 
+    def list_music_tracks(self) -> list[dict]:
+        """启动器背景音乐曲库（PCL2 音乐播放器同款）：music/ 文件夹。"""
+        from mclauncher import music as music_mod
+        return music_mod.list_tracks()
+
+    def open_music_folder(self) -> str:
+        from mclauncher import music as music_mod
+        folder = music_mod.folder()
+        if not open_path(folder):
+            raise LaunchError(f"无法打开: {folder}")
+        return str(folder)
+
     def delete_modpack(self, instance: str, filename: str = ""):
         inst = self._instance(instance)
         meta = inst.meta() or {}
@@ -1108,6 +1120,8 @@ class BackendAPI(QObject):
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
             "ui_background": CONFIG.get("ui_background") or "",
             "ui_font_family": CONFIG.get("ui_font_family") or "",
+            "music_enabled": bool(CONFIG.get("music_enabled", False)),
+            "music_volume": int(CONFIG.get("music_volume", 50) or 0),
             "global_mods_dir": CONFIG.get("global_mods_dir") or "",
             "launcher_visibility": CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": CONFIG.get("gc_preset") or "auto",
@@ -1183,6 +1197,8 @@ class BackendAPI(QObject):
             "ui_background": (data.get("ui_background") if "ui_background" in data
                               else CONFIG.get("ui_background") or ""),
             "ui_font_family": str(_keep("ui_font_family") or "").strip(),
+            "music_enabled": bool(data.get("music_enabled", CONFIG.get("music_enabled", False))),
+            "music_volume": max(0, min(100, int(_keep("music_volume", default=50) or 0))),
             "global_mods_dir": (data.get("global_mods_dir") if "global_mods_dir" in data
                                 else CONFIG.get("global_mods_dir") or ""),
             "launcher_visibility": data.get("launcher_visibility") or CONFIG.get("launcher_visibility") or "keep",

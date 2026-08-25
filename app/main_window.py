@@ -867,7 +867,26 @@ class MainWindow(FluentWindowBase):
             f" border-image: url('{path}') 0 0 0 0 stretch stretch; }}"
         )
 
+    def music_player(self):
+        """启动器背景音乐播放器（懒建，PCL2 音乐播放器同款）。"""
+        player = getattr(self, "_music_player", None)
+        if player is None:
+            from .music_player import MusicPlayer
+            player = self._music_player = MusicPlayer(self)
+        return player
+
+    def _boot_music(self):
+        from mclauncher.config import CONFIG
+        if not CONFIG.get("music_enabled", False):
+            return
+        try:
+            self.music_player().start()
+        except Exception as exc:
+            from mclauncher import utils
+            utils.log.warning("背景音乐启动失败: %s", exc)
+
     def _boot_extras(self):
+        self._boot_music()
         if self.backend.get_setting("first_run", True):
             from .pages.first_run import FirstRunDialog
             dlg = FirstRunDialog(self.backend, self)

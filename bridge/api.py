@@ -515,6 +515,18 @@ class BackendAPI:
     def open_media(self, path: str) -> bool:
         return bool(open_path(path))
 
+    def list_music_tracks(self) -> list[dict]:
+        """启动器背景音乐曲库（PCL2 音乐播放器同款）：music/ 文件夹。"""
+        from mclauncher import music as music_mod
+        return music_mod.list_tracks()
+
+    def open_music_folder(self) -> str:
+        from mclauncher import music as music_mod
+        folder = music_mod.folder()
+        if not open_path(folder):
+            raise LaunchError(f"无法打开: {folder}")
+        return str(folder)
+
     def delete_modpack(self, instance: str, filename: str = ""):
         inst = self._instance(instance)
         meta = inst.meta() or {}
@@ -891,6 +903,8 @@ class BackendAPI:
             "theme_color": CONFIG.get("theme_color") or "#2E9B6B",
             "ui_background": CONFIG.get("ui_background") or "",
             "ui_font_family": CONFIG.get("ui_font_family") or "",
+            "music_enabled": bool(CONFIG.get("music_enabled", False)),
+            "music_volume": int(CONFIG.get("music_volume", 50) or 0),
         }
 
     def save_settings(self, data: dict):
@@ -966,6 +980,10 @@ class BackendAPI:
             patch["ui_background"] = data.get("ui_background") or ""
         if "ui_font_family" in data:
             patch["ui_font_family"] = str(data.get("ui_font_family") or "").strip()
+        if "music_enabled" in data:
+            patch["music_enabled"] = bool(data.get("music_enabled"))
+        if "music_volume" in data:
+            patch["music_volume"] = max(0, min(100, int(data.get("music_volume") or 0)))
         CONFIG.update(patch)
         CONFIG.save()
 

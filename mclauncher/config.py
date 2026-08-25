@@ -78,6 +78,9 @@ DEFAULT_CONFIG = {
     "ui_background": "",
     # 启动器界面字体（HMCL 设置「字体」同款）：空 = 默认 Fluent 字族
     "ui_font_family": "",
+    # 启动器背景音乐（PCL2 音乐播放器同款）：music/ 文件夹随机循环
+    "music_enabled": False,
+    "music_volume": 50,
     # 这三个键以前只在 save_settings 里写、没在这儿声明。
     # `save()` 落的是整份 data，`load()` 却只按本表的键名回读 ——
     # 结果就是「关掉飞入动画、重开启动器它又自己回来了」。

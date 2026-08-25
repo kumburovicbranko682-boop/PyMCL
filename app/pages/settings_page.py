@@ -251,6 +251,23 @@ class SettingsPage(QWidget):
             theme_card.hBoxLayout.addWidget(b, 0, Qt.AlignRight)
         theme_card.hBoxLayout.addSpacing(8)
         ui_group.addSettingCard(theme_card)
+        # 启动器背景音乐（PCL2 音乐播放器同款）
+        music_card = SettingCard(
+            FIF.MUSIC if hasattr(FIF, "MUSIC") else FIF.PLAY,
+            tr("启动器背景音乐"),
+            tr("把音频文件放进 music 文件夹，启动器随机循环播放"))
+        self.music_open_btn = PushButton(tr("打开音乐文件夹"))
+        self.music_next_btn = PushButton(tr("下一曲"))
+        self.music_vol = SpinBox(music_card)
+        self.music_vol.setRange(0, 100)
+        self.music_vol.setValue(int(settings.get("music_volume") or 50))
+        self.music_vol.setFixedWidth(110)
+        self.music_sw = SwitchButton(music_card)
+        self.music_sw.setChecked(bool(settings.get("music_enabled")))
+        for w in (self.music_open_btn, self.music_next_btn, self.music_vol, self.music_sw):
+            music_card.hBoxLayout.addWidget(w, 0, Qt.AlignRight)
+        music_card.hBoxLayout.addSpacing(16)
+        ui_group.addSettingCard(music_card)
         root.addWidget(ui_group)
 
         # ---- 个性化布局：自由画布 + 方案 + 侧栏 ----
@@ -524,6 +541,12 @@ class SettingsPage(QWidget):
         self.bg_edit.editingFinished.connect(self._on_bg_committed)
         # 字体选完就落盘并应用到 Fluent 字族；已建控件等重启
         self.font_box.currentTextChanged.connect(self._on_font_changed)
+        # 背景音乐：开关立即播/停；音量拖动即时生效、失焦才落盘
+        self.music_sw.checkedChanged.connect(self._on_music_toggled)
+        self.music_vol.valueChanged.connect(self._on_music_volume_live)
+        self.music_vol.editingFinished.connect(self._on_music_volume_commit)
+        self.music_next_btn.clicked.connect(self._music_next)
+        self.music_open_btn.clicked.connect(self._open_music_folder)
 
     def refresh_from_config(self):
         """把磁盘上的最新设置推回控件。
@@ -601,6 +624,56 @@ class SettingsPage(QWidget):
         apply_ui_font()
         InfoBar.success(tr("已应用"), tr("新窗口立即生效；已打开的页面重启后全部生效"),
                         parent=self, position=InfoBarPosition.TOP, duration=3000)
+
+    # ------------------------------------------------------------------
+    # 启动器背景音乐（PCL2 音乐播放器同款）
+    # ------------------------------------------------------------------
+    def _music_player(self):
+        win = self.window()
+        return win.music_player() if hasattr(win, "music_player") else None
+
+    def _on_music_toggled(self, checked: bool):
+        self.backend.save_settings({"music_enabled": bool(checked)})
+        player = self._music_player()
+        if player is None:
+            return
+        if checked:
+            if not player.start():
+                InfoBar.info(tr("提示"), tr("music 文件夹里还没有音频文件"),
+                             parent=self, position=InfoBarPosition.TOP, duration=3000)
+        else:
+            player.stop()
+
+    def _on_music_volume_live(self, value: int):
+        # 拖动即时改音量；落盘等 editingFinished，避免每格都触发一次保存
+        player = self._music_player()
+        if player is not None:
+            player.set_volume(int(value))
+
+    def _on_music_volume_commit(self):
+        value = int(self.music_vol.value())
+        if value == int(self.backend.get_setting("music_volume", 50) or 0):
+            return
+        self.backend.save_settings({"music_volume": value})
+
+    def _music_next(self):
+        player = self._music_player()
+        if player is None:
+            return
+        name = player.next_track()
+        if name:
+            InfoBar.success(tr("正在播放"), name, parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)
+        else:
+            InfoBar.info(tr("提示"), tr("music 文件夹里还没有音频文件"),
+                         parent=self, position=InfoBarPosition.TOP, duration=3000)
+
+    def _open_music_folder(self):
+        try:
+            self.backend.open_music_folder()
+        except Exception as e:
+            InfoBar.error(tr("无法打开"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
 
     # ------------------------------------------------------------------
     # 个性化布局
