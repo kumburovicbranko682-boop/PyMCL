@@ -254,7 +254,9 @@ static cJSON *vs_defaults(void) {
         "\"pre_launch_wait\":true,\"server\":\"\",\"port\":\"\",\"process_priority\":\"normal\","
         "\"icon\":\"\",\"hidden\":false,\"login_account\":\"\",\"auth_server\":\"\","
         "\"auth_server_name\":\"\",\"nide8_id\":\"\",\"gc\":\"\",\"window_title\":\"\","
-        "\"window_mode\":\"window\",\"window_width\":null,\"window_height\":null,"
+        /* window_mode 空串 = 跟随全局（与 version_settings.DEFAULTS 一致），
+         * 否则部分保存会把 "window" 固化进文件、挡死全局全屏。 */
+        "\"window_mode\":\"\",\"window_width\":null,\"window_height\":null,"
         "\"skip_assets\":false,\"offline_skin\":\"default\"}");
 }
 

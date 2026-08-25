@@ -43,7 +43,11 @@ DEFAULTS = {
     "nide8_id": "",
     "gc": "",
     "window_title": "",
-    "window_mode": "window",
+    # 空串 = 未显式选择，launch_flow.prepare 回落全局 window_mode。
+    # 以前默认 "window"（truthy）把 or CONFIG 链挡死，设置页
+    # 「默认游戏窗口=全屏」对没保存过版本设置的版本永远不生效；
+    # 且任何部分保存（如隐藏版本）都会把 "window" 固化进文件。
+    "window_mode": "",
     "window_width": None,
     "window_height": None,
     "skip_assets": False,
