@@ -647,6 +647,17 @@ class BackendAPI:
     def get_installed_datapacks(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "datapacks")]
 
+    def get_installed_modpacks(self, instance: str) -> list[str]:
+        # 与 app/backend.py 同步：目录页「已安装」标签在桥上也要能列出整合包。
+        meta = self._instance(instance).meta() or {}
+        pack = meta.get("modpack")
+        if isinstance(pack, dict) and pack.get("name"):
+            label = pack.get("name")
+            if pack.get("version"):
+                label = f"{label} {pack.get('version')}"
+            return [label]
+        return []
+
     def delete_shader(self, instance: str, filename: str):
         mods_mod.delete_content_file(self._instance(instance), "shaderpacks", filename)
         self._emit("ui_changed", {})
