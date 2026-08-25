@@ -159,10 +159,13 @@ class ServerPage(QWidget):
             btn_l.setContentsMargins(4, 2, 4, 2)
             # 不再 setFixedWidth(40)：两个汉字加内边距根本放不下，会被省略号截成「编…」，
             # 切英文后 Edit/Delete 更放不下。让按钮按自身 sizeHint 走，最后一列本来就 stretch。
+            join_b = TransparentPushButton(tr("加入"))
+            join_b.clicked.connect(lambda checked, idx=i: self._on_join(idx))
             edit_b = TransparentPushButton(tr("编辑"))
             edit_b.clicked.connect(lambda checked, idx=i: self._on_edit(idx))
             del_b = TransparentPushButton(tr("删除"))
             del_b.clicked.connect(lambda checked, idx=i: self._on_delete(idx))
+            btn_l.addWidget(join_b)
             btn_l.addWidget(edit_b)
             btn_l.addWidget(del_b)
             self.table.setCellWidget(i, 5, btn_w)
@@ -214,6 +217,18 @@ class ServerPage(QWidget):
             item.setText(tr("离线"))
             item.setForeground(QColor("#D95568"))
             item.setToolTip(result.get("error") or "")
+
+    def _on_join(self, index: int):
+        s = self._servers[index]
+        try:
+            self.backend.join_server(
+                self._instance, s.get("ip") or "", int(s.get("port") or 25565))
+            InfoBar.success(
+                tr("正在启动"),
+                tr("启动后将自动加入 {name}").format(name=s.get("name") or s.get("ip") or "?"),
+                duration=3000, parent=self)
+        except Exception as e:
+            InfoBar.error(tr("启动失败"), str(e), duration=4000, parent=self)
 
     def _on_add(self):
         dlg = InputDialog(tr("添加服务器"), tr("服务器名称"), placeholder=tr("可选"))

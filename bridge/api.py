@@ -930,6 +930,31 @@ class BackendAPI:
         from mclauncher import server_ping
         return server_ping.ping_address(address, port=port)
 
+    def join_server(self, instance: str, ip: str, port: int = 25565) -> str:
+        """一键启动并直连服务器（1.20+ 走 Quick Play，老版本回退 --server）。"""
+        ip = (ip or "").strip()
+        if not ip:
+            raise LaunchError("服务器地址为空")
+        inst = self._instance(instance)
+        installed = list(self.get_installed_versions(inst.name) or [])
+        if not installed:
+            raise LaunchError("该实例还没有安装版本，请先到「版本」页安装")
+        from mclauncher import playtime as playtime_mod
+        version = ""
+        for sess in reversed(playtime_mod.get_playtime(inst.name).get("sessions") or []):
+            if sess.get("version") in installed:
+                version = sess["version"]
+                break
+        version = version or installed[0]
+        account = self.accounts.active or "离线模式"
+        return self.launch_game(
+            instance=inst.name, version=version, account=account,
+            username="", memory_mb=int(CONFIG.get("memory_mb") or 4096),
+            width=int(CONFIG.get("width") or 854),
+            height=int(CONFIG.get("height") or 480),
+            extra_game_args=["--server", ip, "--port", str(int(port or 25565))],
+        )
+
     def remove_account(self, name: str):
         self.accounts.remove_account(name)
         self._emit("ui_changed", {})

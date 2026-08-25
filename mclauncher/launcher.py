@@ -34,6 +34,46 @@ _JVM_VALUE_FLAGS = {
 }
 
 
+def _extract_server(extras):
+    """从额外游戏参数里剥离 --server / --port，交给版本感知的直连逻辑统一处理。
+
+    旧调用方习惯直接塞 ["--server", host, "--port", port]；1.20+ 已改用
+    Quick Play（--quickPlayMultiplayer），旧参数会被游戏忽略。这里统一
+    提取，由 build_launch_command 按版本能力生成正确参数。
+    """
+    host = ""
+    port = 0
+    out = []
+    i = 0
+    extras = list(extras or [])
+    while i < len(extras):
+        a = str(extras[i])
+        if a == "--server" and i + 1 < len(extras):
+            host = str(extras[i + 1]).strip()
+            i += 2
+            continue
+        if a == "--port" and i + 1 < len(extras):
+            try:
+                port = int(str(extras[i + 1]).strip())
+            except ValueError:
+                port = 0
+            i += 2
+            continue
+        out.append(a)
+        i += 1
+    return out, host, port
+
+
+def _server_game_args(game_args, extras, server, server_port):
+    """没有 Quick Play 参数（老版本）时补旧式 --server/--port 直连参数。"""
+    if not server:
+        return []
+    joined = list(game_args) + list(extras)
+    if any(str(a).startswith("--quickPlay") for a in joined):
+        return []
+    return ["--server", str(server), "--port", str(int(server_port or 25565))]
+
+
 def _expand_args(args_raw, placeholders, features):
     out = []
     for entry in args_raw or []:
@@ -236,10 +276,14 @@ def watch_window_title(proc, title: str, timeout: float = 90.0):
 def build_launch_command(instance, version_id, account_props, java_exe,
                          memory_mb=4096, width=None, height=None,
                          extra_game_args=None, extra_jvm_args=None,
-                         game_directory=None, authlib_api=None):
+                         game_directory=None, authlib_api=None,
+                         server="", server_port=0):
     """
     构建启动命令。返回 (cmd, natives_dir, version_dir, game_dir)。
     account_props: {'name', 'uuid', 'token', 'user_type', 'xuid'}
+    server/server_port: 启动后直连的服务器。1.20+ 使用 Quick Play
+    （--quickPlayMultiplayer），老版本回退 --server/--port。extra_game_args
+    里带的 --server/--port 也会被提取并按同样逻辑处理。
     """
     vjson = instance.version_json(version_id)
     if not vjson:
@@ -307,6 +351,14 @@ def build_launch_command(instance, version_id, account_props, java_exe,
 
     main_class = resolved.get("mainClass") or "net.minecraft.client.main.Main"
 
+    # ---- 直连服务器：统一提取（调用方可能塞在 extra_game_args 里）
+    extras_in, ex_host, ex_port = _extract_server(
+        [str(a) for a in (extra_game_args or []) if a not in (None, "")])
+    server = str(server or "").strip() or ex_host
+    server_port = int(server_port or 0) or ex_port
+    if server:
+        server_port = int(server_port or 25565)
+
     # ---- 占位符
     props = account_props or {}
     auth_uuid = utils.dashed_uuid(props.get("uuid") or "") or "00000000-0000-0000-0000-000000000000"
@@ -335,7 +387,13 @@ def build_launch_command(instance, version_id, account_props, java_exe,
         "resolution_width": str(width or 854),
         "resolution_height": str(height or 480),
     }
-    features = {"is_demo_user": False, "has_custom_resolution": bool(width or height)}
+    if server:
+        placeholders["quickPlayMultiplayer"] = f"{server}:{server_port}"
+    features = {
+        "is_demo_user": False,
+        "has_custom_resolution": bool(width or height),
+        "is_quick_play_multiplayer": bool(server),
+    }
 
     # ---- 参数
     if resolved.get("arguments"):
@@ -382,7 +440,8 @@ def build_launch_command(instance, version_id, account_props, java_exe,
         if lp.is_file() and not any("log4j.configurationFile" in a for a in jvm_args):
             jvm_args.append(f"-Dlog4j.configurationFile={lp}")
 
-    extras = [str(a) for a in (extra_game_args or []) if a not in (None, "")]
+    extras = extras_in
+    game_args += _server_game_args(game_args, extras, server, server_port)
     extra_jvm = []
     if extra_jvm_args:
         extra_jvm = list(extra_jvm_args) if isinstance(extra_jvm_args, (list, tuple)) else split_args(extra_jvm_args)
