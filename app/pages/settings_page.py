@@ -165,6 +165,23 @@ class SettingsPage(QWidget):
         self.bg_pick = PushButton(tr("选择文件"))
         self.bg_pick.clicked.connect(self._browse_background)
         self.bg_card.hBoxLayout.addWidget(self.bg_pick, 0, Qt.AlignRight)
+        # 界面字体（HMCL 设置「字体」同款）：默认 = Fluent 字族
+        self._font_default_label = tr("默认字体")
+        cur_font = str(settings.get("ui_font_family") or "").strip()
+        font_items = [self._font_default_label]
+        try:
+            from PySide6.QtGui import QFontDatabase
+            font_items += [f for f in QFontDatabase.families()
+                           if f and not f.startswith(".")]
+        except Exception:
+            pass
+        if cur_font and cur_font not in font_items:
+            # 字体被卸载后仍显示当前配置值，用户能看到并改掉
+            font_items.insert(1, cur_font)
+        self.font_card, self.font_box = _combo_card(
+            FIF.FONT if hasattr(FIF, "FONT") else FIF.EDIT,
+            tr("界面字体"), tr("新窗口立即生效；已打开的页面重启后全部生效"),
+            font_items, cur_font or self._font_default_label)
         vis_map = {
             "keep": tr("保持显示"),
             "minimize": tr("最小化"),
@@ -210,6 +227,7 @@ class SettingsPage(QWidget):
         ui_group.addSettingCard(self.dark_card)
         ui_group.addSettingCard(self.color_card)
         ui_group.addSettingCard(self.bg_card)
+        ui_group.addSettingCard(self.font_card)
         ui_group.addSettingCard(self.vis_card)
         ui_group.addSettingCard(self.home_card)
         ui_group.addSettingCard(self.hp_card)
@@ -504,6 +522,8 @@ class SettingsPage(QWidget):
         self.color_edit.editingFinished.connect(self._on_theme_color_committed)
         # 背景图同理：手输路径回车/失焦就应用，不必先点「保存设置」
         self.bg_edit.editingFinished.connect(self._on_bg_committed)
+        # 字体选完就落盘并应用到 Fluent 字族；已建控件等重启
+        self.font_box.currentTextChanged.connect(self._on_font_changed)
 
     def refresh_from_config(self):
         """把磁盘上的最新设置推回控件。
@@ -515,6 +535,13 @@ class SettingsPage(QWidget):
         self.dark_sw.setChecked(bool(settings.get("ui_dark")))
         self.color_edit.setText(settings.get("theme_color") or "#2E9B6B")
         self.bg_edit.setText(settings.get("ui_background") or "")
+        cur_font = str(settings.get("ui_font_family") or "").strip()
+        # blockSignals：回填不算用户改动，别再触发一次落盘+应用
+        self.font_box.blockSignals(True)
+        if cur_font and self.font_box.findText(cur_font) < 0:
+            self.font_box.insertItem(1, cur_font)
+        self.font_box.setCurrentText(cur_font or self._font_default_label)
+        self.font_box.blockSignals(False)
         self.multi_sw.setChecked(bool(settings.get("allow_multi_instance", False)))
 
     def _sync_ai_mode(self, _text=""):
@@ -564,6 +591,16 @@ class SettingsPage(QWidget):
             return
         self.backend.save_settings({"ui_background": path})
         self._apply_theme_now()
+
+    def _on_font_changed(self, text: str):
+        family = "" if (text or "") == self._font_default_label else (text or "").strip()
+        if family == (self.backend.get_setting("ui_font_family") or ""):
+            return
+        self.backend.save_settings({"ui_font_family": family})
+        from ..pcl_chrome import apply_ui_font
+        apply_ui_font()
+        InfoBar.success(tr("已应用"), tr("新窗口立即生效；已打开的页面重启后全部生效"),
+                        parent=self, position=InfoBarPosition.TOP, duration=3000)
 
     # ------------------------------------------------------------------
     # 个性化布局
@@ -938,6 +975,8 @@ class SettingsPage(QWidget):
             self.refresh_from_config()
             InfoBar.success(tr("已加载"), f"主题包「{name}」已应用", parent=self,
                             position=InfoBarPosition.TOP, duration=2500)
+            from ..pcl_chrome import apply_ui_font
+            apply_ui_font()
             win = self.window()
             if hasattr(win, "apply_theme"):
                 win.apply_theme()

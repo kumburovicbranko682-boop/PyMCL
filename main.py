@@ -538,7 +538,7 @@ def gui_main():
         from PySide6.QtWidgets import QApplication
         from qfluentwidgets import Theme, setTheme, setThemeColor
         from app.main_window import MainWindow
-        from app.pcl_chrome import PCL_GREEN
+        from app.pcl_chrome import PCL_GREEN, apply_ui_font
     except ImportError as exc:
         utils.log.error("Fluent UI 导入失败，回退旧界面: %s", exc)
         from gui import PyMCLApp
@@ -551,6 +551,8 @@ def gui_main():
     qt_app.setApplicationName("PyMCL")
     setTheme(Theme.LIGHT)
     setThemeColor(PCL_GREEN, save=False)
+    # 界面字体要在建窗口前生效：Fluent 控件构造时就固定字体
+    apply_ui_font()
     from mclauncher.i18n import init_language
     init_language()
     window = MainWindow()

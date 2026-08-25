@@ -39,6 +39,7 @@ def _current_theme() -> dict:
         "theme_color": CONFIG.get("theme_color", "#2E9B6B"),
         "ui_dark": bool(CONFIG.get("ui_dark", False)),
         "ui_background": CONFIG.get("ui_background", ""),
+        "ui_font_family": CONFIG.get("ui_font_family", ""),
         "window_mode": CONFIG.get("window_mode", "window"),
         "custom_homepage": CONFIG.get("custom_homepage", ""),
         "homepage_mode": CONFIG.get("homepage_mode", "news"),
@@ -82,8 +83,8 @@ def load_theme(name: str) -> dict:
     if not isinstance(theme, dict):
         raise ValueError(f"主题包数据损坏: {name}")
     updates = {}
-    for key in ("theme_color", "ui_dark", "ui_background", "window_mode",
-                 "custom_homepage", "homepage_mode"):
+    for key in ("theme_color", "ui_dark", "ui_background", "ui_font_family",
+                 "window_mode", "custom_homepage", "homepage_mode"):
         if key in theme:
             updates[key] = theme[key]
     if updates:

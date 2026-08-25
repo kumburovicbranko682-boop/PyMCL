@@ -812,6 +812,9 @@ class BackendAPI:
             "default_java": CONFIG.get("default_java") or "",
             "game_lang": CONFIG.get("game_lang") or "auto",
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
+            "theme_color": CONFIG.get("theme_color") or "#2E9B6B",
+            "ui_background": CONFIG.get("ui_background") or "",
+            "ui_font_family": CONFIG.get("ui_font_family") or "",
         }
 
     def save_settings(self, data: dict):
@@ -881,6 +884,12 @@ class BackendAPI:
             patch["skip_assets"] = bool(data.get("skip_assets"))
         if "ui_dark" in data:
             patch["ui_dark"] = bool(data.get("ui_dark"))
+        if "theme_color" in data:
+            patch["theme_color"] = data.get("theme_color") or "#2E9B6B"
+        if "ui_background" in data:
+            patch["ui_background"] = data.get("ui_background") or ""
+        if "ui_font_family" in data:
+            patch["ui_font_family"] = str(data.get("ui_font_family") or "").strip()
         CONFIG.update(patch)
         CONFIG.save()
 

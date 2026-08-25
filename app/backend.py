@@ -1107,6 +1107,7 @@ class BackendAPI(QObject):
             "theme_color": CONFIG.get("theme_color") or "#2E9B6B",
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
             "ui_background": CONFIG.get("ui_background") or "",
+            "ui_font_family": CONFIG.get("ui_font_family") or "",
             "global_mods_dir": CONFIG.get("global_mods_dir") or "",
             "launcher_visibility": CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": CONFIG.get("gc_preset") or "auto",
@@ -1181,6 +1182,7 @@ class BackendAPI(QObject):
             "ui_dark": bool(data.get("ui_dark", CONFIG.get("ui_dark", False))),
             "ui_background": (data.get("ui_background") if "ui_background" in data
                               else CONFIG.get("ui_background") or ""),
+            "ui_font_family": str(_keep("ui_font_family") or "").strip(),
             "global_mods_dir": (data.get("global_mods_dir") if "global_mods_dir" in data
                                 else CONFIG.get("global_mods_dir") or ""),
             "launcher_visibility": data.get("launcher_visibility") or CONFIG.get("launcher_visibility") or "keep",

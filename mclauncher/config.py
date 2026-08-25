@@ -76,6 +76,8 @@ DEFAULT_CONFIG = {
     "theme_color": "#2E9B6B",
     "ui_dark": False,
     "ui_background": "",
+    # 启动器界面字体（HMCL 设置「字体」同款）：空 = 默认 Fluent 字族
+    "ui_font_family": "",
     # 这三个键以前只在 save_settings 里写、没在这儿声明。
     # `save()` 落的是整份 data，`load()` 却只按本表的键名回读 ——
     # 结果就是「关掉飞入动画、重开启动器它又自己回来了」。
