@@ -660,6 +660,27 @@ cJSON *backend_call(const char *method, cJSON *params) {
         if (inst[0]) {
             cJSON *ids = NULL;
             instance_installed_ids(inst, &ids);
+            /* 对齐 bridge/api.py：默认滤掉版本设置里 hidden 的版本。
+             * 以前 C 桥不滤，用户在 Qt 里隐藏的版本换到 WinUI/WPF 又全冒出来。 */
+            cJSON *inc = cJSON_GetObjectItem(params, "include_hidden");
+            if (!cJSON_IsTrue(inc) && !config_bool("show_hidden_versions", 0)
+                && cJSON_IsArray(ids)) {
+                cJSON *out = cJSON_CreateArray();
+                char vd[PYMCL_PATH], sp[PYMCL_PATH];
+                instance_versions_dir(inst, vd, sizeof(vd));
+                cJSON *v;
+                cJSON_ArrayForEach(v, ids) {
+                    const char *vid = cJSON_GetStringValue(v);
+                    if (!vid) continue;
+                    pymcl_path_join3(sp, sizeof(sp), vd, vid, "pymcl.json");
+                    cJSON *vs = pymcl_read_json(sp);
+                    int hid = vs && cJSON_IsTrue(cJSON_GetObjectItem(vs, "hidden"));
+                    cJSON_Delete(vs);
+                    if (!hid) cJSON_AddItemToArray(out, cJSON_CreateString(vid));
+                }
+                cJSON_Delete(ids);
+                return out;
+            }
             return ids;
         }
         cJSON *names = NULL, *out = cJSON_CreateArray();
