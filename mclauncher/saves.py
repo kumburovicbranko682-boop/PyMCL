@@ -114,7 +114,8 @@ def delete_save(instance: Instance, name: str, version_id: str = ""):
     target = _safe_child(_game_dir(instance, version_id) / "saves", name)
     if not target.exists():
         raise SaveError(f"存档不存在: {name}")
-    utils.remove_tree(target)
+    from . import trash
+    trash.trash_or_delete(target)
 
 
 def open_save(instance: Instance, name: str, version_id: str = "") -> str:
@@ -274,7 +275,8 @@ def delete_backup(instance: Instance, backup_name: str, version_id: str = ""):
     archive = _safe_child(backups_dir(instance, version_id), backup_name, "备份")
     if not archive.is_file():
         raise SaveError(f"备份不存在: {backup_name}")
-    archive.unlink()
+    from . import trash
+    trash.trash_or_delete(archive)
 
 
 def export_save(instance: Instance, name: str, dest: str, version_id: str = "",

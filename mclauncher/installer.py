@@ -1339,5 +1339,7 @@ class Installer:
         vdir = self.instance.versions_dir() / version_id
         if not vdir.is_dir():
             raise InstallError(f"版本 {version_id} 未安装")
-        utils.remove_tree(vdir)
-        utils.log.info("已卸载版本 %s", version_id)
+        from . import trash
+        disposition = trash.trash_or_delete(vdir)
+        utils.log.info("已卸载版本 %s%s", version_id,
+                       "（已移入回收站）" if disposition == "trash" else "")

@@ -418,7 +418,8 @@ def delete_mod(instance: Instance, filename: str, mods_dir=None):
     p = _mod_file_at(mods_dir or (instance.path / "mods"), filename)
     if not p.is_file():
         raise ModError(f"模组文件不存在: {filename}")
-    p.unlink()
+    from . import trash
+    trash.trash_or_delete(p)
 
 
 def set_mod_enabled(instance: Instance, filename: str, enabled: bool, mods_dir=None) -> str:
@@ -1093,7 +1094,8 @@ def delete_content_file(instance: Instance, subdir: str, filename: str):
     if p.parent != folder:
         raise ModError(f"非法路径: {filename}")
     if p.is_file():
-        p.unlink()
+        from . import trash
+        trash.trash_or_delete(p)
 
 
 def install_modrinth_content(dm: DownloadManager, slug, instance: Instance, subdir: str,

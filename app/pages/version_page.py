@@ -366,7 +366,10 @@ class VersionPage(QWidget):
             box = MessageBox(tr("未选择"), tr("请先勾选要卸载的版本"), self)
             box.exec()
             return
-        box = MessageBox(tr("确认卸载"), f"将卸载 {len(selected)} 个版本：\n" + "\n".join(selected), self)
+        box = MessageBox(
+            tr("确认卸载"),
+            f"将卸载 {len(selected)} 个版本：\n" + "\n".join(selected)
+            + "\n" + tr("（会尽量移入系统回收站，可找回）"), self)
         if box.exec():
             for spec in selected:
                 try:

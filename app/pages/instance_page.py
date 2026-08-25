@@ -168,7 +168,10 @@ class InstancePage(QWidget):
             self.reload()
 
     def delete(self, name: str):
-        box = MessageBox(tr("删除实例"), f"确定删除实例「{name}」？其中的存档与配置将一并移除。", self)
+        box = MessageBox(
+            tr("删除实例"),
+            tr("确定删除实例「{name}」？存档与配置会一并移除（会尽量移入系统回收站，可找回）。").format(name=name),
+            self)
         if box.exec():
             try:
                 self.backend.delete_instance(name)

@@ -353,7 +353,7 @@ public sealed partial class CatalogPage : UserControl
                     del.Click += async (_, _) =>
                     {
                         if (!await Dialogs.ConfirmAsync(XamlRoot, "删除文件",
-                                $"确定从实例「{inst}」删除「{name}」吗？文件会直接从磁盘移除。"))
+                                $"确定从实例「{inst}」删除「{name}」吗？会尽量移入系统回收站，可找回。"))
                             return;
                         try { await AppServices.Client.CallAsync("delete_mod", new { instance = inst, filename = name }); Installed_Click(sender, e); }
                         catch (Exception ex) { AppServices.Toast?.Invoke("删除失败", ex.Message, InfoBarSeverity.Error); }

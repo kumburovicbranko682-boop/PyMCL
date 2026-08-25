@@ -640,18 +640,18 @@ class PclCatalogPage(QWidget):
         if fn == "delete_modpack":
             box = MessageBox(
                 tr("删除整合包实例"),
-                f"将删除整个实例「{inst}」及其文件，不可恢复。",
+                tr("将删除整个实例「{name}」及其文件（会尽量移入系统回收站，可找回）。").format(name=inst),
                 self,
             )
             box.yesButton.setText(tr("删除实例"))
         elif fn == "delete_save":
             box = MessageBox(
                 tr("删除世界存档"),
-                f"将永久删除世界「{filename}」，其中的建筑与游戏进度都无法恢复。\n"
-                + tr("建议先在「存档管理」里备份。"),
+                tr("将删除世界「{name}」（会尽量移入系统回收站，可找回）。").format(name=filename)
+                + "\n" + tr("建议先在「存档管理」里备份。"),
                 self,
             )
-            box.yesButton.setText(tr("永久删除"))
+            box.yesButton.setText(tr("删除"))
         elif fn:
             box = MessageBox(tr("删除确认"), f"将删除「{filename}」。", self)
             box.yesButton.setText(tr("删除"))

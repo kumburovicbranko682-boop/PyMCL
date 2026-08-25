@@ -106,7 +106,8 @@ class Instance:
     def delete(self):
         if not self.path.is_dir():
             raise InstanceError(f"实例 {self.name} 不存在。")
-        utils.remove_tree(self.path)
+        from . import trash
+        trash.trash_or_delete(self.path)
         if CONFIG.get("default_instance") == self.name:
             names = list_instances()
             CONFIG.set("default_instance", names[0] if names else "default")

@@ -191,7 +191,9 @@ class SavesDialog(MessageBoxBase):
                 self.backend.delete_save_backup(self.instance, name, self.version)
                 self.reload()
             return
-        box = MessageBox(tr("删除存档"), f"确定删除「{name}」？", self)
+        box = MessageBox(
+            tr("删除存档"),
+            tr("确定删除「{name}」？（会尽量移入系统回收站，可找回）").format(name=name), self)
         if box.exec():
             self.backend.delete_save(self.instance, name, self.version)
             self.reload()
