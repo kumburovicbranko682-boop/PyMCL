@@ -706,11 +706,36 @@ class BackendAPI(QObject):
         return kept
 
     def set_game_dir(self, path: str):
-        p = Path(path).expanduser()
-        CONFIG.set("instances_dir", str(p) if p.is_absolute() else path)
-        CONFIG.save()
+        from mclauncher import game_dirs
+        result = game_dirs.activate(path)
+        self.invalidate_instances()
         self._emit_ui_changed()
-        return str(CONFIG.instances_dir)
+        return result
+
+    def list_game_dirs(self) -> list:
+        """记住的游戏目录列表（HMCL 目录列表 / PCL2 文件夹列表）。"""
+        from mclauncher import game_dirs
+        return game_dirs.entries()
+
+    def add_game_dir(self, path: str, name: str = "") -> list:
+        """把目录加入列表（不切换），返回最新列表。"""
+        from mclauncher import game_dirs
+        game_dirs.register(path, name)
+        self._emit_ui_changed()
+        return game_dirs.entries()
+
+    def remove_game_dir(self, path: str) -> list:
+        """从列表移除（不删磁盘文件），返回最新列表。"""
+        from mclauncher import game_dirs
+        game_dirs.remove(path)
+        self._emit_ui_changed()
+        return game_dirs.entries()
+
+    def rename_game_dir(self, path: str, name: str) -> list:
+        from mclauncher import game_dirs
+        game_dirs.rename(path, name)
+        self._emit_ui_changed()
+        return game_dirs.entries()
 
     def download_java(self, major: str, vendor: str = "adoptium") -> str:
         vendor = (vendor or "adoptium").strip() or "adoptium"

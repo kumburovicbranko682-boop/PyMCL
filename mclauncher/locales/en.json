@@ -1125,5 +1125,13 @@
   "（本轮：": "(this round:",
   "（读取中…）": "(loading…)",
   "（这个文件没有填写更新日志）": "(No changelog was provided for this file)",
-  "＋ 新建实例": "+ New instance"
+  "＋ 新建实例": "+ New instance",
+  "目录列表": "Game directory list",
+  "记住多个游戏目录并随时切换；移除只出列表、不删文件": "Remember multiple game directories and switch anytime; removing only delists, files stay",
+  "添加": "Add",
+  "已移除": "Removed",
+  "仅从列表移除，磁盘文件未动": "Removed from the list only; files on disk untouched",
+  "选择要添加的游戏目录": "Choose a game directory to add",
+  "（不存在）": " (missing)",
+  "默认目录": "Default directory"
 }

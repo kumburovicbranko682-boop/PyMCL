@@ -2258,6 +2258,37 @@ class BackendAPI:
             raise ValueError("该目录里没有 versions 文件夹，不是 Minecraft 游戏目录")
         return {"dir": str(resolved), "versions": om.scan_versions(resolved)}
 
+    def set_game_dir(self, path: str):
+        from mclauncher import game_dirs
+        result = game_dirs.activate(path)
+        self._bus.emit("ui_changed", {})
+        return result
+
+    def list_game_dirs(self) -> list:
+        """记住的游戏目录列表（HMCL 目录列表 / PCL2 文件夹列表）。"""
+        from mclauncher import game_dirs
+        return game_dirs.entries()
+
+    def add_game_dir(self, path: str, name: str = "") -> list:
+        """把目录加入列表（不切换），返回最新列表。"""
+        from mclauncher import game_dirs
+        game_dirs.register(path, name)
+        self._bus.emit("ui_changed", {})
+        return game_dirs.entries()
+
+    def remove_game_dir(self, path: str) -> list:
+        """从列表移除（不删磁盘文件），返回最新列表。"""
+        from mclauncher import game_dirs
+        game_dirs.remove(path)
+        self._bus.emit("ui_changed", {})
+        return game_dirs.entries()
+
+    def rename_game_dir(self, path: str, name: str) -> list:
+        from mclauncher import game_dirs
+        game_dirs.rename(path, name)
+        self._bus.emit("ui_changed", {})
+        return game_dirs.entries()
+
     def migrate_official_launcher(self, instance: str = "default", src_dir: str = "") -> str:
         return self.start_task(
             "导入游戏目录" if src_dir else "导入官方启动器",

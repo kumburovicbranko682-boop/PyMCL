@@ -9,6 +9,9 @@ CONFIG_FILE = utils.ROOT / "config.json"
 DEFAULT_CONFIG = {
     # 实例目录名（相对于启动器主目录）。与 PCL/HMCL 一样用 .minecraft
     "instances_dir": ".minecraft",
+    # 记住的游戏目录列表（HMCL 目录列表 / PCL2 文件夹列表）：[{"name", "path"}]
+    # 当前生效目录仍以 instances_dir 为准；默认目录 .minecraft 不入表
+    "game_dirs": [],
     "default_instance": "default",
     # Java 运行时目录名（所有实例共享）
     "java_dir": "java",

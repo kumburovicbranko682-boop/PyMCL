@@ -110,6 +110,26 @@ class SettingsPage(QWidget):
         game_card.hBoxLayout.addWidget(browse, 0, Qt.AlignRight)
         game_card.hBoxLayout.addSpacing(16)
         iso_group.addSettingCard(game_card)
+        # 目录列表（HMCL 目录列表 / PCL2 文件夹列表）：记住多个游戏目录，一键切换
+        self.dirs_card = SettingCard(
+            FIF.FOLDER_ADD if hasattr(FIF, "FOLDER_ADD") else FIF.FOLDER,
+            tr("目录列表"),
+            tr("记住多个游戏目录并随时切换；移除只出列表、不删文件"))
+        self._dir_entries = []
+        self._dirs_updating = False
+        self.dirs_box = ComboBox(self.dirs_card)
+        self.dirs_box.setFixedWidth(260)
+        self.dirs_box.currentIndexChanged.connect(self._switch_dir_entry)
+        dir_add = PushButton(tr("添加"))
+        dir_add.clicked.connect(self._add_game_dir_entry)
+        dir_del = PushButton(tr("移除"))
+        dir_del.clicked.connect(self._remove_game_dir_entry)
+        self.dirs_card.hBoxLayout.addWidget(self.dirs_box, 0, Qt.AlignRight)
+        self.dirs_card.hBoxLayout.addWidget(dir_add, 0, Qt.AlignRight)
+        self.dirs_card.hBoxLayout.addWidget(dir_del, 0, Qt.AlignRight)
+        self.dirs_card.hBoxLayout.addSpacing(16)
+        iso_group.addSettingCard(self.dirs_card)
+        self._reload_game_dirs()
         root.addWidget(iso_group)
 
         ui_group = SettingCardGroup(tr("界面"), host)
@@ -656,6 +676,7 @@ class SettingsPage(QWidget):
         if typed and typed != (self.backend.get_setting("game_dir") or ""):
             try:
                 self.backend.set_game_dir(typed)
+                self._reload_game_dirs()
             except Exception as e:
                 InfoBar.error(tr("游戏目录无效"), str(e), parent=self,
                               position=InfoBarPosition.TOP, duration=4000)
@@ -728,6 +749,71 @@ class SettingsPage(QWidget):
         except Exception as e:
             InfoBar.error(tr("切换失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+        self._reload_game_dirs()
+
+    def _reload_game_dirs(self):
+        """重建目录列表下拉；active 项即当前生效目录。"""
+        self._dirs_updating = True
+        try:
+            self._dir_entries = self.backend.list_game_dirs()
+            self.dirs_box.clear()
+            labels, active_idx = [], 0
+            for i, e in enumerate(self._dir_entries):
+                label = e.get("name") or e.get("path") or ""
+                if not e.get("exists"):
+                    label += tr("（不存在）")
+                labels.append(label)
+                if e.get("active"):
+                    active_idx = i
+            if labels:
+                self.dirs_box.addItems(labels)
+                self.dirs_box.setCurrentIndex(active_idx)
+        except Exception:
+            pass
+        finally:
+            self._dirs_updating = False
+
+    def _switch_dir_entry(self, idx: int):
+        if self._dirs_updating or idx < 0 or idx >= len(self._dir_entries):
+            return
+        entry = self._dir_entries[idx]
+        if entry.get("active"):
+            return
+        try:
+            self.backend.set_game_dir(entry.get("raw") or entry.get("path") or "")
+            self.game_dir.setText(self.backend.get_setting("game_dir") or "")
+            InfoBar.success(tr("已切换目录"), entry.get("path") or "", parent=self,
+                            position=InfoBarPosition.TOP, duration=2500)
+        except Exception as e:
+            InfoBar.error(tr("切换失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+        self._reload_game_dirs()
+
+    def _add_game_dir_entry(self):
+        path = QFileDialog.getExistingDirectory(self, tr("选择要添加的游戏目录"), "")
+        if not path:
+            return
+        try:
+            self.backend.add_game_dir(path)
+        except Exception as e:
+            InfoBar.error(tr("添加失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+            return
+        self._reload_game_dirs()
+
+    def _remove_game_dir_entry(self):
+        idx = self.dirs_box.currentIndex()
+        if idx < 0 or idx >= len(self._dir_entries):
+            return
+        entry = self._dir_entries[idx]
+        try:
+            self.backend.remove_game_dir(entry.get("raw") or entry.get("path") or "")
+            InfoBar.success(tr("已移除"), tr("仅从列表移除，磁盘文件未动"), parent=self,
+                            position=InfoBarPosition.TOP, duration=2500)
+        except Exception as e:
+            InfoBar.error(tr("移除失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+        self._reload_game_dirs()
 
     def _global_mods(self):
         from .global_mods_dialog import GlobalModsDialog
