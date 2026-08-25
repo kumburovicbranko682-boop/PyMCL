@@ -873,6 +873,33 @@ def install_mrpack(dm: DownloadManager, source, instance: Instance,
 
 # ================================================================ CurseForge
 
+def cf_manual_download_hint(mods_dir: Path, entries: list[dict], err) -> str:
+    """整合包 Mod 下载失败时的可操作提示。
+
+    CurseForge 部分作者禁止第三方分发（API 的 downloadUrl 为空、CDN 403），
+    这类文件只能浏览器手动下载。列出缺失文件的项目页链接和放置目录；
+    已下载的文件重装时会自动跳过。
+    """
+    missing = [e for e in entries if not Path(e["dest"]).is_file()]
+    if not missing:
+        return str(err)
+    blocked = [e for e in missing if e.get("blocked")]
+    head = f"{len(missing)} 个 Mod 下载失败"
+    if blocked:
+        head += f"（其中 {len(blocked)} 个作者禁止第三方分发，只能手动下载）"
+    lines = [head + "："]
+    for e in missing[:12]:
+        mark = "[需手动] " if e.get("blocked") else ""
+        lines.append(
+            f"- {mark}{e['name']}: https://www.curseforge.com/projects/{e['project_id']}"
+            f"（文件 ID {e['file_id']}）")
+    if len(missing) > 12:
+        lines.append(f"… 以及另外 {len(missing) - 12} 个")
+    lines.append(f"请用浏览器下载后放进 {mods_dir}，再重新安装本整合包——已下载的文件会自动跳过。")
+    lines.append(f"原始错误: {err}")
+    return "\n".join(lines)
+
+
 def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                    on_progress=None, cancel=None, force=False, java=None,
                    addon_id=None, file_id=None, cf_slug=None):
@@ -971,6 +998,7 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                 utils.log.warning("批量查询整合包 Mod 元数据失败，将仅用 CDN 规则: %s", e)
         tasks = []
         managed_files = []
+        mod_entries = []
         for f in raw_files:
             pid, fid = f.get("projectID"), f.get("fileID")
             info = meta.get(int(fid), {}) if fid is not None else {}
@@ -987,9 +1015,16 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             size = info.get("fileLength")
             urls = cf_mod_download_urls(pid, fid, filename=filename, download_url=download_url)
             tasks.append((urls, dest, sha1, size))
+            mod_entries.append({"dest": dest, "project_id": pid, "file_id": fid,
+                                "name": dest_name,
+                                "blocked": not download_url})
         if tasks:
             _emit(on_progress, f"开始下载整合包 Mod（{len(tasks)} 个）")
-            dm.download_all(tasks, message="下载整合包 Mod")
+            try:
+                dm.download_all(tasks, message="下载整合包 Mod")
+            except DownloadError as e:
+                raise ModpackError(
+                    cf_manual_download_hint(instance.path / "mods", mod_entries, e)) from e
             _emit(on_progress, "整合包 Mod 下载完成")
 
         # overrides
