@@ -481,7 +481,14 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         char path[PYMCL_PATH];
         servers_path(inst, path, sizeof(path));
         cJSON *arr = pymcl_read_json(path);
-        if (!cJSON_IsArray(arr)) { cJSON_Delete(arr); return cJSON_CreateTrue(); }
+        /* 与 mclauncher/servers.py delete_server 一致：列表缺失或索引越界
+         * 必须报错。以前这里一律返回 true，删一个不存在的条目前端也土司成功。 */
+        int count = cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : 0;
+        if (!cJSON_IsArray(arr) || idx < 0 || idx >= count) {
+            cJSON_Delete(arr);
+            pymcl_set_error("服务器索引 %d 不存在", idx);
+            return NULL;
+        }
         cJSON *next = cJSON_CreateArray();
         int i = 0;
         cJSON *it;
