@@ -97,7 +97,11 @@ def main() -> int:
             _emit_line("ai.fail", {"message": "AI 超时无响应"})
             return 1
         ev = str(item.get("event") or "")
-        if not ev.startswith("ai."):
+        # ui_changed 也要透传：AI 工具建实例/装模组后靠它让前端刷新列表，
+        # 以前被 ai.* 过滤器吞掉，WinUI 列表在 C 桥下一直是旧的。
+        # 任务类事件（task_added/progress/finished）故意不转发：task_id 活在
+        # 本子进程里，转发出去会让任务页出现一个永远取消不掉的假任务。
+        if not (ev.startswith("ai.") or ev == "ui_changed"):
             continue
         _emit_line(ev, item.get("data") or {})
         if ev in ("ai.done", "ai.fail"):
