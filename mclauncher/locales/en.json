@@ -1017,5 +1017,11 @@
   "种子: {s}": "Seed: {s}",
   "难度: {d}": "Difficulty: {d}",
   "已开启作弊": "Cheats enabled",
-  "最后游玩: {t}": "Last played: {t}"
+  "最后游玩: {t}": "Last played: {t}",
+  "包裹命令": "Wrapper command",
+  "环境变量": "Environment variables",
+  "包裹 Java 的前置命令，如 optirun、mangohud": "Command prefixed before Java, e.g. optirun, mangohud",
+  "每行一个 KEY=VALUE，注入游戏进程": "One KEY=VALUE per line, injected into the game process",
+  "包裹命令: {c}": "Wrapper command: {c}",
+  "环境变量: {v}": "Environment variables: {v}"
 }

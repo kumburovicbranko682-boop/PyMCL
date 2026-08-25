@@ -42,6 +42,8 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "priority": settings.get("process_priority") or CONFIG.get("default_priority") or "normal",
         "global_mods": n,
         "pre_launch_wait": settings.get("pre_launch_wait", True),
+        "wrapper": split_args(settings.get("wrapper") or ""),
+        "env": parse_env_vars(settings.get("env_vars") or ""),
         "login_account": settings.get("login_account") or "",
         "nide8_id": settings.get("nide8_id") or "",
         "auth_server": settings.get("auth_server") or "",
@@ -58,6 +60,38 @@ def _positive(value):
     except (TypeError, ValueError):
         return None
     return n if n > 0 else None
+
+
+def parse_env_vars(text: str) -> dict:
+    """解析「每行一个 KEY=VALUE」的环境变量文本。
+
+    忽略空行与 # 注释；VALUE 里允许再出现 =。
+    """
+    env = {}
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key:
+            env[key] = value.strip()
+    return env
+
+
+def wrap_command(cmd, wrapper) -> list:
+    """把包裹命令（如 optirun / mangohud）前缀到启动命令前。"""
+    tokens = [str(t) for t in (wrapper or []) if str(t).strip()]
+    return tokens + list(cmd) if tokens else list(cmd)
+
+
+def build_env(overrides) -> "dict | None":
+    """有自定义环境变量时返回合并后的完整环境，否则 None（进程用默认环境）。"""
+    if not overrides:
+        return None
+    env = os.environ.copy()
+    env.update({str(k): str(v) for k, v in overrides.items()})
+    return env
 
 
 def resolve_resolution(prep, width=None, height=None):

@@ -2113,11 +2113,18 @@ class BackendAPI(QObject):
             game_directory=game_dir,
             authlib_api=props.get("authlib_api"),
         )
+        if prep.get("wrapper"):
+            cmd = launch_flow.wrap_command(cmd, prep["wrapper"])
+            log(tr("包裹命令: {c}").format(c=" ".join(prep["wrapper"])))
+        env = launch_flow.build_env(prep.get("env"))
+        if prep.get("env"):
+            log(tr("环境变量: {v}").format(v=", ".join(sorted(prep["env"]))))
         log(f"实际启动: {cmd[0]}")
         log(tr("正在启动游戏进程…"))
         progress(3, 4, tr("游戏启动中"))
         worker = QThread.currentThread()
-        proc = GameProcess(cmd, cwd=game_dir, on_line=log, priority=prep["priority"],
+        proc = GameProcess(cmd, cwd=game_dir, on_line=log, env=env,
+                           priority=prep["priority"],
                            window_title=prep.get("window_title") or "")
         with self._game_lock:
             self._game_proc = proc
@@ -2282,9 +2289,10 @@ class BackendAPI(QObject):
             game_directory=prep["game_dir"],
             authlib_api=props.get("authlib_api"),
         )
+        cmd = launch_flow.wrap_command(cmd, prep.get("wrapper"))
         if not dest:
             dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.bat")
-        path = vops.export_launch_bat(Path(dest), cmd, gdir)
+        path = vops.export_launch_bat(Path(dest), cmd, gdir, env=prep.get("env"))
         log(f"已写出 {path}")
         return path
 
@@ -2559,6 +2567,7 @@ class BackendAPI(QObject):
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
         )
+        cmd = launch_flow.wrap_command(cmd, prep.get("wrapper"))
         return " ".join(cmd)
 
     # ==================================================================

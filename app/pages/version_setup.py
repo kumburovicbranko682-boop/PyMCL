@@ -125,6 +125,14 @@ class VersionSetupDialog(MessageBoxBase):
         self.post.setPlaceholderText(tr("退出后命令"))
         self.post.setText(data.get("post_launch") or "")
 
+        self.wrapper = LineEdit()
+        self.wrapper.setPlaceholderText(tr("包裹 Java 的前置命令，如 optirun、mangohud"))
+        self.wrapper.setText(data.get("wrapper") or "")
+        self.env = TextEdit()
+        self.env.setPlaceholderText(tr("每行一个 KEY=VALUE，注入游戏进程"))
+        self.env.setFixedHeight(56)
+        self.env.setPlainText(data.get("env_vars") or "")
+
         self.priority = ComboBox()
         self.priority.addItems(["low", "normal", "high"])
         self.priority.setCurrentText(data.get("process_priority") or "normal")
@@ -148,6 +156,8 @@ class VersionSetupDialog(MessageBoxBase):
         form.addRow(form_label(tr("启动前")), self.pre)
         form.addRow("", self.wait)
         form.addRow(form_label(tr("退出后")), self.post)
+        form.addRow(form_label(tr("包裹命令")), self.wrapper)
+        form.addRow(form_label(tr("环境变量")), self.env)
         form.addRow(form_label(tr("优先级")), self.priority)
         self.viewLayout.addWidget(form_host)
         self.yesButton.setText(tr("保存"))
@@ -196,6 +206,8 @@ class VersionSetupDialog(MessageBoxBase):
             "pre_launch": self.pre.text().strip(),
             "post_launch": self.post.text().strip(),
             "pre_launch_wait": self.wait.isChecked(),
+            "wrapper": self.wrapper.text().strip(),
+            "env_vars": self.env.toPlainText().strip(),
             "process_priority": self.priority.currentText(),
             "login_account": login,
             "nide8_id": self.nide8.text().strip(),

@@ -122,7 +122,7 @@ def open_folder(instance: Instance, version_id: str = "", which: str = "root") -
     return str(path)
 
 
-def export_launch_bat(dest: Path, cmd: list, cwd) -> str:
+def export_launch_bat(dest: Path, cmd: list, cwd, env: dict | None = None) -> str:
     dest = Path(dest)
     utils.ensure_dir(dest.parent)
     lines = [
@@ -130,6 +130,8 @@ def export_launch_bat(dest: Path, cmd: list, cwd) -> str:
         "chcp 65001 >nul",
         f'cd /d "{cwd}"',
     ]
+    for k, v in (env or {}).items():
+        lines.append(f'set "{k}={v}"')
     quoted = []
     for a in cmd:
         s = str(a)
