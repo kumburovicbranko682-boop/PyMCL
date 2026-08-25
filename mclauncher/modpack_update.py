@@ -31,9 +31,11 @@ def _meta(instance: Instance) -> dict:
 def _updatable(pack: dict) -> tuple[bool, str]:
     if not pack:
         return False, "该实例不是整合包安装"
+    source = pack.get("source") or ""
+    if source in ("multimc", "plain-zip"):
+        return False, "本地导入的整合包没有在线来源，无法检查更新"
     if not isinstance(pack.get("managed_files"), list):
         return False, "该整合包由旧版 PyMCL 安装，缺少文件清单，无法原地更新；请新建实例重新安装"
-    source = pack.get("source") or ""
     if source == "modrinth":
         if not pack.get("slug"):
             return False, "该整合包从本地文件安装，没有 Modrinth 来源，无法检查更新"
