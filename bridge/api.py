@@ -212,6 +212,30 @@ class BackendAPI:
     def task_title(self, task_id: str) -> str:
         return self._titles.get(task_id, task_id)
 
+    def list_tasks(self) -> list:
+        """任务快照：运行中的 + 最近已结束的。
+
+        WPF 任务页的「刷新」一直在调这个方法，但桥上从来没有它，
+        页面一打开就弹「unknown method: list_tasks」。
+        """
+
+        def _num(tid: str) -> int:
+            try:
+                return int(str(tid).rsplit("-", 1)[-1])
+            except ValueError:
+                return 0
+
+        with self._lock:
+            running = {tid: self._titles.get(tid, tid) for tid in self._workers}
+        rows = []
+        for tid, (ok, msg) in list(self._task_results.items()):
+            rows.append({"id": tid, "title": self._titles.get(tid, tid),
+                         "status": "done" if ok else "failed", "message": msg})
+        for tid, title in running.items():
+            rows.append({"id": tid, "title": title, "status": "running", "message": ""})
+        rows.sort(key=lambda r: _num(r["id"]))
+        return rows
+
     def get_crash(self, task_id: str = "") -> dict:
         if task_id and task_id in self._crashes:
             return self._crashes[task_id]

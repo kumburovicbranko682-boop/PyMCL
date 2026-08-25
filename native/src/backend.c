@@ -730,6 +730,24 @@ cJSON *backend_call(const char *method, cJSON *params) {
         pthread_mutex_unlock(&g_mu);
         return cJSON_CreateTrue();
     }
+    if (strcmp(method, "list_tasks") == 0) {
+        /* 任务活在本进程里，绝不能落到 py_rpc：一次性 Python 进程永远看不到它们。 */
+        cJSON *arr = cJSON_CreateArray();
+        pthread_mutex_lock(&g_mu);
+        for (int i = 0; i < g_ntasks; i++) {
+            task_t *t = g_tasks[i];
+            cJSON *o;
+            if (!t) continue;
+            o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "id", t->id);
+            cJSON_AddStringToObject(o, "title", t->title);
+            cJSON_AddStringToObject(o, "status", t->cancelled ? "cancelling" : "running");
+            cJSON_AddStringToObject(o, "message", "");
+            cJSON_AddItemToArray(arr, o);
+        }
+        pthread_mutex_unlock(&g_mu);
+        return arr;
+    }
     if (strcmp(method, "install_game") == 0)
         return start_task("安装游戏", method, params);
     if (strcmp(method, "download_java") == 0)
