@@ -190,6 +190,76 @@ static void format_playtime(long long sec, char *out, size_t n) {
     else snprintf(out, n, "%lld 秒", s);
 }
 
+/* URL 路径段编码（UTF-8 字节逐个百分号编码，字母数字与 -_. 除外） */
+static void path_enc(const char *s, char *out, size_t n) {
+    size_t o = 0;
+    out[0] = 0;
+    for (s = s ? s : ""; *s && o + 4 < n; s++) {
+        unsigned char c = (unsigned char)*s;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+            || c == '-' || c == '_' || c == '.')
+            out[o++] = (char)c;
+        else { snprintf(out + o, n - o, "%%%02X", c); o = strlen(out); }
+    }
+    out[o] = 0;
+}
+
+/* 皮肤站根地址：去掉尾部 /api/yggdrasil 或 /yggdrasil，只留 scheme://host。
+ * 与 mclauncher/skin.py 的 _site_origin 一致。 */
+static void skin_origin(const char *api, char *out, size_t n) {
+    char raw[512];
+    snprintf(raw, sizeof(raw), "%s", api ? api : "");
+    size_t len = strlen(raw);
+    while (len && raw[len - 1] == '/') raw[--len] = 0;
+    const char *sufs[] = { "/api/yggdrasil", "/yggdrasil" };
+    for (int i = 0; i < 2; i++) {
+        size_t sl = strlen(sufs[i]);
+        if (len > sl && strcmp(raw + len - sl, sufs[i]) == 0) { raw[len - sl] = 0; break; }
+    }
+    char *p = strstr(raw, "://");
+    if (p) {
+        char *slash = strchr(p + 3, '/');
+        if (slash) *slash = 0;
+        snprintf(out, n, "%s", raw);
+    } else {
+        char *slash = strchr(raw, '/');
+        if (slash) *slash = 0;
+        snprintf(out, n, "https://%s", raw);
+    }
+}
+
+/* 头像 / 全身预览 URL，规则与 mclauncher/skin.py 的 avatar_url / body_url 一致。 */
+static void skin_urls(const char *name, const char *type, const char *uuid, const char *api,
+                      char *avatar, size_t an, char *body, size_t bn) {
+    char nameq[384];
+    path_enc((name && name[0]) ? name : "Steve", nameq, sizeof(nameq));
+    /* uuid 规范成 32 位小写 hex；不是合法 UUID 就当没有 */
+    char hexid[64] = {0};
+    size_t o = 0;
+    for (const char *s = uuid ? uuid : ""; *s && o < 33; s++) {
+        char c = *s;
+        if (c == '-') continue;
+        if (c >= 'A' && c <= 'F') c = (char)(c - 'A' + 'a');
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) { o = 0; break; }
+        hexid[o++] = c;
+    }
+    if (o != 32) hexid[0] = 0; else hexid[32] = 0;
+    if (type && strcmp(type, "authlib") == 0 && api && api[0]) {
+        char origin[512];
+        skin_origin(api, origin, sizeof(origin));
+        snprintf(avatar, an, "%s/avatar/%s", origin, nameq);
+        snprintf(body, bn, "%s/preview/%s", origin, nameq);
+        return;
+    }
+    if (type && strcmp(type, "microsoft") == 0 && hexid[0]) {
+        snprintf(avatar, an, "https://crafatar.com/avatars/%s?overlay=true&size=128", hexid);
+        snprintf(body, bn, "https://crafatar.com/renders/body/%s?overlay=true&scale=6", hexid);
+        return;
+    }
+    snprintf(avatar, an, "https://mc-heads.net/avatar/%s/128", nameq);
+    snprintf(body, bn, "https://mc-heads.net/body/%s/180", nameq);
+}
+
 /* Prefer native; on failure or complexity, Python. */
 cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     if (!method) return NULL;
@@ -203,12 +273,19 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         cJSON_ArrayForEach(it, cJSON_GetObjectItem(root, "accounts")) {
             cJSON *row = cJSON_CreateObject();
             const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name")) ?: "";
+            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(it, "type")) ?: "offline";
+            const char *uuid = cJSON_GetStringValue(cJSON_GetObjectItem(it, "uuid")) ?: "";
+            const char *api = cJSON_GetStringValue(cJSON_GetObjectItem(it, "api")) ?: "";
             cJSON_AddStringToObject(row, "name", nm);
-            cJSON_AddStringToObject(row, "type", cJSON_GetStringValue(cJSON_GetObjectItem(it, "type")) ?: "offline");
-            cJSON_AddStringToObject(row, "uuid", cJSON_GetStringValue(cJSON_GetObjectItem(it, "uuid")) ?: "");
-            cJSON_AddStringToObject(row, "api", cJSON_GetStringValue(cJSON_GetObjectItem(it, "api")) ?: "");
-            cJSON_AddStringToObject(row, "avatar", "");
-            cJSON_AddStringToObject(row, "body", "");
+            cJSON_AddStringToObject(row, "type", type);
+            cJSON_AddStringToObject(row, "uuid", uuid);
+            cJSON_AddStringToObject(row, "api", api);
+            /* 头像 / 全身预览：以前恒为空串，账号页在 C 桥下永远不显示头像。
+             * URL 规则与 mclauncher/skin.py 一致。 */
+            char avatar[768], body[768];
+            skin_urls(nm, type, uuid, api, avatar, sizeof(avatar), body, sizeof(body));
+            cJSON_AddStringToObject(row, "avatar", avatar);
+            cJSON_AddStringToObject(row, "body", body);
             cJSON_AddBoolToObject(row, "active", active && strcmp(active, nm) == 0);
             cJSON_AddItemToArray(out, row);
         }
