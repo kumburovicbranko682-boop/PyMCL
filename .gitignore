@@ -10,6 +10,7 @@ ai_chats.json
 node_modules/
 instances/
 .minecraft/
+offline_skins/
 cache/
 build/
 dist/
