@@ -813,8 +813,12 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
             cJSON_AddStringToObject(o, "message", "当前为 C 桥；自更新需 Python");
             return o;
         }
-        if (strcmp(method, "test_ai_connection") == 0)
-            return cJSON_CreateString("AI 需要 Python 桥（未找到可用 Python）");
+        /* test_ai_connection 以前把「需要 Python」当成功结果返回，
+         * UI 弹出「AI 连接成功」toast，正文却是无法使用的原因。诚实报错。 */
+        if (strcmp(method, "test_ai_connection") == 0) {
+            pymcl_set_error("AI 需要 Python 桥（未找到可用 Python）");
+            return NULL;
+        }
         /* submit_feedback 以前假成功返回 true：用户的反馈正文被 UI 清空、
          * 实际哪儿都没送到。诚实报错，让表单留在原地。 */
         if (strcmp(method, "submit_feedback") == 0) {

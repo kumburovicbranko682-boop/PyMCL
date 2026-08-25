@@ -678,8 +678,9 @@ class BackendAPI:
             return vs.mods_dir(inst, version)
         return inst.path / "mods"
 
-    def get_installed_mods(self, instance: str) -> list[str]:
-        return [p.name for p in mods_mod.list_instance_mods(self._instance(instance))]
+    def get_installed_mods(self, instance: str, version: str = "") -> list[str]:
+        inst = self._instance(instance)
+        return [r["filename"] for r in mods_mod.list_mod_entries_at(self._mods_folder(inst, version)) if r.get("enabled")]
 
     def get_installed_shaders(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "shaderpacks")]
@@ -2131,9 +2132,10 @@ class BackendAPI:
         from mclauncher.sysinfo import get_smart_recommendation
         return get_smart_recommendation()
 
-    def test_ai_connection(self) -> str:
+    def test_ai_connection(self, settings: dict | None = None) -> str:
+        """试连 AI。传 settings 就用它，让设置页能测「还没保存的值」而不必先落盘。"""
         from mclauncher.ai.client import test_connection
-        return test_connection(self.get_settings())
+        return test_connection(settings if settings is not None else self.get_settings())
 
     def ai_list_chats(self) -> dict:
         from mclauncher.ai import store as chat_store
