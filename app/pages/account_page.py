@@ -9,7 +9,7 @@ from qfluentwidgets import (
     StrongBodyLabel, SubtitleLabel, TransparentPushButton,
 )
 
-from ..widgets import DeviceCodeDialog, IconTile, Pill, ThumbnailTile
+from ..widgets import DeviceCodeDialog, IconTile, InputDialog, Pill, ThumbnailTile
 from ..pcl_chrome import Theme
 from mclauncher.i18n import tr
 
@@ -219,6 +219,12 @@ class AccountPage(QWidget):
             del_btn = TransparentPushButton(FIF.DELETE, tr("删除"))
             del_btn.clicked.connect(lambda _, n=row["name"]: self._delete(n))
             bar.addStretch(1)
+            if row["type"] == "offline":
+                uuid_btn = TransparentPushButton("UUID")
+                uuid_btn.setToolTip(tr("修改离线 UUID（服务器白名单 / 跨启动器迁移用）"))
+                uuid_btn.clicked.connect(
+                    lambda _, n=row["name"], u=row.get("uuid") or "": self._edit_uuid(n, u))
+                bar.addWidget(uuid_btn)
             bar.addWidget(use_btn)
             bar.addWidget(del_btn)
             self.list_box.addWidget(card)
@@ -351,6 +357,23 @@ class AccountPage(QWidget):
 
     def _use(self, name):
         self.backend.set_active_account(name)
+        self.reload()
+
+    def _edit_uuid(self, name, current: str = ""):
+        dlg = InputDialog(
+            tr("修改离线 UUID"),
+            tr("其他启动器或服务器白名单里的 UUID 可以填到这里；留空则恢复按角色名推导的标准离线 UUID。"),
+            text=current, parent=self.window())
+        if not dlg.exec():
+            return
+        try:
+            out = self.backend.set_offline_uuid(name, dlg.value().strip())
+        except Exception as e:
+            from qfluentwidgets import MessageBox
+            MessageBox(tr("修改失败"), str(e), self.window()).exec()
+            return
+        InfoBar.success(tr("UUID 已更新"), out, parent=self,
+                        position=InfoBarPosition.TOP, duration=3000)
         self.reload()
 
     def _set_auth_busy(self, busy: bool):

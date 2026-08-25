@@ -30,6 +30,14 @@ XSTS_ERRORS = {
     2148916238: "该账户是儿童账户，需要家长将其添加到家庭组。",
 }
 
+def normalize_uuid(text) -> str:
+    """规范化成 8-4-4-4-12 小写；不是合法 UUID 返回空串。"""
+    import re
+    norm = utils.dashed_uuid(str(text or "").strip())
+    return norm if re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", norm) else ""
+
+
 ACCOUNTS_FILE = utils.ROOT / "accounts.json"
 _TOKEN_KEYS = ("access_token", "refresh_token")
 _DPAPI_PREFIX = "dpapi:"
@@ -494,9 +502,15 @@ class AccountManager:
             self.save()
         return self.active
 
-    def offline_account(self, username, skin="default"):
+    def offline_account(self, username, skin="default", uuid=""):
+        """离线账号。uuid 可选：服务器白名单 / 从其他启动器迁移时保住玩家数据。"""
         username = username.strip() or "Player"
         skin = (skin or "default").lower()
+        if str(uuid or "").strip():
+            custom = normalize_uuid(uuid)
+            if not custom:
+                raise AuthError("UUID 格式不对：应为 32 位十六进制，可带连字符。")
+            return {"type": "offline", "name": username, "uuid": custom, "skin": skin}
         if skin == "steve":
             uuid = "8667ba71-b85a-4004-af54-457a9734eed7"
         elif skin == "alex":
@@ -504,6 +518,23 @@ class AccountManager:
         else:
             uuid = utils.offline_uuid(username)
         return {"type": "offline", "name": username, "uuid": uuid, "skin": skin}
+
+    def set_offline_uuid(self, name, uuid="") -> str:
+        """改离线账号的 UUID（对齐 HMCL）。空值恢复成按角色名推导的标准离线 UUID。"""
+        acc = self.get_account(name)
+        if not acc:
+            raise AuthError(f"账号不存在: {name}")
+        if acc.get("type") != "offline":
+            raise AuthError("只有离线账号可以修改 UUID。")
+        if str(uuid or "").strip():
+            norm = normalize_uuid(uuid)
+            if not norm:
+                raise AuthError("UUID 格式不对：应为 32 位十六进制，可带连字符。")
+        else:
+            norm = utils.offline_uuid(acc.get("name") or "Player")
+        acc["uuid"] = norm
+        self.save()
+        return norm
 
     def ensure_valid(self, account):
         """正版 / 皮肤站令牌过期则刷新；失败则抛 AuthError。"""

@@ -90,6 +90,23 @@ static const char *pstr(cJSON *o, const char *k, const char *def) {
     return s ? s : def;
 }
 
+/* 校验并规范 UUID 参数（与 Python auth.normalize_uuid 一致）：
+ * 32 位十六进制，可带连字符。合法写入 out 并返回 0，否则设错误返回 -1。 */
+static int parse_uuid_param(const char *in, char out[40]) {
+    int hex = 0, ok = 1;
+    for (const char *p = in ? in : ""; *p; p++) {
+        if ((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') ||
+            (*p >= 'A' && *p <= 'F')) hex++;
+        else if (*p != '-') { ok = 0; break; }
+    }
+    if (!ok || hex != 32) {
+        pymcl_set_error("UUID 格式不对：应为 32 位十六进制，可带连字符。");
+        return -1;
+    }
+    pymcl_dashed_uuid(in, out);
+    return 0;
+}
+
 static void servers_path(const char *inst, char *out, size_t n) {
     char ip[PYMCL_PATH];
     instance_path(inst, ip, sizeof(ip));
@@ -208,7 +225,14 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     }
     if (strcmp(method, "add_offline_account") == 0) {
         const char *user = pstr(params, "username", pstr(params, "name", "Player"));
+        const char *want = pstr(params, "uuid", "");
+        char custom[40] = {0};
+        if (want[0] && parse_uuid_param(want, custom) != 0) return NULL;
         cJSON *acc = account_offline(user);
+        if (custom[0]) {
+            cJSON_DeleteItemFromObject(acc, "uuid");
+            cJSON_AddStringToObject(acc, "uuid", custom);
+        }
         /* optional skin */
         const char *skin = pstr(params, "skin", "");
         if (skin[0]) cJSON_AddStringToObject(acc, "skin", skin);
@@ -226,6 +250,40 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         cJSON *name = cJSON_CreateString(cJSON_GetStringValue(cJSON_GetObjectItem(acc, "name")));
         cJSON_Delete(acc);
         return name;
+    }
+    if (strcmp(method, "set_offline_uuid") == 0) {
+        /* 改离线账号 UUID（HMCL 对齐）。空值恢复按角色名推导的标准离线 UUID。 */
+        const char *name = pstr(params, "name", "");
+        const char *want = pstr(params, "uuid", "");
+        char norm[40] = {0};
+        if (want[0] && parse_uuid_param(want, norm) != 0) return NULL;
+        cJSON *root = accounts_load();
+        cJSON *it;
+        int found = 0;
+        cJSON_ArrayForEach(it, cJSON_GetObjectItem(root, "accounts")) {
+            const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
+            if (!nm || strcmp(nm, name) != 0) continue;
+            const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(it, "type"));
+            if (type && strcmp(type, "offline") != 0) {
+                cJSON_Delete(root);
+                pymcl_set_error("只有离线账号可以修改 UUID。");
+                return NULL;
+            }
+            if (!norm[0]) pymcl_offline_uuid(nm, norm);
+            cJSON_DeleteItemFromObject(it, "uuid");
+            cJSON_AddStringToObject(it, "uuid", norm);
+            found = 1;
+            break;
+        }
+        if (!found) {
+            cJSON_Delete(root);
+            pymcl_set_error("账号不存在: %s", name);
+            return NULL;
+        }
+        accounts_save(root);
+        cJSON_Delete(root);
+        if (emit) emit("ui_changed", cJSON_CreateObject());
+        return cJSON_CreateString(norm);
     }
     if (strcmp(method, "remove_account") == 0) {
         const char *name = pstr(params, "name", "");

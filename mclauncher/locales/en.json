@@ -1033,5 +1033,9 @@
   "选择游戏目录（如官方启动器的 .minecraft）": "Choose a game directory (e.g. the official launcher's .minecraft)",
   "原地使用这个文件夹，不复制任何文件。给它起个实例名：": "This folder will be used in place; nothing is copied. Give it an instance name:",
   "移除外部目录": "Remove external directory",
-  "移除外部目录「{name}」？只解除引用，文件夹和其中的存档不会被删除。": "Remove external directory \"{name}\"? Only the reference is removed; the folder and its saves are kept."
+  "移除外部目录「{name}」？只解除引用，文件夹和其中的存档不会被删除。": "Remove external directory \"{name}\"? Only the reference is removed; the folder and its saves are kept.",
+  "修改离线 UUID（服务器白名单 / 跨启动器迁移用）": "Edit offline UUID (for server whitelists / migrating from other launchers)",
+  "修改离线 UUID": "Edit offline UUID",
+  "其他启动器或服务器白名单里的 UUID 可以填到这里；留空则恢复按角色名推导的标准离线 UUID。": "Paste the UUID used by another launcher or a server whitelist; leave empty to restore the standard offline UUID derived from the player name.",
+  "UUID 已更新": "UUID updated"
 }

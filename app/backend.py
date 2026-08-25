@@ -1198,12 +1198,18 @@ class BackendAPI(QObject):
         self._emit_ui_changed()
         return self.accounts.active
 
-    def add_offline_account(self, username: str, skin: str = ""):
+    def add_offline_account(self, username: str, skin: str = "", uuid: str = ""):
         acc = self.accounts.offline_account(
-            username, skin=skin or CONFIG.get("offline_skin") or "default")
+            username, skin=skin or CONFIG.get("offline_skin") or "default", uuid=uuid)
         self.accounts.add_account({**acc, "type": "offline"})
         self._emit_ui_changed()
         return acc["name"]
+
+    def set_offline_uuid(self, name: str, uuid: str = "") -> str:
+        """改离线账号 UUID（HMCL 对齐）。空值恢复标准离线 UUID。"""
+        out = self.accounts.set_offline_uuid(name, uuid)
+        self._emit_ui_changed()
+        return out
 
     def start_authlib_login(self, api: str, username: str, password: str) -> str:
         return self.start_task(tr("皮肤站登录"), self._authlib_login_impl, api, username, password)
