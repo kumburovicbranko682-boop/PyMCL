@@ -1598,6 +1598,13 @@ class BackendAPI(QObject):
         self._pack_cache = rows
         return rows
 
+    def get_project_detail(self, source: str, ident: str) -> dict:
+        """资源项目详情（正文 / 截图 / 链接），Modrinth 传 slug，CurseForge 传数字 id。"""
+        from mclauncher import catalog_detail
+        return catalog_detail.project_detail(
+            DownloadManager(threads=2), source, ident,
+            api_key=CONFIG.get("curseforge_api_key") or "")
+
     def search_mods(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
         src = self._catalog_source(source)
         q = (query or "").strip()

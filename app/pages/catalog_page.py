@@ -7,8 +7,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QGuiApplication
 from qfluentwidgets import (
-    ComboBox, EditableComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit, PushButton,
-    ScrollArea, TransparentPushButton, TransparentToolButton,
+    ComboBox, EditableComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
+    MessageBoxBase, PushButton, ScrollArea, TransparentPushButton, TransparentToolButton,
 )
 
 from ..pcl_chrome import Theme, chip_qss, ghost_btn_qss, row_qss, _icon
@@ -85,8 +85,131 @@ def _meta_chip(fif, text: str) -> QWidget:
     return w
 
 
+class DetailDialog(MessageBoxBase):
+    """资源详情：正文 / 截图 / 元数据 / 外链（对标 PCL2 / HMCL 资源详情页）。"""
+
+    def __init__(self, backend, detail: dict, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.detail = dict(detail or {})
+
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        icon_url = self.detail.get("icon_url") or ""
+        name = self.detail.get("name") or "?"
+        if icon_url:
+            head.addWidget(ThumbnailTile(name, icon_url, size=48))
+        else:
+            head.addWidget(IconTile(name, size=48))
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        t = QLabel(name)
+        t.setStyleSheet(
+            f"color: {Theme.title}; font-size: 17px; font-weight: 700; background: transparent;")
+        title_col.addWidget(t)
+        sub_bits = [_src_label(self.detail.get("source"))]
+        if self.detail.get("author"):
+            sub_bits.append(self.detail["author"])
+        if self.detail.get("license"):
+            sub_bits.append(self.detail["license"])
+        sub = QLabel("  ·  ".join(b for b in sub_bits if b))
+        sub.setStyleSheet(f"color: {Theme.muted}; font-size: 12px; background: transparent;")
+        title_col.addWidget(sub)
+        head.addLayout(title_col, 1)
+        self.viewLayout.addLayout(head)
+
+        meta = QHBoxLayout()
+        meta.setSpacing(14)
+        meta.addWidget(_meta_chip(FIF.DOWNLOAD, fmt_downloads(self.detail.get("downloads"))))
+        if self.detail.get("updated"):
+            meta.addWidget(_meta_chip(FIF.UP, str(self.detail["updated"])))
+        loaders = ", ".join(self.detail.get("loaders") or [])
+        if loaders:
+            meta.addWidget(_meta_chip(FIF.APPLICATION, loaders))
+        versions = self.detail.get("game_versions") or []
+        if versions:
+            shown = ", ".join(versions[:6]) + ("…" if len(versions) > 6 else "")
+            meta.addWidget(_meta_chip(FIF.GAME, shown))
+        meta.addStretch(1)
+        self.viewLayout.addLayout(meta)
+
+        cats = self.detail.get("categories") or []
+        if cats:
+            cat_row = QHBoxLayout()
+            cat_row.setSpacing(6)
+            for c in cats[:8]:
+                chip = QLabel(str(c))
+                chip.setStyleSheet(chip_qss())
+                cat_row.addWidget(chip)
+            cat_row.addStretch(1)
+            self.viewLayout.addLayout(cat_row)
+
+        from PySide6.QtWidgets import QTextBrowser
+        body = QTextBrowser(self)
+        body.setOpenExternalLinks(True)
+        body.setStyleSheet(
+            f"QTextBrowser {{ background: {Theme.card}; color: {Theme.text};"
+            f" border: 1px solid {Theme.line}; border-radius: 8px; padding: 8px; }}")
+        text = self.detail.get("body") or self.detail.get("summary") or ""
+        if self.detail.get("body_format") == "html":
+            body.setHtml(text)
+        else:
+            body.setMarkdown(text)
+        body.setMinimumSize(620, 300)
+        self.viewLayout.addWidget(body, 1)
+
+        gallery = [g for g in self.detail.get("gallery") or [] if g.get("url")][:4]
+        if gallery:
+            shots = QHBoxLayout()
+            shots.setSpacing(8)
+            for g in gallery:
+                lab = QLabel(self)
+                lab.setFixedSize(148, 92)
+                lab.setAlignment(Qt.AlignCenter)
+                lab.setStyleSheet(
+                    f"background: {Theme.hover}; border-radius: 6px; color: {Theme.muted};")
+                lab.setText("…")
+                lab.setToolTip(g.get("title") or "")
+                shots.addWidget(lab)
+                self._load_shot(lab, g["url"])
+            shots.addStretch(1)
+            self.viewLayout.addLayout(shots)
+
+        project_url = (self.detail.get("links") or {}).get("project") or ""
+        self.yesButton.setText(tr("在浏览器打开"))
+        self.yesButton.setEnabled(bool(project_url))
+        self.cancelButton.setText(tr("关闭"))
+        self._project_url = project_url
+        self.yesButton.clicked.connect(self._open_page)
+        self.widget.setMinimumWidth(680)
+
+    def _open_page(self):
+        if self._project_url:
+            from PySide6.QtGui import QDesktopServices
+            from PySide6.QtCore import QUrl
+            QDesktopServices.openUrl(QUrl(self._project_url))
+
+    def _load_shot(self, label: QLabel, url: str):
+        def fetch():
+            return self.backend.ensure_thumb(url)
+
+        def ok(path):
+            import shiboken6
+            if not path or not shiboken6.isValid(label):
+                return
+            from PySide6.QtGui import QPixmap
+            pix = QPixmap(path)
+            if not pix.isNull():
+                label.setPixmap(pix.scaled(
+                    label.width(), label.height(),
+                    Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation))
+
+        self.backend.call_async(fetch, ok, lambda *_: None)
+
+
 class PclResultRow(QFrame):
-    def __init__(self, item: dict, on_install, parent=None, on_fav=None):
+    def __init__(self, item: dict, on_install, parent=None, on_fav=None,
+                 on_detail=None):
         super().__init__(parent)
         self.item = item
         self.setObjectName("pclRow")
@@ -136,6 +259,12 @@ class PclResultRow(QFrame):
         info.addLayout(meta)
         layout.addLayout(info, 1)
 
+        if on_detail and (item.get("slug") or item.get("id")):
+            detail_btn = PushButton(tr("详情"))
+            detail_btn.setFixedSize(64, 30)
+            detail_btn.setStyleSheet(ghost_btn_qss())
+            detail_btn.clicked.connect(lambda: on_detail(item, detail_btn))
+            layout.addWidget(detail_btn)
         btn = PushButton(tr("选择版本"))
         btn.setFixedSize(88, 30)
         btn.setStyleSheet(ghost_btn_qss())
@@ -515,8 +644,38 @@ class PclCatalogPage(QWidget):
             self.list_layout.addStretch(1)
             return
         for row in results:
-            self.list_layout.addWidget(PclResultRow(row, self._install, on_fav=self._toggle_fav))
+            self.list_layout.addWidget(PclResultRow(
+                row, self._install, on_fav=self._toggle_fav, on_detail=self._show_detail))
         self.list_layout.addStretch(1)
+
+    def _show_detail(self, item: dict, btn=None):
+        source = str(item.get("source") or "")
+        ident = item.get("slug") if source.lower().startswith("modrinth") or item.get("slug") else item.get("id")
+        if source.lower().startswith("curse"):
+            ident = item.get("id") or item.get("slug")
+        if not ident:
+            return
+        if btn is not None:
+            btn.setEnabled(False)
+            btn.setText(tr("加载中…"))
+
+        def restore():
+            import shiboken6
+            if btn is not None and shiboken6.isValid(btn):
+                btn.setEnabled(True)
+                btn.setText(tr("详情"))
+
+        def ok(detail):
+            restore()
+            DetailDialog(self.backend, detail, self.window()).exec()
+
+        def err(message):
+            restore()
+            InfoBar.error(tr("获取详情失败"), str(message), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        self.backend.call_async(
+            lambda: self.backend.get_project_detail(source, str(ident)), ok, err)
 
     def _set_mode(self, mode: str):
         self._mode = mode
@@ -737,7 +896,8 @@ class PclCatalogPage(QWidget):
             self.list_layout.addStretch(1)
             return
         for row in rows:
-            self.list_layout.addWidget(PclResultRow(row, self._install, on_fav=self._toggle_fav))
+            self.list_layout.addWidget(PclResultRow(
+                row, self._install, on_fav=self._toggle_fav, on_detail=self._show_detail))
         self.list_layout.addStretch(1)
 
     def showEvent(self, event):

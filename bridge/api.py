@@ -1239,6 +1239,12 @@ class BackendAPI:
         self._pack_cache = rows
         return rows
 
+    def get_project_detail(self, source: str, ident: str) -> dict:
+        from mclauncher import catalog_detail
+        return catalog_detail.project_detail(
+            DownloadManager(threads=2), source, ident,
+            api_key=CONFIG.get("curseforge_api_key") or "")
+
     def search_mods(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
         src = "curseforge" if (source or "").lower().startswith("curse") else "modrinth"
         q = (query or "").strip()
