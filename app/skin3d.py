@@ -107,6 +107,52 @@ def _mirror_swap(faces):
     ]
 
 
+_CAPE_TILT = 10.0  # 披风自然下垂的倾角（度）
+
+
+def _cape_faces():
+    """披风的 6 个面（已就位：背在身后、绕 Y 转 180°、带下垂倾角）。
+
+    披风纹理 64x32，盒体 10x16x1，UV 原点 (0,0)。游戏里从玩家背后
+    看到的花纹是盒体的「正面」区 (1,1,10,16)，因此盒体要转 180°。
+    """
+    import math as _m
+    center = (0.0, 16.0, -3.0)
+    pivot_y = (center[0], center[1], center[2])
+    tilt = _m.radians(_CAPE_TILT)
+    sa, ca = _m.sin(tilt), _m.cos(tilt)
+    py, pz = 24.0, -3.0  # 悬挂点（肩部）
+
+    def place_point(p):
+        # 绕 Y 转 180°（关于盒体中心）
+        x = 2 * pivot_y[0] - p[0]
+        z = 2 * pivot_y[2] - p[2]
+        y = p[1]
+        # 绕 X 倾斜（关于肩部悬挂点）
+        y2 = py + (y - py) * ca - (z - pz) * sa
+        z2 = pz + (y - py) * sa + (z - pz) * ca
+        return (x, y2, z2)
+
+    def place_dir(v):
+        x, y, z = -v[0], v[1], -v[2]
+        return (x, y * ca - z * sa, y * sa + z * ca)
+
+    out = []
+    for p0, uvec, vvec, rect in _faces_of(center, (10, 16, 1), (0, 0), 0.0):
+        out.append((place_point(p0), place_dir(uvec), place_dir(vvec), rect))
+    return out
+
+
+def normalize_cape(img: QImage):
+    """校验披风纹理（64x32 或其整数倍）。返回 (ARGB32 图, 缩放系数)；非法 None。"""
+    if img is None or img.isNull() or img.width() < 64 or img.width() % 64:
+        return None
+    s = img.width() // 64
+    if img.height() != 32 * s:
+        return None
+    return img.convertToFormat(QImage.Format_ARGB32), s
+
+
 def normalize_texture(img: QImage):
     """校验并归一化皮肤纹理。返回 (ARGB32 图, 缩放系数 s, 是否旧格式)；非法返回 None。"""
     if img is None or img.isNull() or img.width() < 64 or img.width() % 64:
@@ -126,15 +172,18 @@ _SUPERSAMPLE = 2
 
 def render_skin_3d(img: QImage, model: str = "classic",
                    yaw: float = 30.0, pitch: float = 15.0,
-                   height: int = 256, width: int = 0) -> QImage | None:
+                   height: int = 256, width: int = 0,
+                   cape: QImage | None = None) -> QImage | None:
     """渲染皮肤 3D 视图。yaw 绕 Y 轴（度），pitch 抬头/低头（度）。
 
+    cape 传披风纹理（64x32 或整数倍）时一并渲染在背后。
     返回 ARGB32 QImage（width 默认 height*0.75），纹理非法返回 None。
     """
     got = normalize_texture(img)
     if not got:
         return None
     tex, s, legacy = got
+    cape_got = normalize_cape(cape) if cape is not None else None
     model = "slim" if model == "slim" else "classic"
     if legacy:
         model = "classic"  # 旧格式没有 slim
@@ -154,12 +203,12 @@ def render_skin_3d(img: QImage, model: str = "classic",
 
     out_h = max(64, int(height)) * _SUPERSAMPLE
     out_w = (int(width) if width else int(height * 0.75)) * _SUPERSAMPLE
-    # 模型（含帽子层膨胀）高 33、水平对角线最长 ~18；留边距
-    scale = min(out_h / 36.0, out_w / 22.0)
+    # 模型（含帽子层膨胀、披风）任意转角下的最大半径 ~19；留边距
+    scale = min(out_h / 39.0, out_w / 22.0)
     cx_s, cy_s = out_w / 2.0, out_h / 2.0
     y_mid = 16.0  # 模型垂直中心（脚 0 → 头顶 32）
 
-    faces = []
+    sources = []
     for center, size, uv, inflate, mirror in _boxes(model, legacy):
         box_faces = _faces_of(center, size, uv, inflate)
         if mirror:
@@ -167,29 +216,37 @@ def render_skin_3d(img: QImage, model: str = "classic",
         else:
             entries = [(p0, uvec, vvec, rect, False)
                        for p0, uvec, vvec, rect in box_faces]
-        for p0, uvec, vvec, rect, flip in entries:
-            p1 = (p0[0] + uvec[0], p0[1] + uvec[1], p0[2] + uvec[2])
-            p2 = (p0[0] + vvec[0], p0[1] + vvec[1], p0[2] + vvec[2])
-            r0, r1, r2 = rotate(p0), rotate(p1), rotate(p2)
+        sources += [(p0, uvec, vvec, rect, flip, 0)
+                    for p0, uvec, vvec, rect, flip in entries]
+    if cape_got:
+        sources += [(p0, uvec, vvec, rect, False, 1)
+                    for p0, uvec, vvec, rect in _cape_faces()]
 
-            def to_screen(r):
-                return (cx_s + r[0] * scale, cy_s - (r[1] - y_mid) * scale)
+    faces = []
+    for p0, uvec, vvec, rect, flip, ti in sources:
+        p1 = (p0[0] + uvec[0], p0[1] + uvec[1], p0[2] + uvec[2])
+        p2 = (p0[0] + vvec[0], p0[1] + vvec[1], p0[2] + vvec[2])
+        r0, r1, r2 = rotate(p0), rotate(p1), rotate(p2)
 
-            s0, s1, s2 = to_screen(r0), to_screen(r1), to_screen(r2)
-            e1 = (s1[0] - s0[0], s1[1] - s0[1])
-            e2 = (s2[0] - s0[0], s2[1] - s0[1])
-            # 背面剔除：正对观察者时 U 向右、V 向下，叉积为正
-            if e1[0] * e2[1] - e1[1] * e2[0] <= 0:
-                continue
-            depth = (r0[2] + r1[2] + r2[2]) / 3.0
-            faces.append((depth, s0, e1, e2, rect, flip))
+        def to_screen(r):
+            return (cx_s + r[0] * scale, cy_s - (r[1] - y_mid) * scale)
+
+        s0, s1, s2 = to_screen(r0), to_screen(r1), to_screen(r2)
+        e1 = (s1[0] - s0[0], s1[1] - s0[1])
+        e2 = (s2[0] - s0[0], s2[1] - s0[1])
+        # 背面剔除：正对观察者时 U 向右、V 向下，叉积为正
+        if e1[0] * e2[1] - e1[1] * e2[0] <= 0:
+            continue
+        depth = (r0[2] + r1[2] + r2[2]) / 3.0
+        faces.append((depth, s0, e1, e2, rect, flip, ti))
 
     canvas = QImage(out_w, out_h, QImage.Format_ARGB32)
     canvas.fill(Qt.transparent)
     painter = QPainter(canvas)
     painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-    for _depth, s0, e1, e2, rect, flip in sorted(faces, key=lambda f: f[0]):
-        part = _extract_face(tex, rect, s, flip)
+    for _depth, s0, e1, e2, rect, flip, ti in sorted(faces, key=lambda f: f[0]):
+        src_img, src_s = (tex, s) if ti == 0 else cape_got
+        part = _extract_face(src_img, rect, src_s, flip)
         part = part.scaled(part.width() * _PRESCALE, part.height() * _PRESCALE,
                            Qt.IgnoreAspectRatio, Qt.FastTransformation)
         tw, th = part.width(), part.height()
@@ -209,6 +266,7 @@ class SkinView3D(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._tex: QImage | None = None
+        self._cape: QImage | None = None
         self._model = "classic"
         self._yaw = 30.0
         self._pitch = 15.0
@@ -222,20 +280,26 @@ class SkinView3D(QWidget):
         self._bg = QColor(color)
         self.update()
 
-    def set_texture_file(self, path: str, model: str = "classic") -> bool:
+    def set_texture_file(self, path: str, model: str = "classic",
+                         cape_file: str = "") -> bool:
         img = QImage(str(path or ""))
-        return self.set_texture(img, model)
+        cape = QImage(str(cape_file)) if cape_file else None
+        return self.set_texture(img, model, cape)
 
-    def set_texture(self, img: QImage, model: str = "classic") -> bool:
+    def set_texture(self, img: QImage, model: str = "classic",
+                    cape: QImage | None = None) -> bool:
         if normalize_texture(img) is None:
             return False
         self._tex = img
+        self._cape = cape if (cape is not None
+                              and normalize_cape(cape) is not None) else None
         self._model = "slim" if model == "slim" else "classic"
         self.update()
         return True
 
     def clear(self):
         self._tex = None
+        self._cape = None
         self.update()
 
     # ---- 交互
@@ -279,7 +343,8 @@ class SkinView3D(QWidget):
         h = max(64, int(self.height() * self._zoom))
         img = render_skin_3d(self._tex, self._model,
                              yaw=self._yaw, pitch=self._pitch,
-                             height=h, width=int(self.width() * self._zoom))
+                             height=h, width=int(self.width() * self._zoom),
+                             cape=self._cape)
         if img is not None:
             pix = QPixmap.fromImage(img)
             painter.drawPixmap((self.width() - pix.width()) // 2,

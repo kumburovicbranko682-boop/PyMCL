@@ -75,7 +75,7 @@ MOJANG_SESSION_PROFILE = "https://sessionserver.mojang.com/session/minecraft/pro
 
 
 def _profile_skin(profile_url: str, timeout: float = 12) -> dict:
-    """从 yggdrasil 会话档案解出皮肤纹理 {url, model}；默认皮肤返回 {}。"""
+    """从 yggdrasil 会话档案解出纹理 {url, model, cape_url}；默认皮肤返回 {}。"""
     import base64
     import json
     import requests
@@ -89,12 +89,17 @@ def _profile_skin(profile_url: str, timeout: float = 12) -> dict:
             payload = json.loads(base64.b64decode(prop.get("value") or ""))
         except (ValueError, TypeError):
             continue
-        entry = (payload.get("textures") or {}).get("SKIN") or {}
+        textures = payload.get("textures") or {}
+        entry = textures.get("SKIN") or {}
         url = entry.get("url")
         if url:
             model = ("slim" if (entry.get("metadata") or {}).get("model") == "slim"
                      else "classic")
-            return {"url": str(url), "model": model}
+            out = {"url": str(url), "model": model}
+            cape_url = (textures.get("CAPE") or {}).get("url")
+            if cape_url:
+                out["cape_url"] = str(cape_url)
+            return out
     return {}
 
 
@@ -104,12 +109,32 @@ def _texture_cache_path(url: str) -> Path:
     return utils.ROOT / "cache" / "skin_textures" / f"{digest}.png"
 
 
+def _download_texture(url: str, timeout: float = 12) -> Path | None:
+    """按 URL 缓存下载纹理 PNG（纹理 URL 内容寻址，命中缓存零网络）。"""
+    cache = _texture_cache_path(url)
+    if cache.is_file():
+        return cache
+    import requests
+    try:
+        resp = requests.get(url, timeout=timeout)
+    except Exception as exc:
+        utils.log.debug("下载纹理失败 %s: %s", url, exc)
+        return None
+    if resp.status_code != 200 or not resp.content.startswith(b"\x89PNG"):
+        return None
+    utils.ensure_dir(cache.parent)
+    tmp = cache.with_suffix(".png.part")
+    tmp.write_bytes(resp.content)
+    tmp.replace(cache)
+    return cache
+
+
 def fetch_skin_texture(account: dict | None, timeout: float = 12) -> dict:
-    """任意账号的皮肤纹理 PNG → 本地文件 {file, model}。
+    """任意账号的皮肤纹理 PNG → 本地文件 {file, model[, cape]}。
 
     离线账号直接用本地皮肤文件；微软 / 皮肤站 / 统一通行证账号先查
-    会话档案拿纹理 URL，再按 URL 缓存下载（纹理 URL 内容寻址，命中
-    缓存零网络）。默认皮肤或失败返回 {}，调用方退回原有预览方式。
+    会话档案拿纹理 URL 再缓存下载，戴披风时额外给出披风纹理路径。
+    默认皮肤或失败返回 {}，调用方退回原有预览方式。
     """
     acc = account or {}
     local = local_skin(acc)
@@ -133,18 +158,12 @@ def fetch_skin_texture(account: dict | None, timeout: float = 12) -> dict:
         return {}
     if not info:
         return {}
-    cache = _texture_cache_path(info["url"])
-    if not cache.is_file():
-        import requests
-        try:
-            resp = requests.get(info["url"], timeout=timeout)
-        except Exception as exc:
-            utils.log.debug("下载皮肤纹理失败 %s: %s", info["url"], exc)
-            return {}
-        if resp.status_code != 200 or not resp.content.startswith(b"\x89PNG"):
-            return {}
-        utils.ensure_dir(cache.parent)
-        tmp = cache.with_suffix(".png.part")
-        tmp.write_bytes(resp.content)
-        tmp.replace(cache)
-    return {"file": str(cache), "model": info["model"]}
+    skin_file = _download_texture(info["url"], timeout=timeout)
+    if not skin_file:
+        return {}
+    out = {"file": str(skin_file), "model": info["model"]}
+    if info.get("cape_url"):
+        cape_file = _download_texture(info["cape_url"], timeout=timeout)
+        if cape_file:
+            out["cape"] = str(cape_file)
+    return out

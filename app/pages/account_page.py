@@ -339,7 +339,8 @@ class AccountPage(QWidget):
                     return
                 f = (tex or {}).get("file")
                 if f and self.skin3d.set_texture_file(
-                        f, (tex or {}).get("model") or "classic"):
+                        f, (tex or {}).get("model") or "classic",
+                        cape_file=(tex or {}).get("cape") or ""):
                     self._show_3d(True)
                     return
                 self._load_skin_flat(url, token)

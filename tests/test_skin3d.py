@@ -160,6 +160,42 @@ class TestModels(unittest.TestCase):
         self.assertIsNone(normalize_texture(QImage()))
 
 
+PURPLE = QColor(150, 0, 220) if HAVE_QT else None
+TEAL = QColor(0, 120, 120) if HAVE_QT else None
+
+
+@unittest.skipUnless(HAVE_QT, "需要 PySide6")
+class TestCape(unittest.TestCase):
+    def cape_tex(self):
+        img = QImage(64, 32, QImage.Format_ARGB32)
+        img.fill(Qt.transparent)
+        fill(img, 1, 1, 10, 16, PURPLE)   # 外侧花纹（从背后看到）
+        fill(img, 12, 1, 10, 16, TEAL)    # 内侧（贴着身体）
+        return img
+
+    def test_back_view_shows_cape_art(self):
+        skin = blank_skin()
+        out = render_skin_3d(skin, yaw=180, pitch=0, height=200,
+                             cape=self.cape_tex())
+        self.assertTrue(color_pixels(out, PURPLE))
+        self.assertFalse(color_pixels(out, TEAL))
+
+    def test_front_view_cape_hidden_behind_body(self):
+        skin = blank_skin()
+        out = render_skin_3d(skin, yaw=0, pitch=0, height=200,
+                             cape=self.cape_tex())
+        self.assertFalse(color_pixels(out, PURPLE))
+
+    def test_invalid_cape_ignored(self):
+        skin = blank_skin()
+        bad = QImage(50, 20, QImage.Format_ARGB32)
+        out = render_skin_3d(skin, yaw=180, pitch=0, height=200, cape=bad)
+        self.assertIsNotNone(out)
+        from app.skin3d import normalize_cape
+        self.assertIsNone(normalize_cape(bad))
+        self.assertIsNone(normalize_cape(QImage()))
+
+
 @unittest.skipUnless(HAVE_QT, "需要 PySide6")
 class TestFetchSkinTexture(unittest.TestCase):
     def setUp(self):
@@ -212,6 +248,34 @@ class TestFetchSkinTexture(unittest.TestCase):
             out2 = fetch_skin_texture(acc)
         self.assertEqual(out2["file"], out["file"])
         self.assertEqual(len(calls), n + 1)
+
+    def test_cape_texture_downloaded(self):
+        import base64
+        import json
+        from mclauncher.skin import fetch_skin_texture
+        payload = base64.b64encode(json.dumps({
+            "textures": {"SKIN": {"url": "http://t.example/skin"},
+                         "CAPE": {"url": "http://t.example/cape"}}
+        }).encode()).decode()
+        profile = {"properties": [{"name": "textures", "value": payload}]}
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+
+        def fake_get(url, timeout=0):
+            resp = mock.Mock()
+            resp.status_code = 200
+            if "sessionserver" in url:
+                resp.json = lambda: profile
+            else:
+                resp.content = png
+            return resp
+
+        acc = {"type": "microsoft", "uuid": "ef" * 16}
+        with mock.patch("requests.get", fake_get):
+            out = fetch_skin_texture(acc)
+        self.assertEqual(out["model"], "classic")
+        self.assertTrue(Path(out["file"]).is_file())
+        self.assertTrue(Path(out["cape"]).is_file())
+        self.assertNotEqual(out["file"], out["cape"])
 
     def test_default_skin_returns_empty(self):
         from mclauncher.skin import fetch_skin_texture
