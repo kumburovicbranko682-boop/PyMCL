@@ -931,7 +931,15 @@ class BackendAPI:
             "skin_file": acc.get("skin_file") or "",
             "cape_file": acc.get("cape_file") or "",
             "has_skin": bool(acc.get("skin_file") or acc.get("cape_file")),
+            "uuid": acc.get("uuid") or "",
+            "default_uuid": utils.offline_uuid(acc.get("name") or account_name),
         }
+
+    def set_offline_uuid(self, account_name: str, uuid: str = "") -> str:
+        """离线账号自定义 UUID（HMCL 同款）；传空重置为按用户名推导的默认值。"""
+        result = self.accounts.set_offline_uuid(account_name, uuid)
+        self._emit("ui_changed", {})
+        return result
 
     def set_offline_skin(self, account_name: str, skin_path: str = "",
                          model: str = "", cape_path: str = "") -> dict:
@@ -1704,10 +1712,10 @@ class BackendAPI:
         if account == "离线模式" or not account:
             acc = self.accounts.offline_account(
                 username or "Player", skin=CONFIG.get("offline_skin") or "default")
-            # 同名离线账号配过本地皮肤时，快速启动路径也带上
+            # 同名离线账号配过本地皮肤 / 自定义 UUID 时，快速启动路径也带上
             stored = self.accounts.get_account(acc.get("name"))
             if stored and (stored.get("type") or "offline") == "offline":
-                for key in ("skin_file", "skin_model", "cape_file"):
+                for key in ("skin_file", "skin_model", "cape_file", "uuid"):
                     if stored.get(key):
                         acc[key] = stored[key]
         else:

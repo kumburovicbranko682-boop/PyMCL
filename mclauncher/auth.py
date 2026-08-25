@@ -505,6 +505,28 @@ class AccountManager:
             uuid = utils.offline_uuid(username)
         return {"type": "offline", "name": username, "uuid": uuid, "skin": skin}
 
+    def set_offline_uuid(self, name, raw_uuid: str = "") -> str:
+        """离线账号自定义 UUID（HMCL 同款）。
+
+        换启动器 / 进带白名单绑定的离线服时，保持旧 UUID 才能保住
+        玩家数据与权限。raw_uuid 留空则重置为按用户名推导的标准
+        离线 UUID。返回保存后的带连字符 UUID。
+        """
+        acc = self.get_account(name)
+        if not acc or (acc.get("type") or "offline") != "offline":
+            raise AuthError(f"不是离线账号: {name}")
+        raw = str(raw_uuid or "").strip()
+        if not raw:
+            uuid = utils.offline_uuid(acc.get("name") or name)
+        else:
+            hex_str = raw.replace("-", "").lower()
+            if len(hex_str) != 32 or any(c not in "0123456789abcdef" for c in hex_str):
+                raise AuthError("UUID 格式不对：需要 32 位十六进制，可带连字符")
+            uuid = utils.dashed_uuid(hex_str)
+        acc["uuid"] = uuid
+        self.save()
+        return uuid
+
     def ensure_valid(self, account):
         """正版 / 皮肤站令牌过期则刷新；失败则抛 AuthError。"""
         if not account:

@@ -217,6 +217,26 @@ class OfflineSkinDialog(MessageBoxBase):
         tip.setWordWrap(True)
         self.viewLayout.addWidget(tip)
 
+        uuid_row = QHBoxLayout()
+        uuid_row.addWidget(BodyLabel("UUID", self))
+        self.uuid_edit = LineEdit(self)
+        self.uuid_edit.setPlaceholderText(tr("32 位十六进制，可带连字符"))
+        uuid_row.addWidget(self.uuid_edit, 1)
+        self.uuid_save_btn = PushButton(tr("保存 UUID"), self)
+        self.uuid_save_btn.clicked.connect(self._save_uuid)
+        uuid_row.addWidget(self.uuid_save_btn)
+        self.uuid_reset_btn = PushButton(tr("重置"), self)
+        self.uuid_reset_btn.clicked.connect(self._reset_uuid)
+        uuid_row.addWidget(self.uuid_reset_btn)
+        uuid_host = QWidget(self)
+        uuid_host.setLayout(uuid_row)
+        self.viewLayout.addWidget(uuid_host)
+        uuid_tip = CaptionLabel(
+            tr("从旧启动器迁移或进有白名单绑定的离线服时，填旧 UUID 可保住玩家数据。留空重置为按用户名推导的默认值。"),
+            self)
+        uuid_tip.setWordWrap(True)
+        self.viewLayout.addWidget(uuid_tip)
+
         self.yesButton.setText(tr("关闭"))
         self.cancelButton.hide()
         self.widget.setMinimumWidth(520)
@@ -241,6 +261,8 @@ class OfflineSkinDialog(MessageBoxBase):
         if cfg.get("cape_file"):
             parts.append(tr("已设置披风"))
         self.status.setText("  ·  ".join(parts))
+        if cfg.get("uuid") and not self.uuid_edit.text().strip():
+            self.uuid_edit.setText(cfg["uuid"])
         self._set_busy(False)
 
     def _on_err(self, err):
@@ -249,7 +271,8 @@ class OfflineSkinDialog(MessageBoxBase):
 
     def _set_busy(self, busy: bool):
         self._busy = busy
-        for btn in (self.skin_btn, self.cape_btn, self.fetch_btn, self.clear_btn):
+        for btn in (self.skin_btn, self.cape_btn, self.fetch_btn, self.clear_btn,
+                    self.uuid_save_btn, self.uuid_reset_btn):
             btn.setEnabled(not busy)
 
     def _on_changed(self, cfg: dict):
@@ -261,6 +284,29 @@ class OfflineSkinDialog(MessageBoxBase):
 
     def _model_value(self) -> str:
         return "slim" if self.model_box.currentIndex() == 1 else "default"
+
+    def _save_uuid(self):
+        if self._busy:
+            return
+        raw = self.uuid_edit.text().strip()
+        self._set_busy(True)
+        self.backend.call_async(
+            lambda: self.backend.set_offline_uuid(self.account, raw),
+            guard(self, self._on_uuid_saved), guard(self, self._on_err))
+
+    def _reset_uuid(self):
+        if self._busy:
+            return
+        self._set_busy(True)
+        self.backend.call_async(
+            lambda: self.backend.set_offline_uuid(self.account, ""),
+            guard(self, self._on_uuid_saved), guard(self, self._on_err))
+
+    def _on_uuid_saved(self, uuid: str):
+        self.uuid_edit.setText(uuid or "")
+        InfoBar.success(tr("已更新"), tr("UUID 已保存，下次启动生效。"),
+                        parent=self, position=InfoBarPosition.TOP, duration=3000)
+        self._set_busy(False)
 
     def _apply_model(self, _idx: int = 0):
         if self._busy:
