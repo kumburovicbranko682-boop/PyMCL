@@ -571,6 +571,9 @@ class PclCatalogPage(QWidget):
                 rows = getter(inst, version) or []
             except TypeError:
                 rows = getter(inst) or []
+        elif self.spec.get("list_installed") == "get_installed_resourcepacks":
+            # 资源包走带元数据的入口：pack.png 图标 / 描述 / 兼容版本（PCL2 同款）
+            rows = self.backend.get_resourcepack_entries(inst) or []
         elif callable(list_fn):
             names = list_fn(inst) or []
             if names and isinstance(names[0], dict):
@@ -588,18 +591,51 @@ class PclCatalogPage(QWidget):
         self.list_layout.addStretch(1)
 
     def _installed_row(self, row):
-        from PySide6.QtWidgets import QHBoxLayout
+        from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout
         from qfluentwidgets import SwitchButton, TransparentToolButton
         host = QFrame()
         host.setObjectName("pclRow")
         host.setStyleSheet(row_qss("pclRow"))
-        host.setFixedHeight(52)
         lay = QHBoxLayout(host)
         lay.setContentsMargins(12, 6, 12, 6)
         name = row.get("filename") or row.get("name") or "?"
-        lab = QLabel(name)
-        lab.setStyleSheet("font-size: 13px; background: transparent;")
-        lay.addWidget(lab, 1)
+        rich = bool(row.get("description") or row.get("icon") or row.get("pack_format"))
+        if rich:
+            from mclauncher.utils import format_size
+            host.setFixedHeight(64)
+            lay.setSpacing(10)
+            lay.addWidget(IconTile(name, size=40, image=row.get("icon") or None))
+            col = QVBoxLayout()
+            col.setSpacing(2)
+            display = row.get("name") or (name[:-4] if name.lower().endswith(".zip") else name)
+            top_lab = QLabel(display)
+            top_lab.setStyleSheet(
+                f"color: {Theme.title}; font-size: 13px; font-weight: 600; background: transparent;")
+            top_lab.setToolTip(name)
+            col.addWidget(top_lab)
+            bits = []
+            if row.get("version"):
+                bits.append(str(row["version"]))
+            if row.get("mc_range"):
+                bits.append("MC " + str(row["mc_range"]))
+            elif row.get("pack_format"):
+                bits.append(tr("格式 {n}").format(n=row["pack_format"]))
+            if row.get("bytes"):
+                bits.append(format_size(row["bytes"]))
+            desc = " ".join(str(row.get("description") or "").split())
+            if desc:
+                bits.append(desc)
+            sub = QLabel("  ·  ".join(bits)[:140] or " ")
+            sub.setStyleSheet(f"color: {Theme.muted}; font-size: 11px; background: transparent;")
+            if desc:
+                sub.setToolTip(desc)
+            col.addWidget(sub)
+            lay.addLayout(col, 1)
+        else:
+            host.setFixedHeight(52)
+            lab = QLabel(name)
+            lab.setStyleSheet("font-size: 13px; background: transparent;")
+            lay.addWidget(lab, 1)
         if "enabled" in row:
             sw = SwitchButton()
             sw.setChecked(bool(row.get("enabled")))

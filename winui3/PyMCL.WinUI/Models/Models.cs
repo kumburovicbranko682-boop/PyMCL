@@ -162,6 +162,18 @@ public sealed class ModEntry
     public string Description { get; set; } = "";
 }
 
+public sealed class PackEntry
+{
+    public string Filename { get; set; } = "";
+    [JsonPropertyName("is_dir")] public bool IsDir { get; set; }
+    public long Bytes { get; set; }
+    public string Path { get; set; } = "";
+    public string Description { get; set; } = "";
+    [JsonPropertyName("pack_format")] public int PackFormat { get; set; }
+    [JsonPropertyName("mc_range")] public string McRange { get; set; } = "";
+    public string Icon { get; set; } = "";
+}
+
 public sealed class AiStoreDto
 {
     [JsonPropertyName("active_id")] public string ActiveId { get; set; } = "";

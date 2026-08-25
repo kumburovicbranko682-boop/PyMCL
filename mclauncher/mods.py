@@ -1093,7 +1093,8 @@ def delete_content_file(instance: Instance, subdir: str, filename: str):
     p = (folder / filename).resolve()
     if p.parent != folder:
         raise ModError(f"非法路径: {filename}")
-    if p.is_file():
+    # 文件夹形式的包（资源包/数据包都允许解压放置）也要能删
+    if p.exists():
         from . import trash
         trash.trash_or_delete(p)
 

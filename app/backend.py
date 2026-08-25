@@ -965,6 +965,11 @@ class BackendAPI(QObject):
     def get_installed_resourcepacks(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "resourcepacks")]
 
+    def get_resourcepack_entries(self, instance: str) -> list[dict]:
+        """已装资源包 + 展示元数据（pack.png 图标 / 描述 / 兼容版本，PCL2 同款）。"""
+        from mclauncher.resourcepacks import list_instance_resourcepacks
+        return list_instance_resourcepacks(self._instance(instance))
+
     def get_installed_datapacks(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "datapacks")]
 

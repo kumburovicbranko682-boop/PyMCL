@@ -366,6 +366,77 @@ public sealed partial class CatalogPage : UserControl
                 }
                 return;
             }
+            if (_kind.Title == "资源包")
+            {
+                var packs = await AppServices.Client.CallAsync<List<PackEntry>>("get_resourcepack_entries", new { instance = inst }) ?? new();
+                if (packs.Count == 0)
+                {
+                    ResultList.Children.Add(new TextBlock { Text = "还没有安装资源包", Margin = new Thickness(12), Opacity = 0.7 });
+                    return;
+                }
+                foreach (var row in packs)
+                {
+                    var g = new Grid { Padding = new Thickness(12, 8, 12, 8), ColumnSpacing = 10 };
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                    g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                    UIElement tile;
+                    if (!string.IsNullOrEmpty(row.Icon) && File.Exists(row.Icon))
+                        tile = new Border
+                        {
+                            Width = 36, Height = 36, CornerRadius = new CornerRadius(6),
+                            Child = new Microsoft.UI.Xaml.Controls.Image
+                            {
+                                Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(row.Icon)),
+                                Stretch = Stretch.UniformToFill, Width = 36, Height = 36,
+                            },
+                        };
+                    else
+                        tile = new Border
+                        {
+                            Width = 36, Height = 36, CornerRadius = new CornerRadius(6),
+                            Background = new SolidColorBrush(Color.FromArgb(255, 76, 139, 245)),
+                            Child = new TextBlock
+                            {
+                                Text = row.Filename.Length > 0 ? row.Filename[..1].ToUpperInvariant() : "?",
+                                Foreground = new SolidColorBrush(Microsoft.UI.Colors.White),
+                                HorizontalAlignment = HorizontalAlignment.Center,
+                                VerticalAlignment = VerticalAlignment.Center,
+                            },
+                        };
+                    g.Children.Add(tile);
+                    var display = row.Filename.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                        ? row.Filename[..^4] : row.Filename;
+                    var meta = string.Join("  ·  ", new[]
+                    {
+                        string.IsNullOrEmpty(row.McRange)
+                            ? (row.PackFormat > 0 ? $"格式 {row.PackFormat}" : "")
+                            : "MC " + row.McRange,
+                        row.Description,
+                    }.Where(s => !string.IsNullOrWhiteSpace(s)));
+                    var textCol = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Spacing = 1 };
+                    textCol.Children.Add(new TextBlock { Text = display });
+                    if (!string.IsNullOrWhiteSpace(meta))
+                        textCol.Children.Add(new TextBlock { Text = meta, Opacity = 0.6, FontSize = 11, TextTrimming = TextTrimming.CharacterEllipsis });
+                    ToolTipService.SetToolTip(textCol, row.Filename);
+                    Grid.SetColumn(textCol, 1);
+                    g.Children.Add(textCol);
+                    var name = row.Filename;
+                    var del = new Button { Content = "删除" };
+                    del.Click += async (_, _) =>
+                    {
+                        if (!await Dialogs.ConfirmAsync(XamlRoot, "删除文件",
+                                $"确定从实例「{inst}」删除「{name}」吗？会尽量移入系统回收站，可找回。"))
+                            return;
+                        try { await AppServices.Client.CallAsync("delete_resourcepack", new { instance = inst, filename = name }); Installed_Click(sender, e); }
+                        catch (Exception ex) { AppServices.Toast?.Invoke("删除失败", ex.Message, InfoBarSeverity.Error); }
+                    };
+                    Grid.SetColumn(del, 2);
+                    g.Children.Add(del);
+                    ResultList.Children.Add(g);
+                }
+                return;
+            }
             ResultList.Children.Add(new TextBlock { Text = "此分类请在实例文件夹中管理", Margin = new Thickness(12), Opacity = 0.7 });
         }
         catch (Exception ex)
