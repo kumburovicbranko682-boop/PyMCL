@@ -772,9 +772,18 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
             || strcmp(method, "list_catalog_files") == 0 || strcmp(method, "search_worlds") == 0)
             return cJSON_CreateArray();
         if (strcmp(method, "terracotta_snapshot") == 0) {
+            /* 形状对齐 mclauncher/terracotta.snapshot 的 unsupported 分支：
+             * 以前发 state=idle + message，UI 只认 label/supported，状态栏
+             * 一片空白还以为能用。 */
             cJSON *o = cJSON_CreateObject();
-            cJSON_AddStringToObject(o, "state", "idle");
-            cJSON_AddStringToObject(o, "message", "陶瓦联机需要 Python 后端");
+            cJSON_AddBoolToObject(o, "supported", 0);
+            cJSON_AddBoolToObject(o, "installed", 0);
+            cJSON_AddBoolToObject(o, "running", 0);
+            cJSON_AddStringToObject(o, "state", "unsupported");
+            cJSON_AddStringToObject(o, "label", "陶瓦联机需要 Python 后端");
+            cJSON_AddStringToObject(o, "room", "");
+            cJSON_AddStringToObject(o, "url", "");
+            cJSON_AddStringToObject(o, "error", "");
             return o;
         }
         if (strcmp(method, "lan_hint") == 0)
