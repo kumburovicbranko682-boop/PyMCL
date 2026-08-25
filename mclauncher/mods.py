@@ -216,7 +216,7 @@ def _primary_file(version):
 # ================================================================ 中文搜索（别名目录 + 多源）
 
 def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
-    """中文搜索模组：优先命中内置中文别名目录，其次按别名到多源搜索。
+    """中文搜索模组：内置别名目录 → mcmod.cn 数据库 → 多源全文搜索。
 
     返回结果统一为:
     {
@@ -226,6 +226,7 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
     }
     """
     from . import catalog
+    from . import mod_translations as trdb
 
     q = query.strip()
     if not q:
@@ -248,7 +249,7 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
         except Exception as e:
             utils.log.warning("别名命中后 CurseForge 查询失败 %s: %s", cf_id, e)
     if hits:
-        return hits[:limit]
+        return trdb.annotate_hits(hits[:limit], "mod")
 
     # 2) 模糊匹配：跳过已经 404 的 slug，最多 3 条
     fuzzy = catalog.fuzzy_match_mod(q)
@@ -270,9 +271,41 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
         if len(hits) >= 4:
             break
     if hits:
+        return trdb.annotate_hits(hits[:limit], "mod")
+
+    # 2.5) mcmod.cn 数据库（对齐 PCL2/HMCL 的内置中英对照表，2 万+ 条）
+    try:
+        trdb.ensure_data("mod", dm)
+    except Exception as e:
+        utils.log.warning("mcmod 数据库更新失败: %s", e)
+    for rec in trdb.search(q, "mod", limit=4):
+        slug = rec.get("curseforge")
+        if not slug or slug in dead_slugs or slug in seen_slug:
+            continue
+        seen_slug.add(slug)
+        got = _alias_to_modrinth_hits(dm, slug, rec.get("subname") or rec.get("name"), 1)
+        if not got:
+            try:
+                cf = cf_by_slug(dm, slug, class_id=CF_CLASS_MOD, api_key=api_key)
+            except Exception as e:
+                cf = None
+                utils.log.warning("mcmod 命中后 CurseForge 查询失败 %s: %s", slug, e)
+            if cf:
+                got = [_cf_norm(cf)]
+        for h in got:
+            h["matched_alias"] = True
+            if rec.get("name"):
+                h["chinese_name"] = rec["name"]
+            url = trdb.mcmod_url(rec, "mod")
+            if url:
+                h["mcmod_url"] = url
+        hits.extend(got)
+        if len(hits) >= 5:
+            break
+    if hits:
         return hits[:limit]
 
-    # 3) 别名未命中：回退到 Modrinth（英文原文）+ CurseForge 全文
+    # 3) 均未命中：回退到 Modrinth（英文原文）+ CurseForge 全文
     try:
         hits.extend(search_mods(dm, q, limit=limit))
     except Exception as e:
@@ -282,7 +315,7 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
                                       class_id=CF_CLASS_MOD))
     except Exception as e:
         utils.log.warning("中文搜索回退 CurseForge 失败: %s", e)
-    return hits[:limit]
+    return trdb.annotate_hits(hits[:limit], "mod")
 
 
 def _alias_to_modrinth_hits(dm: DownloadManager, slug, title=None, limit=30):
@@ -397,6 +430,43 @@ def list_mod_entries_at(mods_dir) -> list:
             rows.append({"filename": p.name, "enabled": True, "bytes": p.stat().st_size, "path": str(p)})
         elif low.endswith(".jar.disabled") or low.endswith(".disabled"):
             rows.append({"filename": p.name, "enabled": False, "bytes": p.stat().st_size, "path": str(p)})
+    return rows
+
+
+# (路径, mtime_ns, size) -> (中文名, mcmod 百科链接)；jar 元数据解析结果缓存
+_annotate_cache: dict = {}
+
+
+def annotate_installed_mods(rows: list, mods_dir) -> list:
+    """给已装模组列表补 chinese_name / mcmod_url（对齐 HMCL 模组列表中文名）。
+
+    只在 mcmod.cn 数据库已缓存到本地时才读 jar 元数据，不触发任何网络。
+    """
+    from . import mod_translations as trdb
+    if not rows or not trdb.available("mod"):
+        return rows
+    from .ai.conflict import inspect_jar
+    folder = Path(mods_dir)
+    for r in rows:
+        try:
+            p = folder / str(r.get("filename") or "")
+            st = p.stat()
+        except OSError:
+            continue
+        key = (str(p), st.st_mtime_ns, st.st_size)
+        got = _annotate_cache.get(key)
+        if got is None:
+            info = inspect_jar(p)
+            rec = trdb.lookup_local(info.get("id") or "", info.get("name") or "")
+            got = ((rec or {}).get("name") or "",
+                   trdb.mcmod_url(rec) if rec else "")
+            if len(_annotate_cache) > 4096:
+                _annotate_cache.clear()
+            _annotate_cache[key] = got
+        if got[0]:
+            r["chinese_name"] = got[0]
+        if got[1]:
+            r["mcmod_url"] = got[1]
     return rows
 
 

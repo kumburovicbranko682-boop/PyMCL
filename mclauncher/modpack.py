@@ -305,8 +305,9 @@ def _cf_name_from_html(dm: DownloadManager, slug: str, class_path="modpacks"):
 
 def search_modpacks_chinese(dm: DownloadManager, query, limit=25, api_key=None,
                             game_version=None, categories=None):
-    """中文搜索整合包：优先命中内置中文别名目录，否则回退到多源搜索。"""
+    """中文搜索整合包：别名目录 → mcmod.cn 数据库 → 多源全文搜索。"""
     from . import catalog
+    from . import mod_translations as trdb
     from .catalog_files import type_key
 
     q = query.strip()
@@ -362,6 +363,50 @@ def search_modpacks_chinese(dm: DownloadManager, query, limit=25, api_key=None,
         except Exception as e:
             utils.log.warning("整合包别名命中后 CurseForge 查询失败: %s", e)
     if hits:
+        return trdb.annotate_hits(hits[:limit], "modpack")
+
+    # 1.5) mcmod.cn 整合包数据库（对齐 PCL2/HMCL 内置对照表）
+    try:
+        trdb.ensure_data("modpack", dm)
+    except Exception as e:
+        utils.log.warning("mcmod 整合包数据库更新失败: %s", e)
+    from .mods import CF_CLASS_MODPACK, _cf_norm, cf_by_slug
+    for rec in trdb.search(q, "modpack", limit=3):
+        slug = rec.get("curseforge")
+        if not slug:
+            continue
+        got = []
+        try:
+            data = dm.fetch_json(f"{MODRINTH_API}/project/{slug}", timeout=(3, 8))
+            if _match_filters_mr(data, game_version, cat_keys):
+                got.append({
+                    "source": "modrinth",
+                    "slug": data.get("slug", slug),
+                    "title": data.get("title") or rec.get("subname") or slug,
+                    "author": (data.get("author") or "?"),
+                    "downloads": data.get("downloads", 0),
+                    "description": (data.get("description") or "")[:120],
+                })
+        except Exception:
+            pass
+        if not got:
+            try:
+                cf = cf_by_slug(dm, slug, class_id=CF_CLASS_MODPACK, api_key=api_key)
+                if cf and _match_filters_cf(cf, game_version, cat_keys):
+                    got.append(_cf_norm(cf))
+            except Exception as e:
+                utils.log.warning("mcmod 命中后 CurseForge 整合包查询失败 %s: %s", slug, e)
+        for h in got:
+            h["matched_alias"] = True
+            if rec.get("name"):
+                h["chinese_name"] = rec["name"]
+            url = trdb.mcmod_url(rec, "modpack")
+            if url:
+                h["mcmod_url"] = url
+        hits.extend(got)
+        if len(hits) >= 4:
+            break
+    if hits:
         return hits[:limit]
 
     # 2) 回退到多源搜索
@@ -375,7 +420,7 @@ def search_modpacks_chinese(dm: DownloadManager, query, limit=25, api_key=None,
                                        game_version=game_version, categories=cat_keys))
     except Exception as e:
         utils.log.warning("中文搜索回退 CurseForge 整合包失败: %s", e)
-    return hits[:limit]
+    return trdb.annotate_hits(hits[:limit], "modpack")
 
 
 def _match_filters_mr(project: dict, game_version=None, cat_keys=None) -> bool:

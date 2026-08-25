@@ -94,6 +94,12 @@ class _ConflictDialog(MessageBoxBase):
         self.widget.setMinimumWidth(480)
 
 
+def _open_mcmod(url: str):
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+    QDesktopServices.openUrl(QUrl(url))
+
+
 def _fmt_size(n) -> str:
     try:
         n = float(n or 0)
@@ -130,12 +136,24 @@ class _ModRow(QFrame):
         title.setStyleSheet(
             f"color: {Theme.title}; font-size: 13px; font-weight: 600; background: transparent;")
         info.addWidget(title)
-        meta = CaptionLabel(
-            f"{_fmt_size(entry.get('bytes'))}"
-            + (f"  ·  {tr('已禁用')}" if not entry.get("enabled") else ""))
+        meta_bits = []
+        # mcmod.cn 数据库给出的中文名（对齐 HMCL 模组列表）
+        if entry.get("chinese_name"):
+            meta_bits.append(str(entry["chinese_name"]))
+        meta_bits.append(_fmt_size(entry.get("bytes")))
+        if not entry.get("enabled"):
+            meta_bits.append(tr("已禁用"))
+        meta = CaptionLabel("  ·  ".join(meta_bits))
         meta.setStyleSheet(f"color: {Theme.muted}; font-size: 11px; background: transparent;")
         info.addWidget(meta)
         lay.addLayout(info, 1)
+
+        wiki = (entry.get("mcmod_url") or "").strip()
+        if wiki:
+            wiki_btn = TransparentToolButton(FIF.GLOBE)
+            wiki_btn.setToolTip(tr("打开 mcmod.cn 百科页"))
+            wiki_btn.clicked.connect(lambda _=False, u=wiki: _open_mcmod(u))
+            lay.addWidget(wiki_btn)
 
         self.switch = SwitchButton()
         self.switch.setChecked(bool(entry.get("enabled")))
@@ -188,7 +206,7 @@ class ModManagerPage(QWidget):
         self.target_box = ComboBox()
         self.target_box.setFixedWidth(190)
         self.search = LineEdit()
-        self.search.setPlaceholderText(tr("按文件名筛选…"))
+        self.search.setPlaceholderText(tr("按文件名或中文名筛选…"))
         self.search.setFixedWidth(200)
         bar.addWidget(self.instance_box)
         bar.addWidget(self.target_box)
@@ -313,7 +331,8 @@ class ModManagerPage(QWidget):
             if item.widget():
                 item.widget().deleteLater()
         rows = [r for r in self._entries
-                if not text or text in str(r.get("filename") or "").lower()]
+                if not text or text in str(r.get("filename") or "").lower()
+                or text in str(r.get("chinese_name") or "").lower()]
         if not rows:
             if self._entries:
                 self.list_layout.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的模组")))

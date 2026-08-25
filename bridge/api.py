@@ -1151,9 +1151,10 @@ class BackendAPI:
 
     def get_installed_mod_entries(self, instance: str, version: str = "") -> list:
         inst = self._instance(instance)
-        if version:
-            return mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
-        return mods_mod.list_instance_mod_entries(inst)
+        folder = self._mods_folder(inst, version)
+        rows = mods_mod.list_mod_entries_at(folder)
+        # mcmod.cn 数据库已缓存时补中文名 / 百科链接（对齐 HMCL 模组列表）
+        return mods_mod.annotate_installed_mods(rows, folder)
 
     def open_global_mods(self):
         from mclauncher import global_mods as gm
@@ -1248,6 +1249,8 @@ class BackendAPI:
             "slug": hit.get("slug"),
             "source": src or default_source,
             "description": hit.get("description") or "",
+            "chinese_name": hit.get("chinese_name") or "",
+            "mcmod_url": hit.get("mcmod_url") or "",
         }
 
     def search_modpacks(self, query: str, source: str) -> list[dict]:
@@ -1332,9 +1335,15 @@ class BackendAPI:
         if isinstance(gv, str) and gv.startswith("全部"):
             gv = ""
         from mclauncher.catalog_files import category_facets
+        from mclauncher import mod_translations as trdb
         cats = category_facets(extra.get("category") or extra.get("type") or "")
         try:
-            if src == "curseforge":
+            if trdb.contains_cjk(q):
+                # 中文查询：别名目录 → mcmod.cn 数据库 → 全文搜索（与整合包页一致）
+                hits = mods_mod.search_mods_chinese(
+                    dm, q, limit=30, api_key=CONFIG.get("curseforge_api_key"))
+                hits = sorted(hits, key=lambda h: 0 if (h.get("source") or src) == src else 1)
+            elif src == "curseforge":
                 hits = mods_mod.search_curseforge(
                     dm, q, limit=30, api_key=CONFIG.get("curseforge_api_key"),
                     class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None)
@@ -1342,6 +1351,7 @@ class BackendAPI:
                 hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None, categories=cats)
         except Exception:
             hits = []
+        trdb.annotate_hits(hits, "mod")
         rows = []
         for h in hits:
             rows.append({
@@ -1354,6 +1364,8 @@ class BackendAPI:
                 "description": h.get("description") or h.get("summary") or "",
                 "tags": h.get("tags") or [],
                 "updated": h.get("updated") or "",
+                "chinese_name": h.get("chinese_name") or "",
+                "mcmod_url": h.get("mcmod_url") or "",
             })
         self._mod_cache = rows
         return rows

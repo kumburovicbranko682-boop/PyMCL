@@ -26,6 +26,12 @@ except ImportError:
             return default
 
 
+def _open_url(url: str):
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+    QDesktopServices.openUrl(QUrl(url))
+
+
 def fmt_downloads(n) -> str:
     try:
         n = int(n or 0)
@@ -115,6 +121,13 @@ class PclResultRow(QFrame):
         title.setStyleSheet(
             f"color: {Theme.title}; font-size: 14px; font-weight: 700; background: transparent;")
         title_row.addWidget(title)
+        # mcmod.cn 数据库给出的中文名（对齐 PCL2/HMCL 列表显示）
+        cn = (item.get("chinese_name") or "").strip()
+        if cn and cn != name:
+            cn_label = QLabel(cn)
+            cn_label.setStyleSheet(
+                f"color: {Theme.muted}; font-size: 13px; background: transparent;")
+            title_row.addWidget(cn_label)
         for tag in tags[:4]:
             chip = QLabel(str(tag))
             chip.setStyleSheet(
@@ -141,6 +154,12 @@ class PclResultRow(QFrame):
         btn.setStyleSheet(ghost_btn_qss())
         btn.clicked.connect(lambda: on_install(item, btn))
         layout.addWidget(btn)
+        wiki = (item.get("mcmod_url") or "").strip()
+        if wiki:
+            wiki_btn = TransparentToolButton(FIF.GLOBE)
+            wiki_btn.setToolTip(tr("打开 mcmod.cn 百科页"))
+            wiki_btn.clicked.connect(lambda _=False, u=wiki: _open_url(u))
+            layout.addWidget(wiki_btn)
         if on_fav:
             star = TransparentToolButton(_HEART)
             star.setToolTip(tr("收藏"))
