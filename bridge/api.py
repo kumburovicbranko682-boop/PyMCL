@@ -862,8 +862,11 @@ class BackendAPI:
         self._emit("ui_changed", {})
         return self.accounts.active
 
-    def add_offline_account(self, username: str):
-        acc = self.accounts.offline_account(username)
+    def add_offline_account(self, username: str, skin: str = ""):
+        # WinUI 账号页有 Steve/Alex 皮肤选择器；这里以前不收 skin，
+        # 选择被 _call_kwargs 静默丢弃。语义对齐 app/backend.py。
+        acc = self.accounts.offline_account(
+            username, skin=skin or CONFIG.get("offline_skin") or "default")
         self.accounts.add_account({**acc, "type": "offline"})
         self._emit("ui_changed", {})
         return acc["name"]
