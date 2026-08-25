@@ -1294,6 +1294,19 @@ class BackendAPI(QObject):
             acc = self.accounts.get_account(account_name) or {"type": "offline", "name": account_name}
         return {"avatar": skin_mod.avatar_url(acc), "body": skin_mod.body_url(acc)}
 
+    def skin_change_support(self, account_name: str = "") -> dict:
+        from mclauncher import skin_ops
+        acc = (self.accounts.get_account(account_name) if account_name
+               else self.accounts.get_active())
+        return skin_ops.change_support(acc)
+
+    def upload_skin(self, account_name: str, file_path: str, variant: str = "classic") -> str:
+        return self.start_task(tr("更换皮肤"), self._upload_skin_impl,
+                               account_name, file_path, variant)
+
+    def reset_skin(self, account_name: str = "") -> str:
+        return self.start_task(tr("重置皮肤"), self._reset_skin_impl, account_name)
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)
@@ -2052,6 +2065,32 @@ class BackendAPI(QObject):
         self.accounts.add_account(account)
         log(f"皮肤站登录成功：{account.get('name')}")
         return f"已登录 {account.get('name')}"
+
+    def _skin_account(self, account_name):
+        from mclauncher.skin_ops import SkinError
+        acc = (self.accounts.get_account(account_name) if account_name
+               else self.accounts.get_active())
+        if not acc:
+            raise SkinError(tr("请先登录账号"))
+        return self.accounts.ensure_valid(acc)
+
+    def _upload_skin_impl(self, progress, log, account_name, file_path, variant):
+        from mclauncher import skin_ops
+        progress(0, 2, tr("校验登录状态"))
+        acc = self._skin_account(account_name)
+        progress(1, 2, tr("上传皮肤"))
+        msg = skin_ops.upload_skin(acc, file_path, variant)
+        log(msg)
+        return msg
+
+    def _reset_skin_impl(self, progress, log, account_name):
+        from mclauncher import skin_ops
+        progress(0, 2, tr("校验登录状态"))
+        acc = self._skin_account(account_name)
+        progress(1, 2, tr("重置皮肤"))
+        msg = skin_ops.reset_skin(acc)
+        log(msg)
+        return msg
 
     def _repair_impl(self, progress, log, instance, version):
         from mclauncher.repair import repair

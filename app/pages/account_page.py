@@ -2,7 +2,7 @@
 """账号页：微软 / 离线 / 皮肤站，带皮肤预览。"""
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
     LineEdit, PasswordLineEdit, PrimaryPushButton, PushButton, SimpleCardWidget,
@@ -21,6 +21,8 @@ class AccountPage(QWidget):
         self.backend = backend
         self._login_dlg = None
         self._login_task = None
+        self._skin_task = None
+        self._active_name = ""
         self._pix_token = 0
         self._auth_busy = False
 
@@ -42,6 +44,22 @@ class AccountPage(QWidget):
         self.skin_name = StrongBodyLabel(tr("未登录"))
         self.skin_name.setAlignment(Qt.AlignCenter)
         sl.addWidget(self.skin_name)
+        skin_btns = QHBoxLayout()
+        self.variant_box = ComboBox()
+        self.variant_box.addItems([tr("经典 (Steve)"), tr("纤细 (Alex)")])
+        self.variant_box.setFixedWidth(120)
+        self.upload_btn = PushButton(tr("更换皮肤…"))
+        self.upload_btn.clicked.connect(self._upload_skin)
+        skin_btns.addWidget(self.variant_box)
+        skin_btns.addWidget(self.upload_btn, 1)
+        sl.addLayout(skin_btns)
+        self.reset_skin_btn = TransparentPushButton(tr("重置为默认皮肤"))
+        self.reset_skin_btn.clicked.connect(self._reset_skin)
+        sl.addWidget(self.reset_skin_btn)
+        self.skin_hint = CaptionLabel("")
+        self.skin_hint.setWordWrap(True)
+        self.skin_hint.setVisible(False)
+        sl.addWidget(self.skin_hint)
         top.addWidget(skin_card)
 
         list_card = SimpleCardWidget(self)
@@ -191,7 +209,19 @@ class AccountPage(QWidget):
             self.list_box.addWidget(card)
         active = next((r for r in rows if r.get("active")), None) or (rows[0] if rows else None)
         self.skin_name.setText(active["name"] if active else "Steve")
+        self._active_name = active["name"] if active else ""
+        self._sync_skin_controls()
         self._load_skin(active["body"] if active else "")
+
+    def _sync_skin_controls(self):
+        support = self.backend.skin_change_support(self._active_name)
+        can = bool(support.get("ok")) and not self._skin_task
+        self.upload_btn.setEnabled(can)
+        self.reset_skin_btn.setEnabled(can)
+        self.variant_box.setEnabled(can)
+        reason = "" if support.get("ok") else str(support.get("reason") or "")
+        self.skin_hint.setText(reason)
+        self.skin_hint.setVisible(bool(reason))
 
     def restyle(self):
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
@@ -287,6 +317,33 @@ class AccountPage(QWidget):
         self._login_task = self.backend.start_nide8_login(
             sid, self.nide8_user.text().strip(), self.nide8_pw.text())
 
+    def _upload_skin(self):
+        if self._skin_task:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选择皮肤 PNG"), "", "PNG (*.png)")
+        if not path:
+            return
+        variant = "slim" if self.variant_box.currentIndex() == 1 else "classic"
+        self._skin_task = self.backend.upload_skin(self._active_name, path, variant)
+        self._sync_skin_controls()
+
+    def _reset_skin(self):
+        if self._skin_task:
+            return
+        from qfluentwidgets import MessageBox
+        box = MessageBox(
+            tr("重置皮肤"),
+            tr("将把账号「{name}」的皮肤重置为默认。").format(name=self._active_name),
+            self,
+        )
+        box.yesButton.setText(tr("重置"))
+        box.cancelButton.setText(tr("取消"))
+        if not box.exec():
+            return
+        self._skin_task = self.backend.reset_skin(self._active_name)
+        self._sync_skin_controls()
+
     def _on_login_code(self, code, uri):
         if self._login_dlg:
             self._login_dlg.show_code(code, uri)
@@ -296,6 +353,18 @@ class AccountPage(QWidget):
             self._login_dlg.show_status(text)
 
     def _on_finished(self, task_id, success, message):
+        if task_id == self._skin_task:
+            self._skin_task = None
+            if success:
+                InfoBar.success(tr("皮肤"), message, parent=self,
+                                position=InfoBarPosition.TOP, duration=4000)
+                self.reload()
+            else:
+                self._sync_skin_controls()
+                if message != tr("已取消"):
+                    InfoBar.error(tr("皮肤操作失败"), message, parent=self,
+                                  position=InfoBarPosition.TOP, duration=5000)
+            return
         if task_id != self._login_task:
             return
         if self._auth_busy:
