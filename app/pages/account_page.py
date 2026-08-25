@@ -2,7 +2,7 @@
 """账号页：微软 / 离线 / 皮肤站，带皮肤预览与皮肤管理。"""
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices, QPixmap
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
     LineEdit, MessageBoxBase, PasswordLineEdit, PrimaryPushButton, PushButton,
@@ -305,6 +305,20 @@ class OfflineSkinDialog(MessageBoxBase):
         self.status.setWordWrap(True)
         self.viewLayout.addWidget(self.status)
 
+        # 皮肤 2D 立绘（本地渲染，PCL2/HMCL 同款）
+        self.preview = QLabel(self)
+        self.preview.setFixedSize(96, 192)
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setStyleSheet("background: transparent;")
+        self.preview.hide()
+        prev_row = QHBoxLayout()
+        prev_row.addStretch(1)
+        prev_row.addWidget(self.preview)
+        prev_row.addStretch(1)
+        prev_host = QWidget(self)
+        prev_host.setLayout(prev_row)
+        self.viewLayout.addWidget(prev_host)
+
         row = QHBoxLayout()
         row.addWidget(BodyLabel(tr("模型"), self))
         self.model_box = ComboBox(self)
@@ -391,7 +405,29 @@ class OfflineSkinDialog(MessageBoxBase):
         self.status.setText("  ·  ".join(parts))
         if cfg.get("uuid") and not self.uuid_edit.text().strip():
             self.uuid_edit.setText(cfg["uuid"])
+        self._render_preview(cfg)
         self._set_busy(False)
+
+    def _render_preview(self, cfg: dict):
+        """本地渲染皮肤立绘；没皮肤或渲染失败就藏起来，不打扰主流程。"""
+        skin_file = cfg.get("skin_file") or ""
+        model = cfg.get("model") or "default"
+        if not skin_file:
+            self.preview.hide()
+            return
+        self.backend.call_async(
+            lambda: self.backend.render_skin_preview(skin_file, model=model, scale=6),
+            guard(self, self._show_preview),
+            guard(self, lambda _e: self.preview.hide()))
+
+    def _show_preview(self, path: str):
+        pix = QPixmap(str(path or ""))
+        if pix.isNull():
+            self.preview.hide()
+            return
+        self.preview.setPixmap(pix.scaled(
+            self.preview.size(), Qt.KeepAspectRatio, Qt.FastTransformation))
+        self.preview.show()
 
     def _on_err(self, err):
         self.status.setText(tr("操作失败：{err}").format(err=err))

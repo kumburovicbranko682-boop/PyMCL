@@ -1146,6 +1146,12 @@ class BackendAPI:
         from mclauncher import skin as skin_mod
         return skin_mod.lookup_player(query)
 
+    def render_skin_preview(self, path: str, model: str = "default",
+                            scale: int = 8, kind: str = "front") -> str:
+        """本地渲染皮肤 2D 立绘/头像（PCL2/HMCL 同款，离线可用），返回缓存 PNG 路径。"""
+        from mclauncher import skin_render
+        return skin_render.ensure_preview(path, model=model, scale=scale, kind=kind)
+
     # ---- 离线账户皮肤（本地皮肤服务 + authlib-injector，进游戏可见）
 
     def _offline_account(self, account_name: str) -> dict:
