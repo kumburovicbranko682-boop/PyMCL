@@ -18,11 +18,28 @@ from .downloader import DownloadManager
 MODRINTH_API = "https://api.modrinth.com/v2"
 
 # overrides 里默认带走的游戏目录内容
-DEFAULT_OVERRIDES = ("config", "options.txt", "servers.dat")
+DEFAULT_OVERRIDES = ("config", "options.txt", "servers.dat", "datapacks")
 
 
 class ExportError(Exception):
     """导出失败，消息可直接展示给用户。"""
+
+
+def pick_default_version(instance) -> str:
+    """实例级导出没指定版本时：取最近改动过的已安装版本。"""
+    best = ""
+    best_mtime = -1.0
+    for vid, jfile in instance.installed_versions():
+        try:
+            mtime = Path(jfile).stat().st_mtime
+        except OSError:
+            continue
+        if mtime > best_mtime:
+            best_mtime = mtime
+            best = vid
+    if not best:
+        raise ExportError("实例里没有已安装的版本，无法导出整合包")
+    return best
 
 
 def _loader_deps(vjson: dict, deps: dict):

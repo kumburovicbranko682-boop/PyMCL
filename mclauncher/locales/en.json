@@ -1034,5 +1034,6 @@
   "已开始导出": "Export started",
   "完成后文件在 exports 目录，进度见下载任务。": "The file will appear in the exports folder; see the download tasks for progress.",
   "反查模组下载地址": "Resolving mod download links",
-  "整合包已导出: {p}（{m}/{n} 个模组反查到下载地址）": "Modpack exported: {p} ({m}/{n} mods resolved to download links)"
+  "整合包已导出: {p}（{m}/{n} 个模组反查到下载地址）": "Modpack exported: {p} ({m}/{n} mods resolved to download links)",
+  "未指定版本，按最近改动导出 {v}": "No version given; exporting most recently modified {v}"
 }

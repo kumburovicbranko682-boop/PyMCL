@@ -79,6 +79,16 @@ class FakeInstance:
             return json.loads(p.read_text(encoding="utf-8"))
         return None
 
+    def installed_versions(self):
+        out = []
+        vdir = self.versions_dir()
+        if vdir.is_dir():
+            for child in sorted(vdir.iterdir()):
+                jfile = child / f"{child.name}.json"
+                if jfile.is_file():
+                    out.append((child.name, jfile))
+        return out
+
 
 def _write_version(inst, vid, data):
     d = inst.versions_dir() / vid
@@ -147,6 +157,24 @@ class PackDependenciesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             inst = FakeInstance(td)
             self.assertEqual(modpack_export.pack_dependencies(inst, "nope"), {})
+
+
+class PickDefaultVersionTests(unittest.TestCase):
+    def test_picks_most_recently_modified(self):
+        import os
+        with tempfile.TemporaryDirectory() as td:
+            inst = FakeInstance(td)
+            _write_version(inst, "1.20.4", {"id": "1.20.4"})
+            _write_version(inst, "1.21", {"id": "1.21"})
+            old = inst.versions_dir() / "1.21" / "1.21.json"
+            os.utime(old, (1000000, 1000000))
+            self.assertEqual(modpack_export.pick_default_version(inst), "1.20.4")
+
+    def test_raises_when_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            inst = FakeInstance(td)
+            with self.assertRaises(modpack_export.ExportError):
+                modpack_export.pick_default_version(inst)
 
 
 class ExportMrpackTests(unittest.TestCase):

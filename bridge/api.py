@@ -378,13 +378,16 @@ class BackendAPI:
     def export_launch_script(self, instance: str, version: str, dest: str = "") -> str:
         return self.start_task(f"导出启动脚本 {version}", self._export_bat_impl, instance, version, dest)
 
-    def export_modpack(self, instance: str, version: str, dest: str = "",
+    def export_modpack(self, instance: str, version: str = "", dest: str = "",
                        name: str = "", pack_version: str = "1.0.0",
                        summary: str = "", include_resourcepacks: bool = False,
                        include_shaderpacks: bool = False) -> str:
-        """把版本导出为 Modrinth 整合包（.mrpack）。返回任务 ID。"""
+        """把版本导出为 Modrinth 整合包（.mrpack）。返回任务 ID。
+
+        version 为空时（实例级调用，兼容旧 RPC）自动取最近改动的已安装版本。
+        """
         return self.start_task(
-            f"导出整合包 {version}", self._export_modpack_impl,
+            f"导出整合包 {version or instance}", self._export_modpack_impl,
             instance, version, dest, name, pack_version, summary,
             include_resourcepacks, include_shaderpacks)
 
@@ -392,6 +395,10 @@ class BackendAPI:
                              pack_version, summary, inc_rp, inc_sp):
         from mclauncher import modpack_export as mpx
         inst = self._instance(instance)
+        if not version:
+            version = mpx.pick_default_version(inst)
+            name = name or inst.name
+            log(f"未指定版本，按最近改动导出 {version}")
         include = []
         if inc_rp:
             include.append("resourcepacks")
@@ -974,9 +981,6 @@ class BackendAPI:
             return {"ok": True, "message": "已清空自定义 JVM 参数"}
 
         return {"ok": False, "message": f"未知动作: {aid}"}
-
-    def export_modpack(self, instance: str, dest: str = "") -> str:
-        return self.start_task(f"导出整合包 {instance}", self._export_pack_impl, instance, dest)
 
     def start_mod_updates(self, instance: str) -> str:
         return self.start_task(f"检查模组更新 {instance}", self._mod_update_impl, instance)
@@ -1817,14 +1821,6 @@ class BackendAPI:
         dm = self._dm(progress, log)
         installer = Installer(inst, dm, on_progress=dm.on_progress, cancel=dm.cancel)
         return repair(installer, version)
-
-    def _export_pack_impl(self, progress, log, instance, dest):
-        from mclauncher.export_pack import export_mrpack
-        inst = self._instance(instance)
-        if not dest:
-            dest = str(utils.ROOT / "exports" / f"{inst.name}.mrpack")
-        dm = self._dm(progress, log)
-        return export_mrpack(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))
 
     def _mod_update_impl(self, progress, log, instance):
         from mclauncher.mod_update import apply_update, check_updates
