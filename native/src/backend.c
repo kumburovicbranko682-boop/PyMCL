@@ -978,6 +978,25 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_Delete(list);
         char stored[PYMCL_PATH];
         instance_java_pref(inst, stored, sizeof(stored));
+        /* 对齐 bridge/api.py：已保存但不在扫描结果里的 Java 要补一条，
+         * 否则 WinUI 下拉框显示「自动选择」，用户一点确定就把
+         * 自定义 Java 偏好静默覆盖掉了。 */
+        if (stored[0] && !pymcl_ieq(stored, PYMCL_JAVA_AUTO)) {
+            int seen = 0;
+            cJSON *o;
+            cJSON_ArrayForEach(o, opts) {
+                if (strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(o, "value")) ?: "", stored) == 0)
+                    seen = 1;
+            }
+            if (!seen) {
+                cJSON *ex = cJSON_CreateObject();
+                char lb[PYMCL_PATH + 16];
+                snprintf(lb, sizeof(lb), "已保存 (%s)", stored);
+                cJSON_AddStringToObject(ex, "label", lb);
+                cJSON_AddStringToObject(ex, "value", stored);
+                cJSON_AddItemToArray(opts, ex);
+            }
+        }
         return opts;
     }
     if (strcmp(method, "java_combo_label_for") == 0) {
