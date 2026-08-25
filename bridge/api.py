@@ -721,7 +721,11 @@ class BackendAPI:
             "ui_motion": bool(CONFIG.get("ui_motion", True)),
         }
 
-    def save_settings(self, data: dict):
+    def save_settings(self, data: dict | None = None, **flat):
+        # EziApp 把设置对象直接当 params 发（不包 {data:…}），C 桥两种形状都收；
+        # 这里以前只认 data= 形参，扁平提交经 _call_kwargs 绑参后变成缺参 TypeError，
+        # EziApp 设置页「保存设置」和 Java 页「设为默认」在 Python 桥上必失败。
+        data = {**(data or {}), **flat}
         # 严格的局部更新：只写 `data` 里真正带来的键。前端（eziapp 设置页只提交 11 个键）
         # 提交部分设置时，未提交的键必须原样保留，否则等于静默清空用户配置。
         patch = {}
