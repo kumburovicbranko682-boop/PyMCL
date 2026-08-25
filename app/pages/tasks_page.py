@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""下载任务中心：进度、速度、可展开日志；侧栏红点计数。"""
+"""下载任务中心：进度、速度、可展开日志；侧栏红点计数；运行中的游戏。"""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from ..motion import SmoothProgressBar
 from qfluentwidgets import (
-    CaptionLabel, FluentIcon as FIF, PlainTextEdit, ProgressBar, PushButton, ScrollArea,
-    SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentToolButton,
+    CaptionLabel, FluentIcon as FIF, MessageBox, PlainTextEdit, ProgressBar, PushButton,
+    ScrollArea, SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentToolButton,
 )
 
 from ..widgets import EmptyState, IconTile
@@ -265,6 +265,62 @@ class DownloadDock(SimpleCardWidget):
         self.status.setText(self._active[self._current])
 
 
+def _fmt_uptime(seconds) -> str:
+    s = max(0, int(seconds or 0))
+    if s >= 3600:
+        return f"{s // 3600}h {(s % 3600) // 60}m"
+    if s >= 60:
+        return f"{s // 60}m {s % 60}s"
+    return f"{s}s"
+
+
+class RunningGameCard(SimpleCardWidget):
+    """一个运行中的游戏进程：版本 / 实例 / 账号 / 运行时长 + 结束按钮。"""
+
+    def __init__(self, row: dict, page, parent=None):
+        super().__init__(parent)
+        self.row = row
+        self.page = page
+        self.setMinimumHeight(64)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(14)
+        lay.addWidget(IconTile(row.get("version") or "G", "#2E9B6B", size=40))
+        info = QVBoxLayout()
+        info.setSpacing(2)
+        info.addWidget(StrongBodyLabel(row.get("version") or "?"))
+        self.meta = CaptionLabel("")
+        info.addWidget(self.meta)
+        lay.addLayout(info, 1)
+        self.kill_btn = PushButton(FIF.CLOSE, tr("结束游戏进程"))
+        self.kill_btn.clicked.connect(self._kill)
+        lay.addWidget(self.kill_btn)
+        self.refresh(row)
+
+    def refresh(self, row: dict):
+        self.row = row
+        bits = [row.get("instance") or "", row.get("account") or "",
+                tr("已运行 {t}").format(t=_fmt_uptime(row.get("uptime"))),
+                f"PID {row.get('pid')}" if row.get("pid") else ""]
+        self.meta.setText("  ·  ".join(b for b in bits if b))
+
+    def _kill(self):
+        box = MessageBox(
+            tr("结束游戏进程"),
+            tr("结束「{name}」？未保存的游戏进度可能丢失。").format(
+                name=self.row.get("version") or "?"),
+            self.page.window())
+        box.yesButton.setText(tr("结束"))
+        box.cancelButton.setText(tr("取消"))
+        if not box.exec():
+            return
+        try:
+            self.page.backend.kill_game(self.row.get("task_id") or "")
+        except Exception:
+            pass
+        self.page.reload_running()
+
+
 class TasksPage(QWidget):
     def __init__(self, backend, parent=None):
         super().__init__(parent)
@@ -272,6 +328,7 @@ class TasksPage(QWidget):
         self.backend = backend
         self._cards: dict[str, TaskCard] = {}
         self._done: set[str] = set()
+        self._running_cards: dict[str, RunningGameCard] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 20, 28, 20)
@@ -287,6 +344,24 @@ class TasksPage(QWidget):
         self.clear_btn.clicked.connect(self._clear_finished)
         head.addWidget(self.clear_btn, 0, Qt.AlignTop)
         root.addLayout(head)
+
+        # 运行中的游戏（对标 HMCL 游戏管理：多开时每个进程都可见可结束）
+        self.running_host = QWidget(self)
+        rv = QVBoxLayout(self.running_host)
+        rv.setContentsMargins(0, 0, 0, 0)
+        rv.setSpacing(8)
+        rv.addWidget(SubtitleLabel(tr("运行中的游戏")))
+        self.running_list = QVBoxLayout()
+        self.running_list.setSpacing(8)
+        rv.addLayout(self.running_list)
+        self.running_host.hide()
+        root.addWidget(self.running_host)
+
+        self._running_timer = QTimer(self)
+        self._running_timer.setInterval(5000)
+        self._running_timer.timeout.connect(self.reload_running)
+        backend.game_started.connect(self.reload_running)
+        backend.game_exited.connect(lambda *_: self.reload_running())
 
         scroll = ScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -305,6 +380,38 @@ class TasksPage(QWidget):
         backend.progress.connect(self._progress)
         backend.log.connect(self._log)
         backend.finished.connect(self._finished)
+        self.reload_running()
+
+    # ------------------------------------------------------------------
+    # 运行中的游戏
+    # ------------------------------------------------------------------
+    def reload_running(self):
+        try:
+            rows = self.backend.list_running_games() or []
+        except Exception:
+            rows = []
+        alive = {r.get("task_id"): r for r in rows}
+        for tid in list(self._running_cards):
+            if tid not in alive:
+                card = self._running_cards.pop(tid)
+                self.running_list.removeWidget(card)
+                card.setParent(None)
+                card.deleteLater()
+        for tid, row in alive.items():
+            card = self._running_cards.get(tid)
+            if card is None:
+                card = RunningGameCard(row, self)
+                self._running_cards[tid] = card
+                self.running_list.addWidget(card)
+            else:
+                card.refresh(row)
+        if rows:
+            self.running_host.show()
+            if not self._running_timer.isActive():
+                self._running_timer.start()
+        else:
+            self.running_host.hide()
+            self._running_timer.stop()
 
     def _add(self, task_id, title):
         if not _is_download_title(title):

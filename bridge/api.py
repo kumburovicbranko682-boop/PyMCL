@@ -127,6 +127,9 @@ class BackendAPI:
         self._lock = threading.Lock()
         self.accounts = AccountManager()
         self._game_proc = None
+        # 多开时的进程注册表：task_id -> {proc, instance, version, account, started_at}
+        # 以前只有 _game_proc 单槽，开第二个游戏后第一个就失管（杀不掉、看不见）。
+        self._game_procs: dict[str, dict] = {}
         self._game_lock = threading.Lock()
         self._launch_task_id = None
         self._pack_cache: list[dict] = []
@@ -199,10 +202,10 @@ class BackendAPI:
             worker = self._workers.get(task_id)
         if worker:
             worker.cancel()
-        if task_id != self._launch_task_id:
-            return
         with self._game_lock:
-            proc = self._game_proc
+            entry = self._game_procs.get(task_id)
+            proc = entry["proc"] if entry else (
+                self._game_proc if task_id == self._launch_task_id else None)
         if proc:
             try:
                 proc.kill()
@@ -523,8 +526,8 @@ class BackendAPI:
         return "Player"
 
     def terracotta_snapshot(self) -> dict:
-        game_on = bool(self._game_proc and getattr(self._game_proc, "poll", lambda: 0)() is None)
-        return terracotta_mod.snapshot(self.terracotta_player(), game_running=game_on)
+        return terracotta_mod.snapshot(self.terracotta_player(),
+                                       game_running=self.is_game_running())
 
     def terracotta_prepare(self) -> str:
         return self.start_task("准备陶瓦联机", self._terracotta_prepare_impl)
@@ -1676,6 +1679,14 @@ class BackendAPI:
         terracotta_mod.start(log=log)
         return "陶瓦联机已就绪"
 
+    @staticmethod
+    def _account_label(account, username) -> str:
+        """运行中游戏列表里显示的账号名。"""
+        a = str(account or "").strip()
+        if a and a != "离线模式":
+            return a
+        return str(username or "").strip() or "Player"
+
     def _launch_game_impl(self, progress, log, instance, version, account,
                           username, memory_mb, width, height, java="自动选择",
                           extra_game_args=None):
@@ -1824,8 +1835,14 @@ class BackendAPI:
         worker = getattr(_tls, "worker", None)
         proc = GameProcess(cmd, cwd=game_dir, on_line=log, priority=prep["priority"],
                            window_title=prep.get("window_title") or "")
+        game_key = getattr(worker, "task_id", "") or f"pid-{proc.proc.pid}"
         with self._game_lock:
             self._game_proc = proc
+            self._game_procs[game_key] = {
+                "proc": proc, "instance": inst.name, "version": version,
+                "account": self._account_label(account, username),
+                "started_at": proc.started_at,
+            }
         self._emit("game_started", {})
         code = None
         # 游戏时长统计
@@ -1849,6 +1866,7 @@ class BackendAPI:
             with self._game_lock:
                 if self._game_proc is proc:
                     self._game_proc = None
+                self._game_procs.pop(game_key, None)
             self._emit("game_exited", {"code": code})
         if getattr(worker, "_cancelled", False):
             log("已停止游戏")
@@ -2207,8 +2225,53 @@ class BackendAPI:
 
     def is_game_running(self) -> bool:
         with self._game_lock:
-            proc = self._game_proc
-        return proc is not None and getattr(proc, "poll", lambda: 0)() is None
+            procs = [e.get("proc") for e in self._game_procs.values()]
+            if self._game_proc is not None:
+                procs.append(self._game_proc)
+        return any(p is not None and getattr(p, "poll", lambda: 0)() is None
+                   for p in procs)
+
+    def list_running_games(self) -> list:
+        """运行中的游戏进程列表（对标 HMCL 游戏管理：多开时逐个可见可控）。"""
+        import time as _time
+        with self._game_lock:
+            items = [(tid, dict(e)) for tid, e in self._game_procs.items()]
+        rows = []
+        now = _time.time()
+        for tid, e in items:
+            proc = e.get("proc")
+            if proc is None or proc.poll() is not None:
+                continue
+            started = float(e.get("started_at") or 0)
+            rows.append({
+                "task_id": tid,
+                "instance": str(e.get("instance") or ""),
+                "version": str(e.get("version") or ""),
+                "account": str(e.get("account") or ""),
+                "pid": int(getattr(getattr(proc, "proc", None), "pid", 0) or 0),
+                "started_at": started,
+                "uptime": max(0, int(now - started)) if started else 0,
+            })
+        rows.sort(key=lambda r: r["started_at"])
+        return rows
+
+    def kill_game(self, task_id: str = "") -> int:
+        """结束运行中的游戏；task_id 留空结束全部。返回结束的个数。
+
+        走 cancel_task：worker 会被标记取消，游戏被杀不会误判成崩溃。
+        """
+        with self._game_lock:
+            ids = [task_id] if task_id else list(self._game_procs.keys())
+        n = 0
+        for tid in ids:
+            with self._game_lock:
+                entry = self._game_procs.get(tid)
+            proc = entry.get("proc") if entry else None
+            if proc is None or proc.poll() is not None:
+                continue
+            self.cancel_task(tid)
+            n += 1
+        return n
 
     def allow_multi_instance(self) -> bool:
         return bool(CONFIG.get("allow_multi_instance", False))
