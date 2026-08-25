@@ -139,6 +139,76 @@ int pymcl_version_hidden(const char *inst, const char *ver) {
     return hidden;
 }
 
+/* mklink /J 联结（对齐 mclauncher/version_settings.py 的 _junction）：
+ * 已有非空真目录/已有联结不动；空目录、普通文件先移除再建。 */
+static void vs_junction(const char *link, const char *target) {
+    pymcl_ensure_dir(target);
+    DWORD a = GetFileAttributesA(link);
+    if (a != INVALID_FILE_ATTRIBUTES) {
+        if (a & FILE_ATTRIBUTE_REPARSE_POINT) return;      /* 已是联结/符号链接 */
+        if (a & FILE_ATTRIBUTE_DIRECTORY) {
+            if (!RemoveDirectoryA(link)) return;           /* 非空真目录：保留用户数据 */
+        } else if (!DeleteFileA(link)) return;
+    }
+    const char *argv[] = { "cmd", "/c", "mklink", "/J", link, target };
+    pymcl_run_process(argv, 6, NULL, NULL, NULL, 30);
+}
+
+/* 按版本隔离设置准备游戏目录（对齐 version_settings.apply_isolation）。
+ * gdir_out 得到启动时应使用的游戏目录。C 桥启动以前从不看隔离设置，
+ * WinUI 里选了「隔离全部」照样把存档/模组写进共享实例目录。 */
+int pymcl_apply_isolation(const char *inst, const char *ver, char *gdir_out, size_t n) {
+    char path[PYMCL_PATH];
+    version_settings_path(inst, ver, path, sizeof(path));
+    cJSON *j = pymcl_read_json(path);
+    const char *iso = cJSON_GetStringValue(cJSON_GetObjectItem(j, "isolation"));
+    if (!iso || !iso[0]) iso = config_str("default_isolation", "none");
+    if (strcmp(iso, "saves") != 0 && strcmp(iso, "mods") != 0 && strcmp(iso, "all") != 0)
+        iso = "none";
+    char ip[PYMCL_PATH];
+    instance_path(inst, ip, sizeof(ip));
+    if (strcmp(iso, "none") == 0) {
+        snprintf(gdir_out, n, "%s", ip);
+        cJSON_Delete(j);
+        return 0;
+    }
+    char vd[PYMCL_PATH];
+    instance_versions_dir(inst, vd, sizeof(vd));
+    pymcl_path_join(gdir_out, n, vd, ver);
+    pymcl_ensure_dir(gdir_out);
+    char link[PYMCL_PATH], target[PYMCL_PATH];
+    if (strcmp(iso, "saves") == 0) {
+        static const char *shared[] = { "mods", "config", "resourcepacks", "shaderpacks", "downloads" };
+        for (size_t i = 0; i < sizeof(shared) / sizeof(shared[0]); i++) {
+            pymcl_path_join(link, sizeof(link), gdir_out, shared[i]);
+            pymcl_path_join(target, sizeof(target), ip, shared[i]);
+            vs_junction(link, target);
+        }
+        pymcl_path_join(link, sizeof(link), gdir_out, "saves");
+        pymcl_ensure_dir(link);
+    } else if (strcmp(iso, "mods") == 0) {
+        static const char *shared[] = { "saves", "resourcepacks", "shaderpacks", "screenshots" };
+        for (size_t i = 0; i < sizeof(shared) / sizeof(shared[0]); i++) {
+            pymcl_path_join(link, sizeof(link), gdir_out, shared[i]);
+            pymcl_path_join(target, sizeof(target), ip, shared[i]);
+            vs_junction(link, target);
+        }
+        static const char *own[] = { "mods", "config" };
+        for (size_t i = 0; i < 2; i++) {
+            pymcl_path_join(link, sizeof(link), gdir_out, own[i]);
+            pymcl_ensure_dir(link);
+        }
+    } else { /* all */
+        static const char *own[] = { "mods", "config", "saves", "resourcepacks", "shaderpacks" };
+        for (size_t i = 0; i < sizeof(own) / sizeof(own[0]); i++) {
+            pymcl_path_join(link, sizeof(link), gdir_out, own[i]);
+            pymcl_ensure_dir(link);
+        }
+    }
+    cJSON_Delete(j);
+    return 0;
+}
+
 static cJSON *vs_defaults(void) {
     return cJSON_Parse(
         "{\"isolation\":\"none\",\"memory_mb\":null,\"java\":\"自动选择\","

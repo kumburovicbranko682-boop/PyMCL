@@ -158,7 +158,9 @@ int build_launch_command(const char *instance, const char *version, cJSON *accou
     char libs[PYMCL_PATH], assets[PYMCL_PATH], ip[PYMCL_PATH];
     instance_libraries_dir(instance, libs, sizeof(libs));
     instance_assets_dir(instance, assets, sizeof(assets));
-    instance_path(instance, ip, sizeof(ip));
+    /* 版本隔离：游戏目录可能是 versions/<id> 而非实例根。
+     * 以前这里恒用实例根，「隔离全部」在 C 桥下形同虚设。 */
+    pymcl_apply_isolation(instance, version, ip, sizeof(ip));
 
     char **cp = NULL; int ncp = 0;
     cJSON *seen = cJSON_CreateObject();

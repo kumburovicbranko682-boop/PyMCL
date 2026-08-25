@@ -301,7 +301,9 @@ static void *task_run(void *p) {
                 if (vj) cJSON_Delete(vj);
                 char **argv = NULL; int argc = 0; char natives[PYMCL_PATH];
                 char ip[PYMCL_PATH];
-                instance_path(inst, ip, sizeof(ip));
+                /* 与 Python 桥一致：工作目录 = 隔离后的游戏目录（可能是
+                 * versions/<id>），不是永远的实例根。 */
+                pymcl_apply_isolation(inst, ver, ip, sizeof(ip));
                 if (jexe && build_launch_command(inst, ver, props, jexe, mem, w, h, &argv, &argc, natives, sizeof(natives)) == 0) {
                     ctx_log(t, "正在启动游戏进程…");
                     HANDLE rd = NULL;
