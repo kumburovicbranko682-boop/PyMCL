@@ -75,6 +75,9 @@ public sealed partial class InstancePage : UserControl
         actions.Children.Add(IconBtn("📁", () => _ = Open(info.Name)));
         actions.Children.Add(IconBtn("☕", () => _ = PickJava(info.Name)));
         actions.Children.Add(IconBtn("✎", () => _ = Rename(info.Name)));
+        actions.Children.Add(IconBtn("⧉", () => _ = Duplicate(info.Name)));
+        if (!string.IsNullOrEmpty(info.Pack))
+            actions.Children.Add(IconBtn("⟳", () => _ = CheckPackUpdate(info.Name)));
         actions.Children.Add(IconBtn("⇪", () => _ = Export(info.Name)));
         actions.Children.Add(IconBtn("🗑", () => _ = Delete(info.Name)));
         Grid.SetRow(actions, 4);
@@ -149,6 +152,41 @@ public sealed partial class InstancePage : UserControl
     {
         try { await AppServices.Client.CallAsync("open_instance_folder", new { name }); }
         catch (Exception ex) { AppServices.Toast?.Invoke("无法打开", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async Task Duplicate(string name)
+    {
+        var ne = await yrompt("复制实例", "新实例名称（版本、模组、存档都会复制）", "", name + "-副本");
+        if (string.IsNullOrWhiteSpace(ne) || AppServices.Client is null) return;
+        try
+        {
+            await AppServices.Client.StartTaskAsync("duplicate_instance", new { name, new_name = ne });
+            AppServices.Toast?.Invoke("开始复制", $"{name} → {ne}", InfoBarSeverity.Success);
+        }
+        catch (Exception ex) { AppServices.Toast?.Invoke("复制失败", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async Task CheckPackUpdate(string name)
+    {
+        if (AppServices.Client is null) return;
+        ModpackUpdateInfo? info;
+        try { info = await AppServices.Client.CallAsync<ModpackUpdateInfo>("check_modpack_update", new { instance = name }); }
+        catch (Exception ex)
+        {
+            AppServices.Toast?.Invoke("检查整合包更新失败", ex.Message, InfoBarSeverity.Error);
+            return;
+        }
+        if (info is null || !info.Update)
+        {
+            AppServices.Toast?.Invoke("整合包更新", $"「{info?.Name ?? name}」已是最新版本（{info?.Current ?? "?"}）", InfoBarSeverity.Informational);
+            return;
+        }
+        var ok = await Confirm(
+            "发现整合包新版本",
+            $"{info.Name}：{info.Current} → {info.Latest}\n\n更新会重新安装整合包文件并清理旧版本残留的模组；存档、截图与手动添加的模组不受影响。是否更新？");
+        if (!ok) return;
+        try { await AppServices.Client.StartTaskAsync("update_modpack", new { instance = name }); }
+        catch (Exception ex) { AppServices.Toast?.Invoke("更新失败", ex.Message, InfoBarSeverity.Error); }
     }
 
     private async Task Export(string name)

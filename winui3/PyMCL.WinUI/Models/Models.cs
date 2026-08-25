@@ -21,6 +21,15 @@ public sealed class VersionRow
     public string Date { get; set; } = "";
 }
 
+public sealed class ModpackUpdateInfo
+{
+    public bool Update { get; set; }
+    public string Name { get; set; } = "";
+    public string Current { get; set; } = "";
+    public string Latest { get; set; } = "";
+    public string Source { get; set; } = "";
+}
+
 public sealed class CatalogItem
 {
     public string Name { get; set; } = "";
