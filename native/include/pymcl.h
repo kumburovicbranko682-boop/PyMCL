@@ -57,6 +57,9 @@ typedef struct {
     pymcl_cancel_fn cancel;
     void *ud;
     int threads;
+    /* 跳过资源文件校验/下载（UI 勾选 extra.skip_assets）。位置初始化的
+     * 旧调用点自动补 0 = 不跳过。 */
+    int skip_assets;
 } pymcl_ctx;
 
 /* ---------- error / log ---------- */

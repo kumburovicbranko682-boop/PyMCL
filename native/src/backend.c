@@ -204,6 +204,10 @@ static void *task_run(void *p) {
                 cJSON_Delete(r);
             }
         } else {
+            /* 与 Python 侧一致：勾选 extra.skip_assets 或全局设置 skip_assets 生效。
+             * 以前这个勾选在原生安装路径被整个忽略。 */
+            cJSON *sk = cJSON_GetObjectItem(extra, "skip_assets");
+            ctx.skip_assets = sk ? cJSON_IsTrue(sk) : config_bool("skip_assets", 0);
             ctx_log(t, "安装到实例");
             if (loader && loader[0] && strcmp(loader, "无") != 0) {
                 char vid[256];
@@ -577,6 +581,7 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_AddBoolToObject(o, "ui_fly_animation", config_bool("ui_fly_animation", 1));
         cJSON_AddNumberToObject(o, "ui_fly_duration_ms", config_int("ui_fly_duration_ms", 620));
         cJSON_AddBoolToObject(o, "ui_motion", config_bool("ui_motion", 1));
+        cJSON_AddBoolToObject(o, "skip_assets", config_bool("skip_assets", 0));
         {
             char gd[PYMCL_PATH];
             pymcl_path_join(gd, sizeof(gd), g_root, config_str("instances_dir", ".minecraft"));
@@ -623,6 +628,7 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cfg_patch_bool(d, "ui_fly_animation", "ui_fly_animation");
         cfg_patch_int(d, "ui_fly_duration_ms", "ui_fly_duration_ms");
         cfg_patch_bool(d, "ui_motion", "ui_motion");
+        cfg_patch_bool(d, "skip_assets", "skip_assets");
         config_save();
         return cJSON_CreateTrue();
     }

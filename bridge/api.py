@@ -715,6 +715,7 @@ class BackendAPI:
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
+            "skip_assets": bool(CONFIG.get("skip_assets", False)),
             # WinUI 设置页有对应开关；不带出去它永远显示 DTO 默认值
             "ui_fly_animation": bool(CONFIG.get("ui_fly_animation", True)),
             "ui_fly_duration_ms": int(CONFIG.get("ui_fly_duration_ms", 620)),

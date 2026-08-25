@@ -348,7 +348,9 @@ static int install_json(const char *inst, const char *vid, cJSON *vjson, pymcl_c
         return -1;
     }
     if (install_libraries(inst, resolved, vid, ctx) != 0) { cJSON_Delete(resolved); return -1; }
-    if (install_assets(inst, resolved, ctx) != 0) { cJSON_Delete(resolved); return -1; }
+    if (ctx && ctx->skip_assets)
+        note(ctx, "已按设置跳过资源文件校验");
+    else if (install_assets(inst, resolved, ctx) != 0) { cJSON_Delete(resolved); return -1; }
     install_logging(inst, resolved, ctx);
     cJSON *mv = cJSON_CreateString(vid);
     instance_set_meta(inst, "mc_version", mv);
