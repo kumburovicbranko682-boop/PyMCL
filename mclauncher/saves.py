@@ -140,15 +140,45 @@ def _world_fields():
     }
 
 
+def _read_level(level: Path):
+    """读 level.dat：返回 (root_name, root, Data 字典, 是否 gzip)。"""
+    from . import nbt_lite as nbt
+    raw = level.read_bytes()
+    was_gzip = raw[:2] == b"\x1f\x8b"
+    try:
+        root_name, root = nbt.loads(raw)
+    except Exception as exc:
+        raise SaveError(f"level.dat 解析失败: {exc}") from exc
+    data_tag = root.get("Data")
+    if not (isinstance(data_tag, tuple) and data_tag[0] == nbt.TAG_COMPOUND):
+        raise SaveError("level.dat 缺少 Data 标签，不是有效的存档")
+    return root_name, root, data_tag[1], was_gzip
+
+
+def _write_level(save_dir: Path, root_name, root, was_gzip: bool):
+    """写回 level.dat：与游戏一致，旧内容挪到 level.dat_old，再原子替换。"""
+    import gzip
+
+    from . import nbt_lite as nbt
+    out = nbt.dumps(root, root_name)
+    if was_gzip:
+        out = gzip.compress(out)
+    level = save_dir / "level.dat"
+    tmp = level.with_suffix(".dat.pymcl-new")
+    tmp.write_bytes(out)
+    try:
+        shutil.copy2(level, save_dir / "level.dat_old")
+    except OSError:
+        pass
+    tmp.replace(level)
+
+
 def edit_world(instance: Instance, name: str, changes: dict, version_id: str = "") -> dict:
     """改写存档 level.dat 的基本信息（世界名/模式/难度/作弊……）。
 
     只动指定键，其余 NBT 原样保留；写入前把旧文件备份成 level.dat_old
     （与游戏自身的保存行为一致）。返回修改后的 world_info。
     """
-    import gzip
-
-    from . import nbt_lite as nbt
     save_dir = _safe_child(_game_dir(instance, version_id) / "saves", name)
     level = save_dir / "level.dat"
     if not level.is_file():
@@ -161,32 +191,11 @@ def edit_world(instance: Instance, name: str, changes: dict, version_id: str = "
     if not changes:
         return world_info(instance, name, version_id)
 
-    raw = level.read_bytes()
-    was_gzip = raw[:2] == b"\x1f\x8b"
-    try:
-        root_name, root = nbt.loads(raw)
-    except Exception as exc:
-        raise SaveError(f"level.dat 解析失败: {exc}") from exc
-    data_tag = root.get("Data")
-    if not (isinstance(data_tag, tuple) and data_tag[0] == nbt.TAG_COMPOUND):
-        raise SaveError("level.dat 缺少 Data 标签，不是有效的存档")
-    data = data_tag[1]
-
+    root_name, root, data, was_gzip = _read_level(level)
     for key, value in changes.items():
         nbt_key, tag_type, convert = fields[key]
         data[nbt_key] = (tag_type, convert(value))
-
-    out = nbt.dumps(root, root_name)
-    if was_gzip:
-        out = gzip.compress(out)
-    # 与游戏一致：旧内容挪到 level.dat_old，再原子替换
-    tmp = level.with_suffix(".dat.pymcl-new")
-    tmp.write_bytes(out)
-    try:
-        shutil.copy2(level, save_dir / "level.dat_old")
-    except OSError:
-        pass
-    tmp.replace(level)
+    _write_level(save_dir, root_name, root, was_gzip)
     return world_info(instance, name, version_id)
 
 
@@ -236,6 +245,151 @@ def install_datapack_into_save(instance: Instance, filename: str, save_name: str
     dest = dest_dir / src.name
     shutil.copy2(src, dest)
     return str(dest)
+
+
+# ---------------------------------------------------------------- 世界数据包管理
+# 对齐 HMCL 世界管理的「数据包」页：看某个世界装了什么、禁用、删除。
+# 启用状态存在 level.dat 的 Data.DataPacks（Enabled/Disabled，"file/<名字>"）；
+# 游戏对新发现的包默认启用，所以「不在 Disabled 里」就算启用。
+
+def _flat_text(desc) -> str:
+    """pack.mcmeta 的 description 可能是字符串或 chat component。"""
+    if isinstance(desc, str):
+        return desc
+    if isinstance(desc, dict):
+        text = str(desc.get("text") or "")
+        extra = desc.get("extra")
+        if isinstance(extra, list):
+            text += "".join(_flat_text(x) for x in extra)
+        return text
+    if isinstance(desc, list):
+        return "".join(_flat_text(x) for x in desc)
+    return ""
+
+
+def _datapack_description(path: Path) -> str:
+    import json
+    try:
+        if path.is_dir():
+            meta = json.loads((path / "pack.mcmeta").read_text("utf-8"))
+        else:
+            with zipfile.ZipFile(path) as zf:
+                meta = json.loads(zf.read("pack.mcmeta").decode("utf-8", "replace"))
+    except Exception:
+        return ""
+    pack = meta.get("pack") if isinstance(meta, dict) else None
+    return _flat_text((pack or {}).get("description")).strip()
+
+
+def _datapack_string_list(dp_data: dict, key: str) -> list[str]:
+    from . import nbt_lite as nbt
+    tag = dp_data.get(key)
+    if isinstance(tag, tuple) and tag[0] == nbt.TAG_LIST:
+        elem_type, items = tag[1]
+        if elem_type in (nbt.TAG_STRING, nbt.TAG_END):
+            return [str(x) for x in items]
+    return []
+
+
+def list_world_datapacks(instance: Instance, name: str, version_id: str = "") -> list[dict]:
+    """某存档 datapacks/ 里的数据包 + level.dat 的启用状态。"""
+    from . import nbt_lite as nbt
+    save_dir = _safe_child(_game_dir(instance, version_id) / "saves", name)
+    if not save_dir.is_dir():
+        raise SaveError(f"存档不存在: {name}")
+    disabled = set()
+    level = save_dir / "level.dat"
+    if level.is_file():
+        try:
+            _rn, _root, data, _gz = _read_level(level)
+        except SaveError:
+            data = {}
+        dp = data.get("DataPacks")
+        if isinstance(dp, tuple) and dp[0] == nbt.TAG_COMPOUND:
+            disabled = set(_datapack_string_list(dp[1], "Disabled"))
+    folder = save_dir / "datapacks"
+    rows = []
+    if folder.is_dir():
+        for p in sorted(folder.iterdir(), key=lambda x: x.name.lower()):
+            is_zip = p.is_file() and p.name.lower().endswith(".zip")
+            if not (is_zip or p.is_dir()):
+                continue
+            rows.append({
+                "filename": p.name,
+                "enabled": f"file/{p.name}" not in disabled,
+                "bytes": p.stat().st_size if p.is_file() else _dir_size(p),
+                "description": _datapack_description(p),
+            })
+    return rows
+
+
+def set_world_datapack_enabled(instance: Instance, name: str, filename: str,
+                               enabled: bool, version_id: str = "") -> bool:
+    """启用 / 禁用某存档里的一个数据包（改 level.dat 的 DataPacks 列表）。"""
+    from . import nbt_lite as nbt
+    save_dir = _safe_child(_game_dir(instance, version_id) / "saves", name)
+    pack_path = _safe_child(save_dir / "datapacks", filename, what="数据包")
+    if not pack_path.exists():
+        raise SaveError(f"数据包不存在: {filename}")
+    level = save_dir / "level.dat"
+    if not level.is_file():
+        raise SaveError(f"存档缺少 level.dat: {name}")
+    root_name, root, data, was_gzip = _read_level(level)
+    dp = data.get("DataPacks")
+    if not (isinstance(dp, tuple) and dp[0] == nbt.TAG_COMPOUND):
+        raise SaveError("这个世界没有 DataPacks 信息（需要 Minecraft 1.13+ 的存档）")
+    dp_data = dp[1]
+    ident = f"file/{filename}"
+    enabled_list = _datapack_string_list(dp_data, "Enabled")
+    disabled_list = _datapack_string_list(dp_data, "Disabled")
+    if enabled:
+        disabled_list = [x for x in disabled_list if x != ident]
+        if ident not in enabled_list:
+            enabled_list.append(ident)
+    else:
+        enabled_list = [x for x in enabled_list if x != ident]
+        if ident not in disabled_list:
+            disabled_list.append(ident)
+    dp_data["Enabled"] = (nbt.TAG_LIST, (nbt.TAG_STRING, enabled_list))
+    dp_data["Disabled"] = (nbt.TAG_LIST, (nbt.TAG_STRING, disabled_list))
+    _write_level(save_dir, root_name, root, was_gzip)
+    return bool(enabled)
+
+
+def delete_world_datapack(instance: Instance, name: str, filename: str,
+                          version_id: str = ""):
+    """删除存档里的数据包文件，并从 level.dat 的启用/禁用列表中清理。"""
+    from . import nbt_lite as nbt
+    save_dir = _safe_child(_game_dir(instance, version_id) / "saves", name)
+    pack_path = _safe_child(save_dir / "datapacks", filename, what="数据包")
+    if not pack_path.exists():
+        raise SaveError(f"数据包不存在: {filename}")
+    if pack_path.is_dir():
+        utils.remove_tree(pack_path)
+    else:
+        pack_path.unlink()
+    level = save_dir / "level.dat"
+    if not level.is_file():
+        return
+    try:
+        root_name, root, data, was_gzip = _read_level(level)
+    except SaveError:
+        return
+    dp = data.get("DataPacks")
+    if not (isinstance(dp, tuple) and dp[0] == nbt.TAG_COMPOUND):
+        return
+    ident = f"file/{filename}"
+    changed = False
+    for key in ("Enabled", "Disabled"):
+        tag = dp[1].get(key)
+        if isinstance(tag, tuple) and tag[0] == nbt.TAG_LIST:
+            elem_type, items = tag[1]
+            kept = [x for x in items if str(x) != ident]
+            if len(kept) != len(items):
+                dp[1][key] = (nbt.TAG_LIST, (elem_type, kept))
+                changed = True
+    if changed:
+        _write_level(save_dir, root_name, root, was_gzip)
 
 
 def list_media(instance: Instance, kind: str, version_id: str = "") -> list[dict]:

@@ -103,6 +103,113 @@ class WorldInfoDialog(MessageBoxBase):
         return True
 
 
+class WorldDatapacksDialog(MessageBoxBase):
+    """世界数据包管理：列出 / 启用禁用 / 删除（对齐 HMCL 世界管理的数据包页）。"""
+
+    def __init__(self, backend, instance: str, save_name: str, version: str = "",
+                 parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.instance = instance
+        self.save_name = save_name
+        self.version = version
+        self._rows: list[dict] = []
+        self.viewLayout.addWidget(
+            SubtitleLabel(tr("数据包 · {name}").format(name=save_name), self))
+        self.list = ListWidget()
+        self.list.setMinimumHeight(220)
+        self.list.setSpacing(2)
+        self.viewLayout.addWidget(self.list)
+        hint = CaptionLabel(
+            tr("游戏对新放入的数据包默认启用；禁用状态保存在这个世界的 level.dat 里。"), self)
+        hint.setWordWrap(True)
+        self.viewLayout.addWidget(hint)
+        row = QHBoxLayout()
+        self.toggle_btn = PushButton(tr("启用 / 禁用"))
+        self.remove_btn = PushButton(tr("删除数据包"))
+        row.addWidget(self.toggle_btn)
+        row.addWidget(self.remove_btn)
+        row.addStretch(1)
+        host = QWidget(self)
+        host.setLayout(row)
+        self.viewLayout.addWidget(host)
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(560)
+        self.toggle_btn.clicked.connect(self._toggle)
+        self.remove_btn.clicked.connect(self._delete)
+        self.reload()
+
+    def reload(self):
+        self.list.clear()
+        try:
+            self._rows = self.backend.list_world_datapacks(
+                self.instance, self.save_name, self.version) or []
+        except Exception as e:
+            self._rows = []
+            self.list.addItem(str(e))
+        for r in self._rows:
+            state = tr("已启用") if r.get("enabled") else tr("已禁用")
+            label = f"{r['filename']}  ({format_size(r.get('bytes') or 0)}) · {state}"
+            desc = (r.get("description") or "").strip()
+            if desc:
+                label += f"\n{desc[:90]}"
+            item = QListWidgetItem(label)
+            item.setData(Qt.UserRole, r["filename"])
+            self.list.addItem(item)
+        has = bool(self._rows)
+        if not has and self.list.count() == 0:
+            self.list.addItem(tr("这个世界还没有安装数据包"))
+        self.toggle_btn.setEnabled(has)
+        self.remove_btn.setEnabled(has)
+
+    def _selected(self):
+        item = self.list.currentItem()
+        if not item:
+            return None
+        filename = item.data(Qt.UserRole)
+        if not filename:
+            return None
+        for r in self._rows:
+            if r.get("filename") == filename:
+                return r
+        return None
+
+    def _toggle(self):
+        row = self._selected()
+        if not row:
+            return
+        try:
+            self.backend.set_world_datapack_enabled(
+                self.instance, self.save_name, row["filename"],
+                not row.get("enabled"), self.version)
+        except Exception as e:
+            MessageBox(tr("修改失败"), str(e), self.window()).exec()
+            return
+        self.reload()
+
+    def _delete(self):
+        row = self._selected()
+        if not row:
+            return
+        box = MessageBox(
+            tr("删除数据包"),
+            tr("从世界「{world}」删除数据包 {name}？").format(
+                world=self.save_name, name=row["filename"]),
+            self.window())
+        box.yesButton.setText(tr("删除"))
+        box.cancelButton.setText(tr("取消"))
+        if not box.exec():
+            return
+        try:
+            self.backend.delete_world_datapack(
+                self.instance, self.save_name, row["filename"], self.version)
+        except Exception as e:
+            MessageBox(tr("删除失败"), str(e), self.window()).exec()
+            return
+        self.reload()
+
+
 class SavesDialog(MessageBoxBase):
     def __init__(self, backend, instance: str, version: str = "", parent=None):
         super().__init__(parent)
@@ -132,10 +239,12 @@ class SavesDialog(MessageBoxBase):
         row.addWidget(self.dp_btn)
         row2 = QHBoxLayout()
         self.info_btn = PushButton(tr("修改世界信息"))
+        self.manage_dp_btn = PushButton(tr("管理数据包"))
         self.backup_btn = PushButton(tr("备份存档"))
         self.restore_btn = PushButton(tr("还原备份"))
         self.export_btn = PushButton(tr("导出为 zip"))
         row2.addWidget(self.info_btn)
+        row2.addWidget(self.manage_dp_btn)
         row2.addWidget(self.backup_btn)
         row2.addWidget(self.restore_btn)
         row2.addWidget(self.export_btn)
@@ -150,6 +259,7 @@ class SavesDialog(MessageBoxBase):
         self.open_btn.clicked.connect(self._open)
         self.del_btn.clicked.connect(self._delete)
         self.dp_btn.clicked.connect(self._datapack)
+        self.manage_dp_btn.clicked.connect(self._manage_datapacks)
         self.info_btn.clicked.connect(self._edit_info)
         self.backup_btn.clicked.connect(self._backup)
         self.restore_btn.clicked.connect(self._restore)
@@ -163,6 +273,7 @@ class SavesDialog(MessageBoxBase):
         self.del_btn.setEnabled(is_save or is_backup)
         self.del_btn.setText(tr("删除备份") if is_backup else tr("删除存档"))
         self.dp_btn.setEnabled(is_save)
+        self.manage_dp_btn.setEnabled(is_save)
         self.info_btn.setEnabled(is_save)
         self.backup_btn.setEnabled(is_save)
         self.export_btn.setEnabled(is_save)
@@ -283,6 +394,14 @@ class SavesDialog(MessageBoxBase):
         if box.exec():
             self.backend.delete_save(self.instance, name, self.version)
             self.reload()
+
+    def _manage_datapacks(self):
+        name = self._selected_name()
+        if not name:
+            MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
+            return
+        WorldDatapacksDialog(self.backend, self.instance, name, self.version,
+                             self.window()).exec()
 
     def _edit_info(self):
         name = self._selected_name()

@@ -632,6 +632,24 @@ class BackendAPI(QObject):
         from mclauncher import saves as saves_mod
         return saves_mod.install_datapack_into_save(self._instance(instance), filename, save_name, version)
 
+    def list_world_datapacks(self, instance: str, name: str, version: str = "") -> list[dict]:
+        """某存档已装的数据包（文件名、启用状态、描述）。"""
+        from mclauncher import saves as saves_mod
+        return saves_mod.list_world_datapacks(self._instance(instance), name, version)
+
+    def set_world_datapack_enabled(self, instance: str, name: str, filename: str,
+                                   enabled: bool, version: str = "") -> bool:
+        """启用 / 禁用存档里的数据包（写 level.dat 的 DataPacks 列表）。"""
+        from mclauncher import saves as saves_mod
+        return saves_mod.set_world_datapack_enabled(
+            self._instance(instance), name, filename, enabled, version)
+
+    def delete_world_datapack(self, instance: str, name: str, filename: str,
+                              version: str = ""):
+        """删除存档里的数据包文件，并清理 level.dat 里的引用。"""
+        from mclauncher import saves as saves_mod
+        saves_mod.delete_world_datapack(self._instance(instance), name, filename, version)
+
     def list_media(self, instance: str, kind: str, version: str = "") -> list[dict]:
         from mclauncher import saves as saves_mod
         return saves_mod.list_media(self._instance(instance), kind, version)

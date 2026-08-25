@@ -1059,5 +1059,13 @@
   "复制地址": "Copy address",
   "发现局域网": "Discover LAN",
   "扫描本局域网里「对局域网开放」的世界": "Scan this LAN for worlds opened via \"Open to LAN\"",
-  "扫描失败": "Scan failed"
+  "扫描失败": "Scan failed",
+  "管理数据包": "Manage data packs",
+  "数据包 · {name}": "Data packs · {name}",
+  "游戏对新放入的数据包默认启用；禁用状态保存在这个世界的 level.dat 里。": "The game enables newly added data packs by default; the disabled state is stored in this world's level.dat.",
+  "启用 / 禁用": "Enable / disable",
+  "删除数据包": "Delete data pack",
+  "已启用": "Enabled",
+  "这个世界还没有安装数据包": "This world has no data packs installed",
+  "从世界「{world}」删除数据包 {name}？": "Delete data pack {name} from world \"{world}\"?"
 }
