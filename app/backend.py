@@ -857,6 +857,15 @@ class BackendAPI(QObject):
         Instance(name).rename(new_name)
         self._emit_ui_changed()
 
+    def set_instance_icon(self, name: str, image_path: str):
+        """把一张本地图片设为实例图标（HMCL/PCL2 的版本图标）。"""
+        Instance(name).set_icon(image_path)
+        self._emit_ui_changed()
+
+    def clear_instance_icon(self, name: str):
+        Instance(name).clear_icon()
+        self._emit_ui_changed()
+
     def duplicate_instance(self, name: str, new_name: str = "") -> str:
         """复制整个实例（版本、mods、config、存档）为试验副本。"""
         return self.start_task(f"复制实例 {name}", self._duplicate_instance_impl,
@@ -1631,6 +1640,7 @@ class BackendAPI(QObject):
             pack = meta.get("modpack") if isinstance(meta.get("modpack"), dict) else {}
             pack_name = pack.get("name") if pack else None
             mc = pack_name or meta.get("mc_version") or (ids[0] if ids else tr("未安装版本"))
+            icon = inst.icon_path()
             rows.append({
                 "name": name,
                 "versions": len(ids),
@@ -1640,6 +1650,7 @@ class BackendAPI(QObject):
                 "mc_version": (pack.get("mc_version") if pack else None) or meta.get("mc_version") or "",
                 "java": inst.java_pref(),
                 "java_label": self.instance_java_label(name),
+                "icon": str(icon) if icon else "",
             })
         self._inst_cache = rows
         self._inst_cache_at = now

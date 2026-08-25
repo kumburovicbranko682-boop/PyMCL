@@ -8,6 +8,9 @@ from . import utils
 from .config import CONFIG
 
 INSTANCE_META = ".instance.json"
+ICON_STEM = ".instance_icon"
+_ICON_SUFFIXES = (".png", ".jpg", ".gif", ".webp", ".bmp")
+_ICON_MAX_BYTES = 4 * 1024 * 1024
 JAVA_AUTO = "自动选择"
 _MAX_INSTANCE_NAME = 48
 _ILLEGAL_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -28,6 +31,26 @@ _STANDARD_DIRS = [
 
 class InstanceError(Exception):
     pass
+
+
+def _sniff_image_suffix(path: Path):
+    """按文件头识别图片格式，返回规范扩展名；不认识返回 None。"""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return None
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if head.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return ".webp"
+    if head.startswith(b"BM"):
+        return ".bmp"
+    return None
 
 
 def list_instances() -> list:
@@ -145,6 +168,34 @@ class Instance:
         if v in ("auto", "default"):
             v = JAVA_AUTO
         self.set_meta("java", v)
+
+    # ---- 自定义图标（HMCL/PCL2 的「版本图标」）
+    def icon_path(self):
+        """自定义图标文件路径；没设置过返回 None。"""
+        for suffix in _ICON_SUFFIXES:
+            p = self.path / f"{ICON_STEM}{suffix}"
+            if p.is_file():
+                return p
+        return None
+
+    def set_icon(self, src):
+        """把一张图片设为实例图标。按内容（魔数）识别格式，与扩展名无关。"""
+        src = Path(src)
+        if not src.is_file():
+            raise InstanceError(f"图片不存在: {src}")
+        if src.stat().st_size > _ICON_MAX_BYTES:
+            raise InstanceError("图片太大（上限 4 MB），请换一张小一点的。")
+        suffix = _sniff_image_suffix(src)
+        if not suffix:
+            raise InstanceError("不是可识别的图片文件（支持 PNG / JPEG / GIF / WebP / BMP）。")
+        self.clear_icon()
+        shutil.copyfile(src, self.path / f"{ICON_STEM}{suffix}")
+
+    def clear_icon(self):
+        for suffix in _ICON_SUFFIXES:
+            p = self.path / f"{ICON_STEM}{suffix}"
+            if p.is_file():
+                p.unlink()
 
     # ---- 路径
     def versions_dir(self):

@@ -24,7 +24,7 @@ class InstanceCard(SimpleCardWidget):
         layout.setSpacing(6)
 
         top = QHBoxLayout()
-        top.addWidget(IconTile(info["name"], size=40))
+        top.addWidget(IconTile(info["name"], size=40, image=info.get("icon") or None))
         name_box = QVBoxLayout()
         name_box.setSpacing(2)
         name_box.addWidget(StrongBodyLabel(info["name"]))
@@ -76,6 +76,13 @@ class InstanceCard(SimpleCardWidget):
         dup = Action(FIF.COPY, tr("复制实例"))
         dup.triggered.connect(lambda: self.page.duplicate(self.info["name"]))
         menu.addAction(dup)
+        set_icon = Action(FIF.PHOTO, tr("设置图标…"))
+        set_icon.triggered.connect(lambda: self.page.set_icon(self.info["name"]))
+        menu.addAction(set_icon)
+        if self.info.get("icon"):
+            reset_icon = Action(FIF.CANCEL, tr("恢复默认图标"))
+            reset_icon.triggered.connect(lambda: self.page.reset_icon(self.info["name"]))
+            menu.addAction(reset_icon)
         menu.exec(event.globalPos())
 
 
@@ -196,6 +203,26 @@ class InstancePage(QWidget):
                 self.backend.duplicate_instance(name, dlg.value())
             except Exception as e:
                 MessageBox(tr("复制失败"), str(e), self).exec()
+
+    def set_icon(self, name: str):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选择实例图标"), "",
+            tr("图片文件") + " (*.png *.jpg *.jpeg *.gif *.webp *.bmp)")
+        if not path:
+            return
+        try:
+            self.backend.set_instance_icon(name, path)
+        except Exception as e:
+            MessageBox(tr("设置图标失败"), str(e), self).exec()
+        self.reload()
+
+    def reset_icon(self, name: str):
+        try:
+            self.backend.clear_instance_icon(name)
+        except Exception as e:
+            MessageBox(tr("设置图标失败"), str(e), self).exec()
+        self.reload()
 
     def check_pack_update(self, name: str):
         def done(info):

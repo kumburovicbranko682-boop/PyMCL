@@ -12,6 +12,7 @@ public sealed class InstanceInfo
     [JsonPropertyName("mc_version")] public string McVersion { get; set; } = "";
     public string Java { get; set; } = "";
     [JsonPropertyName("java_label")] public string JavaLabel { get; set; } = "";
+    public string Icon { get; set; } = "";
 }
 
 public sealed class VersionRow
