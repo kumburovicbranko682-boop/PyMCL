@@ -6,8 +6,35 @@
 static sse_emit_fn g_emit;
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static int g_task_n;
-static HANDLE g_game;
-static char g_launch_id[32];
+
+/* 运行中游戏注册表（多开管理，对齐 Python backend._game_procs） */
+#define MAX_GAMES 16
+typedef struct {
+    HANDLE proc;
+    DWORD pid;
+    char task_id[32];
+    char instance[128];
+    char version[128];
+    char account[64];
+    double started;
+} game_slot;
+static game_slot g_games[MAX_GAMES];
+
+static int game_slot_alive(const game_slot *s) {
+    DWORD code = 0;
+    if (!s->proc) return 0;
+    if (GetExitCodeProcess(s->proc, &code) && code != STILL_ACTIVE) return 0;
+    return 1;
+}
+
+static int games_running(void) {
+    int any = 0;
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < MAX_GAMES; i++)
+        if (game_slot_alive(&g_games[i])) { any = 1; break; }
+    pthread_mutex_unlock(&g_mu);
+    return any;
+}
 
 typedef struct {
     char id[32];
@@ -231,6 +258,9 @@ static void *task_run(void *p) {
         int h = pint(t->args, "height", 480);
         const char *java = pstr(t->args, "java", PYMCL_JAVA_AUTO);
         if (!ver[0]) { pymcl_set_error("请先选择版本"); }
+        else if (!config_bool("allow_multi_instance", 0) && games_running()) {
+            pymcl_set_error("游戏正在运行中\n若要同时运行多个游戏，请到设置开启「允许多开」");
+        }
         else {
             config_set_str("default_instance", inst);
             config_save();
@@ -275,9 +305,23 @@ static void *task_run(void *p) {
                     ctx_log(t, "正在启动游戏进程…");
                     HANDLE rd = NULL;
                     HANDLE proc = game_spawn((const char **)argv, argc, ip, &rd);
+                    int gslot = -1;
                     pthread_mutex_lock(&g_mu);
-                    g_game = proc;
-                    snprintf(g_launch_id, sizeof(g_launch_id), "%s", t->id);
+                    if (proc) {
+                        for (int i = 0; i < MAX_GAMES; i++)
+                            if (!g_games[i].proc) { gslot = i; break; }
+                        if (gslot >= 0) {
+                            game_slot *s = &g_games[gslot];
+                            s->proc = proc;
+                            s->pid = GetProcessId(proc);
+                            snprintf(s->task_id, sizeof(s->task_id), "%s", t->id);
+                            snprintf(s->instance, sizeof(s->instance), "%s", inst);
+                            snprintf(s->version, sizeof(s->version), "%s", ver);
+                            snprintf(s->account, sizeof(s->account), "%s",
+                                     (account[0] && strcmp(account, "离线模式") != 0) ? account : user);
+                            s->started = (double)time(NULL);
+                        }
+                    }
                     pthread_mutex_unlock(&g_mu);
                     if (proc) {
                         char buf[4096]; DWORD got;
@@ -307,10 +351,11 @@ static void *task_run(void *p) {
                         WaitForSingleObject(proc, INFINITE);
                         DWORD code = 0;
                         GetExitCodeProcess(proc, &code);
-                        CloseHandle(rd); CloseHandle(proc);
                         pthread_mutex_lock(&g_mu);
-                        if (g_game == proc) g_game = NULL;
+                        if (gslot >= 0 && g_games[gslot].proc == proc)
+                            memset(&g_games[gslot], 0, sizeof(g_games[gslot]));
                         pthread_mutex_unlock(&g_mu);
+                        CloseHandle(rd); CloseHandle(proc);
                         if (t->cancelled) { ok = 1; snprintf(msg, sizeof(msg), "已停止游戏"); }
                         else {
                             long scode = (long)code;
@@ -482,7 +527,10 @@ void backend_init(sse_emit_fn emit_fn) {
 }
 
 void backend_shutdown(void) {
-    if (g_game) game_kill(g_game);
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < MAX_GAMES; i++)
+        if (g_games[i].proc) game_kill(g_games[i].proc);
+    pthread_mutex_unlock(&g_mu);
 }
 
 cJSON *backend_call(const char *method, cJSON *params) {
@@ -726,9 +774,46 @@ cJSON *backend_call(const char *method, cJSON *params) {
         pthread_mutex_lock(&g_mu);
         for (int i = 0; i < g_ntasks; i++)
             if (g_tasks[i] && strcmp(g_tasks[i]->id, tid) == 0) g_tasks[i]->cancelled = 1;
-        if (strcmp(g_launch_id, tid) == 0 && g_game) game_kill(g_game);
+        /* 多开时按任务结束对应的游戏进程 */
+        for (int i = 0; i < MAX_GAMES; i++)
+            if (g_games[i].proc && strcmp(g_games[i].task_id, tid) == 0)
+                game_kill(g_games[i].proc);
         pthread_mutex_unlock(&g_mu);
         return cJSON_CreateTrue();
+    }
+    if (strcmp(method, "is_game_running") == 0)
+        return cJSON_CreateBool(games_running());
+    if (strcmp(method, "get_running_games") == 0) {
+        cJSON *out = cJSON_CreateArray();
+        double now = (double)time(NULL);
+        pthread_mutex_lock(&g_mu);
+        for (int i = 0; i < MAX_GAMES; i++) {
+            if (!game_slot_alive(&g_games[i])) continue;
+            cJSON *row = cJSON_CreateObject();
+            cJSON_AddNumberToObject(row, "pid", (double)g_games[i].pid);
+            cJSON_AddStringToObject(row, "task_id", g_games[i].task_id);
+            cJSON_AddStringToObject(row, "instance", g_games[i].instance);
+            cJSON_AddStringToObject(row, "version", g_games[i].version);
+            cJSON_AddStringToObject(row, "account", g_games[i].account);
+            double up = now - g_games[i].started;
+            cJSON_AddNumberToObject(row, "uptime", up > 0 ? up : 0);
+            cJSON_AddItemToArray(out, row);
+        }
+        pthread_mutex_unlock(&g_mu);
+        return out;
+    }
+    if (strcmp(method, "stop_game") == 0) {
+        int pid = pint(params, "pid", 0);
+        int n = 0;
+        pthread_mutex_lock(&g_mu);
+        for (int i = 0; i < MAX_GAMES; i++) {
+            if (!game_slot_alive(&g_games[i])) continue;
+            if (pid && (DWORD)pid != g_games[i].pid) continue;
+            game_kill(g_games[i].proc);
+            n++;
+        }
+        pthread_mutex_unlock(&g_mu);
+        return cJSON_CreateNumber(n);
     }
     if (strcmp(method, "install_game") == 0)
         return start_task("安装游戏", method, params);

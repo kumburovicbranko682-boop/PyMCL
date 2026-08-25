@@ -103,9 +103,15 @@ class BannerBody(QWidget):
         page.stop_btn = PushButton(FIF.CLOSE, tr("停止"))
         page.stop_btn.setFixedSize(170, 30)
         page.stop_btn.setEnabled(False)
+        # 多开管理入口：有游戏在跑时显示「运行中 ×N」，点开列表可结束指定游戏
+        page.running_btn = TransparentPushButton(FIF.GAME, tr("运行中"))
+        page.running_btn.setFixedSize(170, 26)
+        page.running_btn.hide()
+        page.running_btn.clicked.connect(page._show_running_games)
         page.banner.right_area.addStretch(1)
         page.banner.right_area.addWidget(page.launch_btn, 0, Qt.AlignRight)
         page.banner.right_area.addWidget(page.stop_btn, 0, Qt.AlignRight)
+        page.banner.right_area.addWidget(page.running_btn, 0, Qt.AlignRight)
 
         from ..motion import SmoothProgressBar
         page.progress = SmoothProgressBar(self)

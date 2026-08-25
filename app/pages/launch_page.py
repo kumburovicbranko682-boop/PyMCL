@@ -2,9 +2,10 @@
 """启动页：自由布局画布（横幅/配置/日志/新闻/便签等卡片，可任意拖拽缩放）。"""
 
 from PySide6.QtCore import QTimer, QUrl
-from PySide6.QtWidgets import QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QTextBrowser, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, InfoBar, InfoBarPosition, StrongBodyLabel,
+    CaptionLabel, InfoBar, InfoBarPosition, MessageBoxBase, PushButton,
+    StrongBodyLabel, SubtitleLabel,
 )
 
 from mclauncher.config import CONFIG
@@ -17,6 +18,79 @@ from .home_cards import (
     BannerBody, ConfigBody, LogBody, NewsBody, build_registry,
 )
 from mclauncher.i18n import tr
+
+
+class RunningGamesDialog(MessageBoxBase):
+    """运行中的游戏列表（多开管理：对标 PCL2 同时运行多实例并结束指定游戏）。"""
+
+    def __init__(self, backend, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.viewLayout.addWidget(SubtitleLabel(tr("运行中的游戏"), self))
+        self._host = QWidget(self)
+        self._rows_lay = QVBoxLayout(self._host)
+        self._rows_lay.setContentsMargins(0, 0, 0, 0)
+        self._rows_lay.setSpacing(4)
+        self.viewLayout.addWidget(self._host)
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.setText(tr("全部结束"))
+        self.cancelButton.clicked.connect(self._stop_all)
+        self.widget.setMinimumWidth(520)
+        self._reload_rows()
+
+    def _stop_all(self):
+        try:
+            self.backend.stop_game(0)
+        except Exception:
+            pass
+
+    def _stop_one(self, pid: int):
+        try:
+            self.backend.stop_game(pid)
+        except Exception as e:
+            InfoBar.error(tr("结束失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=3000)
+        QTimer.singleShot(400, self._reload_rows)
+
+    def _reload_rows(self):
+        while self._rows_lay.count():
+            item = self._rows_lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        try:
+            rows = self.backend.get_running_games() or []
+        except Exception:
+            rows = []
+        if not rows:
+            empty = CaptionLabel(tr("没有正在运行的游戏"))
+            empty.setStyleSheet("background: transparent;")
+            self._rows_lay.addWidget(empty)
+            return
+        from mclauncher.playtime import format_duration
+        for r in rows:
+            frame = QFrame(self._host)
+            h = QHBoxLayout(frame)
+            h.setContentsMargins(4, 4, 4, 4)
+            h.setSpacing(10)
+            col = QVBoxLayout()
+            col.setSpacing(1)
+            title = StrongBodyLabel(f"{r.get('version') or '?'} · {r.get('instance') or '?'}")
+            col.addWidget(title)
+            bits = []
+            if r.get("account"):
+                bits.append(str(r["account"]))
+            if r.get("pid"):
+                bits.append(f"PID {r['pid']}")
+            bits.append(tr("已运行 {t}").format(t=format_duration(int(r.get("uptime") or 0)) or "0s"))
+            cap = CaptionLabel("  ·  ".join(bits))
+            cap.setStyleSheet("background: transparent;")
+            col.addWidget(cap)
+            h.addLayout(col, 1)
+            btn = PushButton(tr("结束"))
+            btn.setFixedHeight(28)
+            btn.clicked.connect(lambda _=False, p=int(r.get("pid") or 0): self._stop_one(p))
+            h.addWidget(btn)
+            self._rows_lay.addWidget(frame)
 
 
 class LaunchPage(QWidget):
@@ -71,6 +145,8 @@ class LaunchPage(QWidget):
         backend.crash.connect(self._on_crash)
         backend.login_code.connect(self._on_login_code)
         backend.login_status.connect(self._on_login_status)
+        backend.game_started.connect(self._refresh_running)
+        backend.game_exited.connect(self._refresh_running)
 
         # 扫盘（实例/账号/版本）延后到事件循环空转：首帧先出壳，
         # MainWindow._boot_reload 的合并刷新会覆盖这次 reload。
@@ -463,6 +539,25 @@ class LaunchPage(QWidget):
     def _on_stop(self):
         if self._task_id:
             self.backend.cancel_task(self._task_id)
+
+    def _refresh_running(self, *_):
+        """多开入口按钮：有游戏在跑就显示「运行中 ×N」。"""
+        btn = getattr(self, "running_btn", None)
+        if btn is None:
+            return
+        try:
+            n = len(self.backend.get_running_games() or [])
+        except Exception:
+            n = 0
+        if n:
+            btn.setText(tr("运行中 ×{n}").format(n=n))
+            btn.show()
+        else:
+            btn.hide()
+
+    def _show_running_games(self):
+        RunningGamesDialog(self.backend, self.window()).exec()
+        self._refresh_running()
 
     def _copy_cmd(self):
         try:

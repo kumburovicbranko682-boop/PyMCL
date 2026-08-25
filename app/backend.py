@@ -165,6 +165,7 @@ class BackendAPI(QObject):
         self._titles: dict[str, str] = {}
         self.accounts = AccountManager()
         self._game_proc = None
+        self._game_procs: list[dict] = []   # 运行中游戏注册表（多开管理）
         self._game_lock = threading.Lock()
         self._pending_login = None
         self._manual_downloads = None
@@ -329,11 +330,12 @@ class BackendAPI(QObject):
         worker = self._workers.get(task_id)
         if worker:
             worker.cancel()
-        if task_id != self._launch_task_id:
-            return
+        # 多开时按任务找到对应的游戏进程再杀，而不是只杀最新一个
         with self._game_lock:
-            proc = self._game_proc
-        if proc:
+            procs = [e["proc"] for e in self._game_procs if e.get("task_id") == task_id]
+            if not procs and task_id == self._launch_task_id and self._game_proc is not None:
+                procs = [self._game_proc]
+        for proc in procs:
             try:
                 proc.kill()
             except Exception:
@@ -717,8 +719,8 @@ class BackendAPI(QObject):
         return "Player"
 
     def terracotta_snapshot(self) -> dict:
-        game_on = bool(self._game_proc and getattr(self._game_proc, "poll", lambda: 0)() is None)
-        return terracotta_mod.snapshot(self.terracotta_player(), game_running=game_on)
+        return terracotta_mod.snapshot(self.terracotta_player(),
+                                       game_running=self.is_game_running())
 
     def terracotta_prepare(self) -> str:
         return self.start_task(tr("准备陶瓦联机"), self._terracotta_prepare_impl)
@@ -2372,8 +2374,17 @@ class BackendAPI(QObject):
         proc = GameProcess(cmd, cwd=game_dir, on_line=log, env=env,
                            priority=prep["priority"],
                            window_title=prep.get("window_title") or "")
+        entry = {
+            "proc": proc,
+            "task_id": str(getattr(worker, "task_id", "") or ""),
+            "instance": inst.name,
+            "version": version,
+            "account": props.get("name") or "",
+            "started_at": getattr(proc, "started_at", None) or time.time(),
+        }
         with self._game_lock:
             self._game_proc = proc
+            self._game_procs.append(entry)
         self.game_started.emit()
         code = None
         # 游戏时长统计
@@ -2399,6 +2410,7 @@ class BackendAPI(QObject):
             with self._game_lock:
                 if self._game_proc is proc:
                     self._game_proc = None
+                self._game_procs = [e for e in self._game_procs if e["proc"] is not proc]
             self.game_exited.emit(code)
         if getattr(worker, "_cancelled", False):
             log(tr("已停止游戏"))
@@ -2789,8 +2801,48 @@ class BackendAPI(QObject):
 
     def is_game_running(self) -> bool:
         with self._game_lock:
-            proc = self._game_proc
-        return proc is not None and getattr(proc, "poll", lambda: 0)() is None
+            procs = [e["proc"] for e in self._game_procs]
+            if self._game_proc is not None and self._game_proc not in procs:
+                procs.append(self._game_proc)
+        return any(getattr(p, "poll", lambda: 0)() is None for p in procs)
+
+    def get_running_games(self) -> list[dict]:
+        """运行中的游戏进程列表（多开管理：PCL2 可同时跑多个实例并结束指定游戏）。"""
+        with self._game_lock:
+            entries = list(self._game_procs)
+        now = time.time()
+        out = []
+        for e in entries:
+            proc = e["proc"]
+            if getattr(proc, "poll", lambda: 0)() is not None:
+                continue
+            out.append({
+                "pid": int(getattr(proc, "pid", 0) or 0),
+                "task_id": e.get("task_id") or "",
+                "instance": e.get("instance") or "",
+                "version": e.get("version") or "",
+                "account": e.get("account") or "",
+                "uptime": max(0, int(now - (e.get("started_at") or now))),
+            })
+        return out
+
+    def stop_game(self, pid: int = 0) -> int:
+        """结束游戏进程；pid=0 结束全部运行中的游戏。返回结束的数量。"""
+        with self._game_lock:
+            entries = list(self._game_procs)
+        n = 0
+        for e in entries:
+            proc = e["proc"]
+            if pid and int(getattr(proc, "pid", 0) or 0) != int(pid):
+                continue
+            if getattr(proc, "poll", lambda: 0)() is not None:
+                continue
+            try:
+                proc.kill()
+                n += 1
+            except Exception:
+                pass
+        return n
 
     def allow_multi_instance(self) -> bool:
         return bool(CONFIG.get("allow_multi_instance", False))

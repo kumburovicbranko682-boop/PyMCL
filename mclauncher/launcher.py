@@ -480,6 +480,10 @@ class GameProcess:
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
 
+    @property
+    def pid(self):
+        return self.proc.pid
+
     def last_lines(self):
         return list(self.lines)
 
