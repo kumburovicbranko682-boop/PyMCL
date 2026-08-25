@@ -61,6 +61,7 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         version = _pick_version(dm, slug, mc_version, loader)
 
     seen = set()
+    seen_projects = set()
     downloaded = []
 
     def _download(v, depth=0):
@@ -68,6 +69,8 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         if not vid or vid in seen or depth > 3:
             return
         seen.add(vid)
+        if v.get("project_id"):
+            seen_projects.add(v["project_id"])
         f = _primary_file(v)
         if not f or not f.get("url"):
             return
@@ -79,19 +82,26 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         dm.download(tried[0], dest, sha1=f.get("sha1"), size=f.get("size"),
                     sha512=f.get("sha512"), urls=tried)
         downloaded.append(dest)
-        # 必需依赖（如 Fabric API）递归下载
+        # 必需依赖（如 Fabric API）递归下载。Modrinth 的依赖大多只给
+        # project_id（version_id 为空），这类要按实例 MC 版本 + 加载器
+        # 现场挑一个版本，和 PCL2 / HMCL 行为一致。
         for dep in v.get("dependencies") or []:
             if dep.get("dependency_type") != "required":
                 continue
             dep_vid = dep.get("version_id")
-            if not dep_vid:
-                continue
+            dep_pid = dep.get("project_id")
             try:
-                dep_version = dm.fetch_json(f"{MODRINTH_API}/version/{dep_vid}", timeout=60)
+                if dep_vid:
+                    dep_version = dm.fetch_json(f"{MODRINTH_API}/version/{dep_vid}", timeout=60)
+                elif dep_pid and dep_pid not in seen_projects:
+                    seen_projects.add(dep_pid)
+                    dep_version = _pick_version(dm, dep_pid, mc_version, loader)
+                else:
+                    continue
                 _download(dep_version, depth + 1)
             except Exception as e:
                 utils.log.warning("下载依赖 %s 失败: %s",
-                                  dep.get("file_name") or dep_vid, e)
+                                  dep.get("file_name") or dep_vid or dep_pid, e)
 
     _download(version)
     if not downloaded:
@@ -765,13 +775,20 @@ def _resolve_mods_dir(instance: Instance, mods_dir=None) -> Path:
     return folder
 
 
+# CurseForge dependencies[].relationType == 3 表示必装依赖
+CF_RELATION_REQUIRED = 3
+
+
 def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
                            mc_version=None, loader=None, api_key=None, on_progress=None,
-                           file_id=None, mods_dir=None):
-    """安装 CurseForge 模组：自动匹配实例 MC 版本与加载器。"""
+                           file_id=None, mods_dir=None, _seen=None, _depth=0):
+    """安装 CurseForge 模组：自动匹配实例 MC 版本与加载器，含必需依赖。"""
     inst = instance
     inst.ensure_standard_dirs()
     dest_dir = _resolve_mods_dir(inst, mods_dir)
+    if _seen is None:
+        _seen = set()
+    _seen.add(str(addon_id))
     if not mc_version:
         mc_version = detect_mc_version(inst)
     if loader is None:
@@ -818,6 +835,9 @@ def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
     filename = f.get("fileName") or f"mod-{addon_id}-{file_id}.jar"
     download_url = f.get("downloadUrl")  # API 可能返回此字段
     dest = dest_dir / filename
+    # 官方 API 带 sha1（algo=1）：传给下载器做完整性校验，已有相同文件时直接跳过
+    sha1 = next((h.get("value") for h in (f.get("hashes") or [])
+                 if h.get("algo") == 1 and h.get("value")), None)
 
     last_err = None
     # 候选 URL：API 返回的 downloadUrl → 带文件名的 CDN 直链 → 不带文件名的通用 URL
@@ -828,6 +848,7 @@ def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
     url_sets.append(_candidate_cf_urls(addon_id, file_id, None))
 
     tried = set()
+    ok = False
     for urls in url_sets:
         for url in urls:
             if url in tried:
@@ -836,12 +857,35 @@ def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
             try:
                 if on_progress:
                     on_progress(f"下载 CurseForge 模组 {filename}", 0, 1)
-                dm.download(url, dest, timeout=900)
-                return {"source": "curseforge", "title": mod.get("name"), "files": [dest.name]}
+                dm.download(url, dest, sha1=sha1, timeout=900)
+                ok = True
+                break
             except Exception as e:
                 last_err = e
                 utils.remove_tree(dest)
-    raise ModError(f"CurseForge 模组下载失败: {last_err}")
+        if ok:
+            break
+    if not ok:
+        raise ModError(f"CurseForge 模组下载失败: {last_err}")
+
+    files = [dest.name]
+    # 必需依赖递归安装（对齐 PCL2 / HMCL）。单个依赖失败只警告，不拖垮主模组。
+    if _depth < 3:
+        for dep in f.get("dependencies") or []:
+            if dep.get("relationType") != CF_RELATION_REQUIRED:
+                continue
+            dep_id = dep.get("modId")
+            if not dep_id or str(dep_id) in _seen:
+                continue
+            try:
+                sub = install_curseforge_mod(
+                    dm, dep_id, inst, mc_version=mc_version, loader=loader,
+                    api_key=api_key, on_progress=on_progress, mods_dir=dest_dir,
+                    _seen=_seen, _depth=_depth + 1)
+                files.extend((sub or {}).get("files") or [])
+            except Exception as e:
+                utils.log.warning("安装 CurseForge 依赖 %s 失败: %s", dep_id, e)
+    return {"source": "curseforge", "title": mod.get("name"), "files": files}
 
 
 def install_cf_mod(dm: DownloadManager, url, instance: Instance, on_progress=None, mods_dir=None):
