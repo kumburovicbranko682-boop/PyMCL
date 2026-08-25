@@ -105,6 +105,11 @@ int pymcl_zip_extract_one(const char *zip_path, const char *inner, const char *d
 int pymcl_open_folder(const char *path);
 int pymcl_run_process(const char **argv, int argc, const char *cwd,
                       void (*on_line)(void *, const char *), void *ud, int timeout_sec);
+/* pymcl_run_process_cancelable 在取消时的返回值（区别于失败 -1） */
+#define PYMCL_PROC_CANCELLED (-2)
+int pymcl_run_process_cancelable(const char **argv, int argc, const char *cwd,
+                                 void (*on_line)(void *, const char *), void *ud,
+                                 int timeout_sec, int (*cancel)(void *), void *cud);
 HANDLE pymcl_spawn_process(const char **argv, int argc, const char *cwd, HANDLE *out_read);
 void pymcl_dashed_uuid(const char *in, char out[40]);
 void pymcl_offline_uuid(const char *name, char out[40]);
@@ -262,6 +267,9 @@ void backend_shutdown(void);
 int server_run(const char *host, int port, const char *token);
 cJSON *py_rpc_call(const char *method, cJSON *params);
 cJSON *py_rpc_call_t(const char *method, cJSON *params, int timeout_secs);
+/* 带取消回调的变体：cancel(cud) 返回非 0 时立即杀掉 Python 子进程 */
+cJSON *py_rpc_call_c(const char *method, cJSON *params, int timeout_secs,
+                     int (*cancel)(void *), void *cud);
 cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit);
 
 #ifdef __cplusplus

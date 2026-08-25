@@ -196,7 +196,8 @@ static void *task_run(void *p) {
             /* OptiFine / LiteLoader 组合装只有 Python 侧有实现；原生路径
              * 以前直接忽略这两个勾选，装个原版还报「安装完成」。 */
             ctx_log(t, "OptiFine/LiteLoader 组合安装交由 Python 后端…");
-            cJSON *r = py_rpc_call_t(t->method, t->args, 3600);
+            /* 传入取消回调：用户点「取消」时真正杀掉 Python 子进程 */
+            cJSON *r = py_rpc_call_c(t->method, t->args, 3600, ctx_cancel, t);
             ok = r != NULL;
             if (ok) {
                 const char *s = cJSON_GetStringValue(r);
@@ -406,7 +407,9 @@ static void *task_run(void *p) {
          * C 侧没有原生实现。任务线程里同步走 py_rpc（py_rpc.py 会等 Python
          * 侧任务真正结束再返回）。进度/日志事件带不回来，但成败是真的。 */
         ctx_log(t, "任务交由 Python 后端执行…");
-        cJSON *r = py_rpc_call_t(t->method, t->args, 3600);
+        /* 传入取消回调：以前这里的任务点「取消」只翻个标志位，
+         * Python 子进程照样跑满（最长一小时），任务卡在列表里假活着。 */
+        cJSON *r = py_rpc_call_c(t->method, t->args, 3600, ctx_cancel, t);
         ok = r != NULL;
         if (ok) {
             const char *s = cJSON_GetStringValue(r);

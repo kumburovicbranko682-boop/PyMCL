@@ -376,8 +376,9 @@ static char *join_cmdline(const char **argv, int argc) {
     }
     return s;
 }
-int pymcl_run_process(const char **argv, int argc, const char *cwd,
-                      void (*on_line)(void *, const char *), void *ud, int timeout_sec) {
+int pymcl_run_process_cancelable(const char **argv, int argc, const char *cwd,
+                                 void (*on_line)(void *, const char *), void *ud,
+                                 int timeout_sec, int (*cancel)(void *), void *cud) {
     HANDLE rd = NULL;
     HANDLE proc = pymcl_spawn_process(argv, argc, cwd, &rd);
     if (!proc) return -1;
@@ -400,6 +401,12 @@ int pymcl_run_process(const char **argv, int argc, const char *cwd,
         }
         DWORD st = WaitForSingleObject(proc, 50);
         if (st == WAIT_OBJECT_0) break;
+        if (cancel && cancel(cud)) {
+            /* 用户点了「取消」：真正杀掉子进程，而不是等它自己跑完 */
+            TerminateProcess(proc, 1);
+            CloseHandle(rd); CloseHandle(proc);
+            return PYMCL_PROC_CANCELLED;
+        }
         if (deadline && GetTickCount() > deadline) {
             TerminateProcess(proc, 1);
             CloseHandle(rd); CloseHandle(proc);
@@ -411,6 +418,11 @@ int pymcl_run_process(const char **argv, int argc, const char *cwd,
     GetExitCodeProcess(proc, &code);
     CloseHandle(rd); CloseHandle(proc);
     return (int)code;
+}
+
+int pymcl_run_process(const char **argv, int argc, const char *cwd,
+                      void (*on_line)(void *, const char *), void *ud, int timeout_sec) {
+    return pymcl_run_process_cancelable(argv, argc, cwd, on_line, ud, timeout_sec, NULL, NULL);
 }
 HANDLE pymcl_spawn_process(const char **argv, int argc, const char *cwd, HANDLE *out_read) {
     SECURITY_ATTRIBUTES sa = { sizeof(sa), NULL, TRUE };

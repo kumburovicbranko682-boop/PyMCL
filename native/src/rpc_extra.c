@@ -22,10 +22,15 @@ static int find_python(char *out, size_t n) {
 }
 
 cJSON *py_rpc_call(const char *method, cJSON *params) {
-    return py_rpc_call_t(method, params, 120);
+    return py_rpc_call_c(method, params, 120, NULL, NULL);
 }
 
 cJSON *py_rpc_call_t(const char *method, cJSON *params, int timeout_secs) {
+    return py_rpc_call_c(method, params, timeout_secs, NULL, NULL);
+}
+
+cJSON *py_rpc_call_c(const char *method, cJSON *params, int timeout_secs,
+                     int (*cancel)(void *), void *cud) {
     char py[PYMCL_PATH], script[PYMCL_PATH], pin[PYMCL_PATH], pout[PYMCL_PATH], tmpdir[PYMCL_PATH];
     find_python(py, sizeof(py));
     pymcl_path_join3(script, sizeof(script), g_root, "native\\tools", "py_rpc.py");
@@ -71,9 +76,16 @@ cJSON *py_rpc_call_t(const char *method, cJSON *params, int timeout_secs) {
     argv[argc++] = pin;
     argv[argc++] = "--out";
     argv[argc++] = pout;
-    int rc = pymcl_run_process(argv, argc, g_root, NULL, NULL,
-                               timeout_secs > 0 ? timeout_secs : 120);
+    int rc = pymcl_run_process_cancelable(argv, argc, g_root, NULL, NULL,
+                                          timeout_secs > 0 ? timeout_secs : 120,
+                                          cancel, cud);
     DeleteFileA(pin);
+    if (rc == PYMCL_PROC_CANCELLED) {
+        /* 用户取消：子进程已被杀，别再去读残缺的输出文件 */
+        DeleteFileA(pout);
+        pymcl_set_error("已取消");
+        return NULL;
+    }
     cJSON *wrap = pymcl_read_json(pout);
     DeleteFileA(pout);
     if (!wrap) {
