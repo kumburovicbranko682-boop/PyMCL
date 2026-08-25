@@ -991,6 +991,7 @@ class BackendAPI(QObject):
             "show_hidden_versions": bool(CONFIG.get("show_hidden_versions", False)),
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
+            "game_lang": CONFIG.get("game_lang") or "auto",
             "instances_dir": str(CONFIG.get("instances_dir") or ".minecraft"),
             "game_dir": str(CONFIG.instances_dir),
             "root": str(utils.ROOT),
@@ -1065,6 +1066,7 @@ class BackendAPI(QObject):
             "first_run": bool(data["first_run"]) if "first_run" in data else bool(CONFIG.get("first_run", False)),
             "offline_skin": data.get("offline_skin") or CONFIG.get("offline_skin") or "default",
             "default_java": _keep("default_java"),
+            "game_lang": data.get("game_lang") or CONFIG.get("game_lang") or "auto",
         })
         if "show_hidden_versions" in data:
             CONFIG.set("show_hidden_versions", bool(data.get("show_hidden_versions")))
@@ -2129,6 +2131,9 @@ class BackendAPI(QObject):
             log(f"版本隔离: {prep['settings']['isolation']} → {game_dir}")
         if prep["global_mods"]:
             log(f"已应用 {prep['global_mods']} 个全局模组")
+        if prep.get("game_lang"):
+            log(tr("首次启动：游戏语言已自动设为 {lang}（可在设置或游戏内修改）").format(
+                lang=prep["game_lang"]))
         launch_flow.run_hook(
             prep["settings"].get("pre_launch") or "", game_dir, log=log,
             wait=bool(prep.get("pre_launch_wait", True)))

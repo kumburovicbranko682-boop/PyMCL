@@ -50,6 +50,9 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     settings = version_settings.load(instance, version_id)
     gdir = version_settings.apply_isolation(instance, version_id, settings)
     n = global_mods.apply(gdir / "mods")
+    from . import game_options
+    game_lang = game_options.ensure_lang(
+        gdir, mc_version=game_options.base_mc_version(instance, version_id))
     mem, mem_src = resolve_memory(settings, memory_mb)
     extras = [str(a) for a in (extra_game_args or []) if a not in (None, "")]
     extras += split_args(settings.get("game_args"))
@@ -80,6 +83,7 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "window_height": _positive(settings.get("window_height")),
         "window_title": (settings.get("window_title") or "").strip(),
         "wrapper": str(settings.get("wrapper") or "").strip(),
+        "game_lang": game_lang,
     }
 
 

@@ -95,6 +95,8 @@ DEFAULT_CONFIG = {
     "offline_skin": "default",
     "allow_multi_instance": False,
     "language": "zh_CN",
+    # 首次启动自动写入 options.txt 的游戏语言：auto=跟随启动器 / off=不写 / zh_cn 等具体代码
+    "game_lang": "auto",
 }
 
 

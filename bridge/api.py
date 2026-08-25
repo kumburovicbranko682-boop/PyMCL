@@ -722,6 +722,7 @@ class BackendAPI:
             "game_dir": str(CONFIG.instances_dir),
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
+            "game_lang": CONFIG.get("game_lang") or "auto",
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
         }
 
@@ -780,7 +781,8 @@ class BackendAPI:
         if "use_system_proxy" in data:
             patch["use_system_proxy"] = bool(data.get("use_system_proxy"))
         for key in ("launcher_visibility", "gc_preset", "custom_homepage", "homepage_mode",
-                    "window_mode", "offline_skin", "instances_dir", "default_java"):
+                    "window_mode", "offline_skin", "instances_dir", "default_java",
+                    "game_lang"):
             if key in data:
                 patch[key] = data.get(key)
         if "download_limit_kbps" in data:
@@ -1707,6 +1709,8 @@ class BackendAPI:
             log(f"版本设置内存: {memory_mb} MB")
         extra_game_args = prep["extra_game_args"]
         game_dir = prep["game_dir"]
+        if prep.get("game_lang"):
+            log(f"首次启动：游戏语言已自动设为 {prep['game_lang']}（可在设置或游戏内修改）")
         launch_flow.run_hook(
             prep["settings"].get("pre_launch") or "", game_dir, log=log,
             wait=bool(prep.get("pre_launch_wait", True)))
