@@ -46,6 +46,10 @@ class InstallWizardDialog(MessageBoxBase):
         row2.addWidget(self.loader_ver, 1)
         lay.addLayout(row2)
 
+        # Fabric API / QSL 随装（HMCL 安装页同款可选组件）
+        self.fabric_api = CheckBox(tr("同时安装 Fabric API（多数 Fabric 模组的必备前置）"))
+        self.fabric_api.setChecked(True)
+        lay.addWidget(self.fabric_api)
         self.optifine = CheckBox(tr("同时安装 OptiFine（Forge / 原版）"))
         self.liteloader = CheckBox(tr("同时安装 LiteLoader（1.7–1.12）"))
         self.skip_assets = CheckBox(tr("跳过资源文件校验（加快重装）"))
@@ -82,6 +86,12 @@ class InstallWizardDialog(MessageBoxBase):
         self.optifine.setEnabled(of_ok)
         if not of_ok:
             self.optifine.setChecked(False)
+        fab_ok = primary in ("Fabric", "Quilt")
+        self.fabric_api.setEnabled(fab_ok)
+        self.fabric_api.setText(
+            tr("同时安装 QSL / Quilted Fabric API（多数 Quilt 模组的必备前置）")
+            if primary == "Quilt"
+            else tr("同时安装 Fabric API（多数 Fabric 模组的必备前置）"))
 
     def _reload_loaders(self):
         self._sync()
@@ -158,6 +168,7 @@ class InstallWizardDialog(MessageBoxBase):
             "optifine": self.optifine.isChecked(),
             "liteloader": self.liteloader.isChecked(),
             "skip_assets": self.skip_assets.isChecked(),
+            "fabric_api": self.fabric_api.isEnabled() and self.fabric_api.isChecked(),
         }
         if lv:
             extra["loader_version"] = str(lv)

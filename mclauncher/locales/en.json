@@ -667,6 +667,8 @@
   "最新": "Latest",
   "推荐": "Recommended",
   "测试版": "Beta",
+  "同时安装 Fabric API（多数 Fabric 模组的必备前置）": "Also install Fabric API (required by most Fabric mods)",
+  "同时安装 QSL / Quilted Fabric API（多数 Quilt 模组的必备前置）": "Also install QSL / Quilted Fabric API (required by most Quilt mods)",
   "最近提交": "Recent commits",
   "朋友是公网就直连": "Direct connect if your friend has a public IP",
   "朋友需先对局域网开放世界，并在路由器映射该端口。然后输入他的公网地址。": "Friend must open to LAN and port-forward, then enter their public address.",

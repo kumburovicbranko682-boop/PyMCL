@@ -81,6 +81,23 @@ def install_game(installer: Installer, version: str, loader: str = "无",
         else:
             vid = installer.install_optifine(mc, typ=of_typ, patch=of_patch)
 
+    # Fabric API / QSL 随装（HMCL 安装页同款可选组件）。
+    # 失败只提示不炸游戏安装：加载器已装好，前置可以稍后手动补。
+    if extra.get("fabric_api"):
+        if primary in ("fabric", "quilt"):
+            from . import mods as mods_mod
+            slug = "fabric-api" if primary == "fabric" else "qsl"
+            try:
+                info = mods_mod.install_modrinth_mod(
+                    installer.dm, slug, installer.instance,
+                    mc_version=mc, loader=primary)
+                installer._note(
+                    f"{slug} {info.get('version') or ''} 已放入 mods（{', '.join(info.get('files') or [])}）")
+            except Exception as exc:
+                installer._note(f"{slug} 安装失败（可稍后到下载页手动安装）: {exc}")
+        else:
+            installer._note("Fabric API 只适用于 Fabric / Quilt，已跳过")
+
     if custom and custom != vid:
         from . import version_ops as vops
         try:
