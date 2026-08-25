@@ -169,6 +169,31 @@ def _ping_impl(host: str, port: int, timeout: float) -> dict:
     }
 
 
+def favicon_base64(favicon) -> str:
+    """把 SLP 返回的 favicon 规范成 servers.dat icon 字段的纯 base64。
+
+    输入可以是 data URI（data:image/png;base64,xxx）或裸 base64；
+    校验能解码、是 PNG、且不超过 512KB，不合法一律返回空串。
+    游戏的多人列表就是从 servers.dat 的 icon 读图标的。
+    """
+    import base64
+    text = str(favicon or "").strip()
+    if not text:
+        return ""
+    if text.startswith("data:"):
+        _head, _sep, text = text.partition(",")
+        if not _sep:
+            return ""
+    text = "".join(text.split())
+    try:
+        raw = base64.b64decode(text, validate=True)
+    except Exception:
+        return ""
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n") or len(raw) > 512 * 1024:
+        return ""
+    return base64.b64encode(raw).decode("ascii")
+
+
 def ping(host: str, port: int = 25565, timeout: float = 5.0) -> dict:
     """查询服务器状态。
 

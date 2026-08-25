@@ -1069,5 +1069,6 @@
   "这个世界还没有安装数据包": "This world has no data packs installed",
   "从世界「{world}」删除数据包 {name}？": "Delete data pack {name} from world \"{world}\"?",
   "打开 mcmod.cn 百科页": "Open the mcmod.cn wiki page",
-  "按文件名或中文名筛选…": "Filter by file name or Chinese name…"
+  "按文件名或中文名筛选…": "Filter by file name or Chinese name…",
+  "服务器不存在": "Server does not exist"
 }

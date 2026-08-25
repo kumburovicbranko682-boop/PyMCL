@@ -2,9 +2,10 @@
 """服务器列表管理页。"""
 from __future__ import annotations
 
+import base64
 import re
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QHeaderView, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
@@ -26,6 +27,20 @@ _GLOBE_ICON = (getattr(FIF, "GLOBE", None) or getattr(FIF, "WORLD", None)
                or FIF.CLOUD_DOWNLOAD)
 
 _PORT_RE = re.compile(r"^\d{1,5}$")
+
+
+def _server_icon(b64: str):
+    """servers.dat icon 字段（纯 base64 PNG）→ QIcon；坏数据返回 None。"""
+    if not b64:
+        return None
+    try:
+        raw = base64.b64decode(str(b64), validate=True)
+    except Exception:
+        return None
+    pix = QPixmap()
+    if not pix.loadFromData(raw) or pix.isNull():
+        return None
+    return QIcon(pix.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
 
 class _LanWorldsDialog(MessageBoxBase):
@@ -204,7 +219,11 @@ class ServerPage(QWidget):
         self._body.setCurrentWidget(self.table)
         self.table.setRowCount(len(self._servers))
         for i, s in enumerate(self._servers):
-            self.table.setItem(i, 0, QTableWidgetItem(s.get("name", "?")))
+            name_item = QTableWidgetItem(s.get("name", "?"))
+            icon = _server_icon(s.get("icon", ""))
+            if icon:
+                name_item.setIcon(icon)
+            self.table.setItem(i, 0, name_item)
             self.table.setItem(i, 1, QTableWidgetItem(s.get("ip", "")))
             self.table.setItem(i, 2, QTableWidgetItem(str(s.get("port", 25565))))
             self.table.setItem(i, 3, QTableWidgetItem("—"))
@@ -259,11 +278,13 @@ class ServerPage(QWidget):
         self._status_pending = len(self._servers)
         self.status_btn.setEnabled(False)
         self.status_btn.setText(tr("查询中…"))
+        inst = self._instance
         for i, s in enumerate(self._servers):
             self._set_status_cell(i, QTableWidgetItem(tr("查询中…")))
-            host, port = s.get("ip", ""), s.get("port", 25565)
+            # ping_listed_server 会顺手把 favicon 写回 servers.dat 的 icon 字段，
+            # 游戏多人列表首开就有图标
             self.backend.call_async(
-                lambda h=host, p=port: self.backend.ping_server(h, p),
+                lambda idx=i: self.backend.ping_listed_server(inst, idx),
                 lambda result, row=i: self._on_status(token, row, result),
                 lambda err, row=i: self._on_status(token, row, {"online": False, "error": str(err)}),
             )
@@ -301,6 +322,12 @@ class ServerPage(QWidget):
             if result.get("error"):
                 item.setToolTip(str(result["error"]))
         self._set_status_cell(row, item)
+        # 拿到 favicon 就地更新名称列的图标（后端已写回 servers.dat）
+        icon = _server_icon(result.get("icon") or "")
+        if icon and 0 <= row < self.table.rowCount():
+            name_item = self.table.item(row, 0)
+            if name_item is not None:
+                name_item.setIcon(icon)
 
     def _on_add(self):
         dlg = InputDialog(tr("添加服务器"), tr("服务器名称"), placeholder=tr("可选"))
