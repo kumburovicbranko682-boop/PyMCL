@@ -165,6 +165,22 @@ static int pint(cJSON *a, const char *k, int def) {
     return def;
 }
 
+/* 目录页「安装所选」会在 extra 里钉住 version_id/file_id。原生安装器一律装
+ * 最新版，钉了版本的请求必须落到 Python 实现，否则用户挑的旧版被静默换掉。 */
+static int extra_pins_version(cJSON *args) {
+    cJSON *x = cJSON_GetObjectItem(args, "extra");
+    if (!cJSON_IsObject(x)) return 0;
+    const char *keys[] = { "version_id", "file_id" };
+    for (size_t i = 0; i < 2; i++) {
+        cJSON *v = cJSON_GetObjectItem(x, keys[i]);
+        if (!v || cJSON_IsNull(v)) continue;
+        if (cJSON_IsString(v)) {
+            if (v->valuestring && v->valuestring[0]) return 1;
+        } else return 1;
+    }
+    return 0;
+}
+
 static void on_login_code(void *ud, const char *code, const char *uri) {
     (void)ud;
     cJSON *o = cJSON_CreateObject();
@@ -217,19 +233,20 @@ static void *task_run(void *p) {
         ok = exe != NULL;
         if (ok) snprintf(msg, sizeof(msg), "Java %d 就绪: %s", maj, exe);
         free(exe);
-    } else if (strcmp(t->method, "install_mod") == 0) {
+    } else if (strcmp(t->method, "install_mod") == 0 && !extra_pins_version(t->args)) {
         const char *name = pstr(t->args, "name", "");
         const char *inst = pstr(t->args, "instance", "default");
         cJSON *extra = cJSON_GetObjectItem(t->args, "extra");
         ok = install_mod(inst, name, extra, &ctx) == 0;
         if (ok) snprintf(msg, sizeof(msg), "模组安装完成");
-    } else if (strcmp(t->method, "install_modpack") == 0) {
+    } else if (strcmp(t->method, "install_modpack") == 0 && !extra_pins_version(t->args)) {
         ok = install_modpack(pstr(t->args, "name", ""), pstr(t->args, "source", "Modrinth"),
                              cJSON_GetObjectItem(t->args, "extra"), &ctx) == 0;
         if (ok) snprintf(msg, sizeof(msg), "整合包安装完成");
-    } else if (strcmp(t->method, "install_shader") == 0 ||
-               strcmp(t->method, "install_resourcepack") == 0 ||
-               strcmp(t->method, "install_datapack") == 0) {
+    } else if ((strcmp(t->method, "install_shader") == 0 ||
+                strcmp(t->method, "install_resourcepack") == 0 ||
+                strcmp(t->method, "install_datapack") == 0)
+               && !extra_pins_version(t->args)) {
         const char *kind = strstr(t->method, "shader") ? "shader" :
             strstr(t->method, "resource") ? "resourcepack" : "datapack";
         ok = install_content(kind, pstr(t->args, "instance", "default"),
