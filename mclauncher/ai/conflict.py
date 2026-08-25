@@ -233,8 +233,8 @@ def inspect_jar(path: Path) -> dict:
     return info
 
 
-def _mod_files(instance: Instance) -> list[Path]:
-    mods_dir = instance.path / "mods"
+def _mod_files(instance: Instance, mods_dir: Path | None = None) -> list[Path]:
+    mods_dir = Path(mods_dir) if mods_dir else instance.path / "mods"
     if not mods_dir.is_dir():
         return []
     out = []
@@ -254,10 +254,15 @@ _SKIP_DEP = {
 }
 
 
-def scan_conflicts(instance: Instance) -> dict:
+def scan_conflicts(instance: Instance, mods_dir: Path | None = None) -> dict:
+    """扫描 mods 目录：重复安装、加载器不匹配、缺依赖、互不兼容。
+
+    mods_dir 不传时用实例共享 mods；传了则扫指定目录（版本隔离的
+    独立 mods 目录）。
+    """
     loader = detect_loader(instance)
     mc = detect_mc_version(instance)
-    files = _mod_files(instance)
+    files = _mod_files(instance, mods_dir=mods_dir)
     mods = [inspect_jar(p) for p in files]
     by_id = {}
     issues = []
@@ -278,7 +283,15 @@ def scan_conflicts(instance: Instance) -> dict:
                 "message": f"模组 {mid} 装了 {len(enabled)} 份",
             })
 
-    present = set(by_id)
+    # 只有启用中的模组才算「已提供」；provides 声明的虚拟 id 同样计入，
+    # 否则会误报缺依赖。
+    present = set()
+    for m in mods:
+        if m.get("enabled"):
+            mid = (m.get("id") or "").lower()
+            if mid:
+                present.add(mid)
+            present.update(str(p).lower() for p in (m.get("provides") or []) if p)
     for m in mods:
         if not m.get("enabled"):
             continue

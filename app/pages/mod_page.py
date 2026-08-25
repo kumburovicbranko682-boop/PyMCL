@@ -13,13 +13,14 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
-    MessageBox, PushButton, SubtitleLabel, SwitchButton, TransparentPushButton,
-    TransparentToolButton,
+    MessageBox, MessageBoxBase, PushButton, SubtitleLabel, SwitchButton,
+    TransparentPushButton, TransparentToolButton,
 )
 
 from mclauncher.config import CONFIG
 from mclauncher.i18n import tr
 from ..pcl_chrome import Theme, ghost_btn_qss, row_qss
+from ..ui_alive import guard
 from ..widgets import EmptyState, IconTile, Pill
 from .catalog_page import PclCard
 
@@ -80,6 +81,79 @@ class _ModRow(QFrame):
         lay.addWidget(btn)
 
 
+class ConflictReportDialog(MessageBoxBase):
+    """模组冲突扫描结果：重复安装 / 加载器不匹配 / 缺依赖 / 互不兼容。"""
+
+    def __init__(self, report: dict, parent=None):
+        super().__init__(parent)
+        report = report or {}
+        self._type_labels = {
+            "duplicate_id": tr("重复安装"),
+            "loader_mismatch": tr("加载器不匹配"),
+            "missing_dep": tr("缺少依赖"),
+            "breaks": tr("互不兼容"),
+        }
+        self.viewLayout.addWidget(SubtitleLabel(tr("模组冲突扫描"), self))
+        head = CaptionLabel(
+            tr("实例 {inst} · {loader} {mc} · 共 {n} 个模组（启用 {on}）").format(
+                inst=report.get("instance") or "?",
+                loader=report.get("loader") or tr("未知加载器"),
+                mc=report.get("mc_version") or "",
+                n=report.get("mod_count") or 0,
+                on=report.get("enabled") or 0), self)
+        head.setWordWrap(True)
+        self.viewLayout.addWidget(head)
+
+        issues = list(report.get("issues") or [])
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        host = QWidget(self)
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        for issue in issues:
+            lay.addWidget(self._issue_row(issue))
+        lay.addStretch(1)
+        scroll.setWidget(host)
+        scroll.setMinimumHeight(min(320, max(90, 64 * len(issues))))
+        self.viewLayout.addWidget(scroll)
+
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(560)
+
+    def _issue_row(self, issue: dict) -> QWidget:
+        row = QFrame(self)
+        row.setObjectName("conflictRow")
+        row.setStyleSheet(row_qss("conflictRow"))
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(10, 8, 10, 8)
+        lay.setSpacing(10)
+        label = self._type_labels.get(issue.get("type") or "", issue.get("type") or "?")
+        lay.addWidget(Pill(label, "#D65C5C"))
+        box = QVBoxLayout()
+        box.setSpacing(1)
+        msg = QLabel(str(issue.get("message") or ""))
+        msg.setWordWrap(True)
+        msg.setStyleSheet(f"color: {Theme.title}; font-size: 13px; background: transparent;")
+        box.addWidget(msg)
+        files = issue.get("files") or ([issue.get("file")] if issue.get("file") else [])
+        bits = [", ".join(str(f) for f in files if f)]
+        if issue.get("need"):
+            bits.append(tr("需要: {dep}").format(dep=issue["need"]))
+        if issue.get("other"):
+            bits.append(tr("冲突对象: {mod}").format(mod=issue["other"]))
+        detail = " · ".join(b for b in bits if b)
+        if detail:
+            cap = CaptionLabel(detail)
+            cap.setStyleSheet(f"color: {Theme.muted}; font-size: 11px; background: transparent;")
+            cap.setWordWrap(True)
+            box.addWidget(cap)
+        lay.addLayout(box, 1)
+        return row
+
+
 class ModManagerPage(QWidget):
     def __init__(self, backend, parent=None):
         super().__init__(parent)
@@ -127,7 +201,8 @@ class ModManagerPage(QWidget):
         self.folder_btn = TransparentPushButton(FIF.FOLDER, tr("打开 mods 文件夹"))
         self.import_btn = TransparentPushButton(FIF.ADD, tr("导入 jar"))
         self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
-        for b in (self.folder_btn, self.import_btn, self.update_btn):
+        self.conflict_btn = TransparentPushButton(FIF.SEARCH, tr("冲突扫描"))
+        for b in (self.folder_btn, self.import_btn, self.update_btn, self.conflict_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
         cv.addLayout(bar)
@@ -159,6 +234,7 @@ class ModManagerPage(QWidget):
         self.folder_btn.clicked.connect(self._open_folder)
         self.import_btn.clicked.connect(self._import_local)
         self.update_btn.clicked.connect(self._check_updates)
+        self.conflict_btn.clicked.connect(self._scan_conflicts)
         self.setAcceptDrops(True)
 
         self._reload_instances()
@@ -313,6 +389,41 @@ class ModManagerPage(QWidget):
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+
+    def _scan_conflicts(self):
+        inst = self._current_instance()
+        ver = self._current_version()
+        self.conflict_btn.setEnabled(False)
+        self.conflict_btn.setText(tr("扫描中…"))
+
+        def _restore():
+            self.conflict_btn.setEnabled(True)
+            self.conflict_btn.setText(tr("冲突扫描"))
+
+        def _done(report):
+            _restore()
+            report = report or {}
+            if not report.get("mod_count"):
+                InfoBar.info(tr("没有模组"), tr("当前目录里没有可扫描的模组。"), parent=self,
+                             position=InfoBarPosition.TOP, duration=3000)
+                return
+            if not report.get("issue_count"):
+                InfoBar.success(
+                    tr("未发现冲突"),
+                    tr("已扫描 {n} 个模组，没有发现重复、缺依赖或不兼容。").format(
+                        n=report.get("mod_count")),
+                    parent=self, position=InfoBarPosition.TOP, duration=4000)
+                return
+            ConflictReportDialog(report, self.window()).exec()
+
+        def _fail(err):
+            _restore()
+            InfoBar.error(tr("扫描失败"), str(err), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        self.backend.call_async(
+            lambda i=inst, v=ver: self.backend.scan_mod_conflicts(i, v),
+            guard(self, _done), guard(self, _fail))
 
     # ------------------------------------------------------------------
     def dragEnterEvent(self, event):
