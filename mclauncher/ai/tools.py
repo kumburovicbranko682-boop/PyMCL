@@ -487,12 +487,15 @@ def execute_tool(backend, name: str, args: dict, wait=True, cancelled=None):
             out["hint"] = note
             return out
         return f"{out}\n{note}"
+    # 注意：这里的 backend 可能是 app.backend（Qt，ui_changed 是 Signal）也可能是
+    # bridge.api（无 Qt，只有 _emit）。以前三个分支直接 backend.ui_changed.emit()，
+    # 在桥上做完动作后必抛 AttributeError——实例建了/Mod 切了，AI 却报「工具失败」。
+    # 统一走门面方法，让各门面自己用正确的方式广播刷新。
     if name == "create_instance":
         raw = args.get("name") or "游戏"
-        inst = Instance(unique_instance_name(raw))
-        inst.create()
-        backend.ui_changed.emit()
-        return f"已创建实例 {inst.name}"
+        new_name = unique_instance_name(raw)
+        backend.create_instance(new_name)
+        return f"已创建实例 {new_name}"
     if name == "delete_instance":
         backend.delete_instance(args.get("name"))
         return f"已删除实例 {args.get('name')}"
@@ -500,12 +503,10 @@ def execute_tool(backend, name: str, args: dict, wait=True, cancelled=None):
         backend.delete_mod(inst_name, args.get("filename"))
         return f"已删除 {args.get('filename')}"
     if name == "disable_mod":
-        new = mods_mod.set_mod_enabled(backend._instance(inst_name), args.get("filename"), False)
-        backend.ui_changed.emit()
+        new = backend.disable_mod(inst_name, args.get("filename"))
         return f"已禁用 → {new}"
     if name == "enable_mod":
-        new = mods_mod.set_mod_enabled(backend._instance(inst_name), args.get("filename"), True)
-        backend.ui_changed.emit()
+        new = backend.enable_mod(inst_name, args.get("filename"))
         return f"已启用 → {new}"
     if name == "get_java_list":
         return backend.get_java_list(False)
