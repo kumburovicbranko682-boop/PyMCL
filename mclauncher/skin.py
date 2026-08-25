@@ -67,3 +67,84 @@ def local_skin(account: dict | None) -> dict:
         return {}
     model = "slim" if acc.get("skin_model") == "slim" else "classic"
     return {"local_file": str(p), "model": model}
+
+
+# ---------------------------------------------------------------- 皮肤原图获取
+# 3D 预览需要皮肤纹理 PNG 本体（不是渲染服务出的成品图）。
+MOJANG_SESSION_PROFILE = "https://sessionserver.mojang.com/session/minecraft/profile/{uuid}"
+
+
+def _profile_skin(profile_url: str, timeout: float = 12) -> dict:
+    """从 yggdrasil 会话档案解出皮肤纹理 {url, model}；默认皮肤返回 {}。"""
+    import base64
+    import json
+    import requests
+    resp = requests.get(profile_url, timeout=timeout)
+    if resp.status_code != 200:
+        return {}
+    for prop in resp.json().get("properties") or []:
+        if prop.get("name") != "textures":
+            continue
+        try:
+            payload = json.loads(base64.b64decode(prop.get("value") or ""))
+        except (ValueError, TypeError):
+            continue
+        entry = (payload.get("textures") or {}).get("SKIN") or {}
+        url = entry.get("url")
+        if url:
+            model = ("slim" if (entry.get("metadata") or {}).get("model") == "slim"
+                     else "classic")
+            return {"url": str(url), "model": model}
+    return {}
+
+
+def _texture_cache_path(url: str) -> Path:
+    import hashlib
+    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
+    return utils.ROOT / "cache" / "skin_textures" / f"{digest}.png"
+
+
+def fetch_skin_texture(account: dict | None, timeout: float = 12) -> dict:
+    """任意账号的皮肤纹理 PNG → 本地文件 {file, model}。
+
+    离线账号直接用本地皮肤文件；微软 / 皮肤站 / 统一通行证账号先查
+    会话档案拿纹理 URL，再按 URL 缓存下载（纹理 URL 内容寻址，命中
+    缓存零网络）。默认皮肤或失败返回 {}，调用方退回原有预览方式。
+    """
+    acc = account or {}
+    local = local_skin(acc)
+    if local:
+        return {"file": local["local_file"], "model": local["model"]}
+    kind = acc.get("type")
+    uuid = str(acc.get("uuid") or "").replace("-", "")
+    if not uuid:
+        return {}
+    if kind == "microsoft":
+        profile_url = MOJANG_SESSION_PROFILE.format(uuid=uuid)
+    elif kind in ("authlib", "nide8") and acc.get("api"):
+        api = str(acc["api"]).rstrip("/")
+        profile_url = f"{api}/sessionserver/session/minecraft/profile/{uuid}"
+    else:
+        return {}
+    try:
+        info = _profile_skin(profile_url, timeout=timeout)
+    except Exception as exc:
+        utils.log.debug("查询皮肤档案失败 %s: %s", profile_url, exc)
+        return {}
+    if not info:
+        return {}
+    cache = _texture_cache_path(info["url"])
+    if not cache.is_file():
+        import requests
+        try:
+            resp = requests.get(info["url"], timeout=timeout)
+        except Exception as exc:
+            utils.log.debug("下载皮肤纹理失败 %s: %s", info["url"], exc)
+            return {}
+        if resp.status_code != 200 or not resp.content.startswith(b"\x89PNG"):
+            return {}
+        utils.ensure_dir(cache.parent)
+        tmp = cache.with_suffix(".png.part")
+        tmp.write_bytes(resp.content)
+        tmp.replace(cache)
+    return {"file": str(cache), "model": info["model"]}

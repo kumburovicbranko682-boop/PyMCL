@@ -956,6 +956,13 @@ class BackendAPI:
     def start_authlib_login(self, api: str, username: str, password: str) -> str:
         return self.start_task("皮肤站登录", self._authlib_login_impl, api, username, password)
 
+    def skin_texture(self, account_name: str = "") -> dict:
+        """账号的皮肤纹理 PNG 本地文件 {file, model}，供 3D 预览本地渲染。"""
+        from mclauncher import skin as skin_mod
+        acc = (self.accounts.get_account(account_name) if account_name
+               else self.accounts.get_active())
+        return skin_mod.fetch_skin_texture(acc)
+
     def skin_change_support(self, account_name: str = "") -> dict:
         from mclauncher import skin_ops
         acc = (self.accounts.get_account(account_name) if account_name

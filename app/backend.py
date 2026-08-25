@@ -1449,6 +1449,17 @@ class BackendAPI(QObject):
         out.update(skin_mod.local_skin(acc))
         return out
 
+    def skin_texture(self, account_name: str = "") -> dict:
+        """账号的皮肤纹理 PNG 本地文件 {file, model}，供 3D 预览本地渲染。
+
+        离线账号直接给本地皮肤；微软 / 皮肤站 / 统一通行证账号查会话
+        档案并按纹理 URL 缓存下载。默认皮肤或失败返回 {}。
+        """
+        from mclauncher import skin as skin_mod
+        acc = (self.accounts.get_account(account_name) if account_name
+               else self.accounts.get_active())
+        return skin_mod.fetch_skin_texture(acc)
+
     def skin_change_support(self, account_name: str = "") -> dict:
         from mclauncher import skin_ops
         acc = (self.accounts.get_account(account_name) if account_name

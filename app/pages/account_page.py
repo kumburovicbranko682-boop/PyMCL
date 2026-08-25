@@ -44,6 +44,12 @@ class AccountPage(QWidget):
         self.skin.setAlignment(Qt.AlignCenter)
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
         sl.addWidget(self.skin, 0, Qt.AlignHCenter)
+        from ..skin3d import SkinView3D
+        self.skin3d = SkinView3D(self)
+        self.skin3d.setFixedSize(140, 260)
+        self.skin3d.set_background(Theme.hover)
+        self.skin3d.hide()
+        sl.addWidget(self.skin3d, 0, Qt.AlignHCenter)
         self.skin_name = StrongBodyLabel(tr("未登录"))
         self.skin_name.setAlignment(Qt.AlignCenter)
         sl.addWidget(self.skin_name)
@@ -308,20 +314,47 @@ class AccountPage(QWidget):
 
     def restyle(self):
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
+        self.skin3d.set_background(Theme.hover)
         self.reload()
+
+    def _show_3d(self, on: bool):
+        self.skin3d.setVisible(on)
+        self.skin.setVisible(not on)
 
     def _load_skin(self, url: str):
         self._pix_token += 1
         token = self._pix_token
-        # 离线自定义皮肤：在线渲染服务不认识本地文件，直接从 PNG 拼正面像素画
+        # 优先本地 3D 渲染：离线账号直接读皮肤文件；在线账号异步拉纹理
+        # 原图（按 URL 缓存）。拿不到纹理时退回渲染服务出的平面图。
         urls = self.backend.skin_urls(self._active_name) if self._active_name else {}
         local_file = urls.get("local_file")
-        if local_file:
-            from ..widgets import render_skin_front
-            pix = render_skin_front(local_file, urls.get("model") or "classic", height=260)
-            if pix:
-                self.skin.setPixmap(pix)
-                return
+        if local_file and self.skin3d.set_texture_file(
+                local_file, urls.get("model") or "classic"):
+            self._show_3d(True)
+            return
+        name = self._active_name
+        if name:
+            def ok_tex(tex):
+                if token != self._pix_token:
+                    return
+                f = (tex or {}).get("file")
+                if f and self.skin3d.set_texture_file(
+                        f, (tex or {}).get("model") or "classic"):
+                    self._show_3d(True)
+                    return
+                self._load_skin_flat(url, token)
+
+            self.backend.call_async(lambda: self.backend.skin_texture(name),
+                                    ok_tex,
+                                    lambda *_: self._load_skin_flat(url, token))
+            return
+        self._load_skin_flat(url, token)
+
+    def _load_skin_flat(self, url: str, token: int):
+        """退回原有平面预览（在线渲染服务出图 / 占位文本）。"""
+        if token != self._pix_token:
+            return
+        self._show_3d(False)
         if not url:
             return
 

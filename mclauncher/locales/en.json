@@ -522,6 +522,7 @@
   "把数据包装进所选存档": "Install datapack into selected save",
   "披风": "Cape",
   "拉取正版皮肤": "Fetch Mojang skin",
+  "拖动旋转，滚轮缩放，双击复位": "Drag to rotate, scroll to zoom, double-click to reset",
   "挂在 Java 前执行，如 gamemoderun / optirun；版本设置可单独覆盖": "Runs before Java, e.g. gamemoderun / optirun; per-version settings can override",
   "挂在 Java 前的命令，如 gamemoderun / optirun": "Command prepended before Java, e.g. gamemoderun / optirun",
   "指向上报口，不要填看板端口": "Point to the report API, not the dashboard port",
