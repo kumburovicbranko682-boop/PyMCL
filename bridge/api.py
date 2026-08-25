@@ -1132,6 +1132,18 @@ class BackendAPI:
             })
         return rows
 
+    @staticmethod
+    def _catalog_source(source: str) -> str:
+        # 与 app/backend.py 同步：WinUI 目录页的源下拉默认就是「全部」，
+        # 以前这里直接按 startswith("curse") 二分，「全部」被静默当成 Modrinth，
+        # CurseForge 结果永远搜不出来。
+        s = (source or "").strip().lower()
+        if s in ("", "全部", "all"):
+            return "all"
+        if s.startswith("curse"):
+            return "curseforge"
+        return "modrinth"
+
     def _modpack_row(self, hit: dict, default_source: str = "") -> dict:
         src = (hit.get("source") or default_source or "").lower()
         return {
@@ -1148,7 +1160,7 @@ class BackendAPI:
         # WinUI / EziApp 的整合包搜索和其他目录页一样带 extra={game_version, category}，
         # 这里以前不收 extra（服务器绑参时静默丢掉），筛选框在这两个前端形同虚设。
         # 与 app/backend.py 的同名方法保持同步。
-        src = "curseforge" if (source or "").lower().startswith("curse") else "modrinth"
+        src = self._catalog_source(source)
         q = (query or "").strip()
         extra = extra or {}
         gv = extra.get("game_version") or extra.get("version") or ""
@@ -1160,10 +1172,11 @@ class BackendAPI:
             rows = []
             seen = set()
             for title, pack_src, key, slug in POPULAR_MODPACKS:
-                if pack_src != src and pack_src == "modrinth":
-                    continue
-                if pack_src != src and key != CBC_CF_ID:
-                    continue
+                if src != "all":
+                    if pack_src != src and pack_src == "modrinth":
+                        continue
+                    if pack_src != src and key != CBC_CF_ID:
+                        continue
                 row = {
                     "name": title,
                     "author": "CurseForge" if pack_src == "curseforge" else "Modrinth",
@@ -1213,17 +1226,20 @@ class BackendAPI:
                 hits,
                 key=lambda h: 0 if (h.get("source") or src) == src else 1,
             )
-        rows = [self._modpack_row(h, src) for h in hits]
+        # modrinth_search 的命中不带 source 字段；「全部」模式下无源回落只可能
+        # 来自 Modrinth，别把字面 "all" 当来源发回前端（会漏进安装参数）。
+        default_src = "modrinth" if src == "all" else src
+        rows = [self._modpack_row(h, default_src) for h in hits]
         self._pack_cache = rows
         return rows
 
     def search_mods(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
-        src = "curseforge" if (source or "").lower().startswith("curse") else "modrinth"
+        src = self._catalog_source(source)
         q = (query or "").strip()
         if not q:
             rows = []
             for title, mod_src, key, *_rest in POPULAR_MODS:
-                if mod_src != src:
+                if src != "all" and mod_src != src:
                     continue
                 rows.append({
                     "name": title,
@@ -1259,7 +1275,7 @@ class BackendAPI:
                 "downloads": int(h.get("downloads") or 0),
                 "id": h.get("id"),
                 "slug": h.get("slug"),
-                "source": h.get("source") or src,
+                "source": h.get("source") or ("modrinth" if src == "all" else src),
                 "description": h.get("description") or h.get("summary") or "",
                 "tags": h.get("tags") or [],
                 "updated": h.get("updated") or "",
