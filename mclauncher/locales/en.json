@@ -1026,5 +1026,12 @@
   "和平": "Peaceful",
   "简单": "Easy",
   "普通": "Normal",
-  "困难": "Hard"
+  "困难": "Hard",
+  "外部目录": "External directory",
+  "移除外部目录（不删除文件）": "Remove external directory (files are kept)",
+  "添加已有游戏目录": "Add existing game directory",
+  "选择游戏目录（如官方启动器的 .minecraft）": "Choose a game directory (e.g. the official launcher's .minecraft)",
+  "原地使用这个文件夹，不复制任何文件。给它起个实例名：": "This folder will be used in place; nothing is copied. Give it an instance name:",
+  "移除外部目录": "Remove external directory",
+  "移除外部目录「{name}」？只解除引用，文件夹和其中的存档不会被删除。": "Remove external directory \"{name}\"? Only the reference is removed; the folder and its saves are kept."
 }

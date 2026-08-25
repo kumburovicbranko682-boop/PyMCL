@@ -4,8 +4,8 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, FluentIcon as FIF, MessageBox, ScrollArea, SimpleCardWidget,
-    StrongBodyLabel, SubtitleLabel, TransparentToolButton,
+    CaptionLabel, FluentIcon as FIF, MessageBox, PushButton, ScrollArea,
+    SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentToolButton,
 )
 
 from mclauncher.config import CONFIG
@@ -30,7 +30,14 @@ class InstanceCard(SimpleCardWidget):
         name_box.addWidget(StrongBodyLabel(info["name"]))
         name_box.addWidget(CaptionLabel(f'{info["versions"]} 个版本'))
         top.addLayout(name_box, 1)
-        top.addWidget(Pill(tr("默认") if info["name"] == CONFIG.get("default_instance") else tr("实例"), "#4C8BF5"))
+        if info["name"] == CONFIG.get("default_instance"):
+            top.addWidget(Pill(tr("默认"), "#4C8BF5"))
+        elif info.get("external"):
+            top.addWidget(Pill(tr("外部目录"), "#9C6ADE"))
+        else:
+            top.addWidget(Pill(tr("实例"), "#4C8BF5"))
+        if info.get("external") and info.get("path"):
+            self.setToolTip(str(info["path"]))
         layout.addLayout(top)
         layout.addWidget(CaptionLabel(str(info.get("mc") or "")))
         layout.addWidget(CaptionLabel(f"Java · {info.get('java_label') or '自动选择'}"))
@@ -53,7 +60,10 @@ class InstanceCard(SimpleCardWidget):
         open_btn.clicked.connect(lambda: page.open_folder(info["name"]))
         java_btn.clicked.connect(lambda: page.pick_java(info["name"]))
         rename_btn.clicked.connect(lambda: page.rename(info["name"]))
-        delete_btn.clicked.connect(lambda: page.delete(info["name"]))
+        delete_btn.clicked.connect(
+            lambda: page.delete(info["name"], bool(info.get("external"))))
+        if info.get("external"):
+            delete_btn.setToolTip(tr("移除外部目录（不删除文件）"))
         export_btn.clicked.connect(lambda: page.export_pack(info["name"]))
         saves_btn.clicked.connect(lambda: page.open_saves(info["name"]))
         actions.addStretch(1)
@@ -117,6 +127,10 @@ class InstancePage(QWidget):
         title_box.addWidget(SubtitleLabel(tr("实例")))
         title_box.addWidget(CaptionLabel(tr("每个实例相互隔离，放心折腾")))
         head.addLayout(title_box, 1)
+        self.link_btn = PushButton(
+            getattr(FIF, "FOLDER_ADD", None) or FIF.FOLDER, tr("添加已有游戏目录"))
+        self.link_btn.clicked.connect(self.link_external)
+        head.addWidget(self.link_btn)
         root.addLayout(head)
 
         self.scroll = ScrollArea(self)
@@ -161,8 +175,35 @@ class InstancePage(QWidget):
                 MessageBox(tr("创建失败"), str(e), self).exec()
             self.reload()
 
-    def delete(self, name: str):
-        box = MessageBox(tr("删除实例"), f"确定删除实例「{name}」？其中的存档与配置将一并移除。", self)
+    def link_external(self):
+        from pathlib import Path
+        from PySide6.QtWidgets import QFileDialog
+        folder = QFileDialog.getExistingDirectory(
+            self, tr("选择游戏目录（如官方启动器的 .minecraft）"))
+        if not folder:
+            return
+        default = Path(folder).name or tr("外部目录")
+        dlg = InputDialog(
+            tr("添加已有游戏目录"),
+            tr("原地使用这个文件夹，不复制任何文件。给它起个实例名："),
+            text=default, parent=self)
+        if not dlg.exec():
+            return
+        try:
+            self.backend.link_external_instance(dlg.value() or default, folder)
+        except Exception as e:
+            MessageBox(tr("添加失败"), str(e), self).exec()
+            return
+        self.reload()
+
+    def delete(self, name: str, external: bool = False):
+        if external:
+            box = MessageBox(
+                tr("移除外部目录"),
+                tr("移除外部目录「{name}」？只解除引用，文件夹和其中的存档不会被删除。").format(name=name),
+                self)
+        else:
+            box = MessageBox(tr("删除实例"), f"确定删除实例「{name}」？其中的存档与配置将一并移除。", self)
         if box.exec():
             try:
                 self.backend.delete_instance(name)

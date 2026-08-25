@@ -29,15 +29,74 @@ class InstanceError(Exception):
     pass
 
 
+def external_instances() -> dict:
+    """外部游戏目录注册表 {实例名: 绝对路径}。
+
+    对齐 HMCL「游戏目录」：把电脑上已有的 .minecraft 原地当实例用，不复制文件。
+    """
+    data = CONFIG.get("external_instances") or {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if k and v}
+
+
+def is_external(name) -> bool:
+    return str(name) in external_instances()
+
+
+def _save_external(registry: dict):
+    CONFIG.set("external_instances", dict(registry))
+    CONFIG.save()
+
+
+def link_external_instance(name, path) -> str:
+    """把已有游戏目录注册为实例，原地使用。返回最终实例名。"""
+    name = sanitize_instance_name(name, fallback="外部目录")
+    target = Path(path).expanduser()
+    try:
+        target = target.resolve()
+    except OSError as exc:
+        raise InstanceError(f"无法访问目录: {exc}")
+    if not target.is_dir():
+        raise InstanceError(f"目录不存在: {target}")
+    root = CONFIG.instances_dir.resolve()
+    if target == root or root in target.parents:
+        raise InstanceError("该目录已在启动器的实例目录里，不需要外部接入。")
+    registry = external_instances()
+    if name in registry or name in list_instances() or (root / name).exists():
+        raise InstanceError(f"实例 {name} 已存在。")
+    for other, p in registry.items():
+        if Path(p) == target:
+            raise InstanceError(f"该目录已注册为实例「{other}」。")
+    registry[name] = str(target)
+    _save_external(registry)
+    return name
+
+
+def unlink_external_instance(name):
+    """解除外部目录注册。只删引用，绝不动用户的文件夹。"""
+    registry = external_instances()
+    if str(name) not in registry:
+        raise InstanceError(f"外部实例不存在: {name}")
+    registry.pop(str(name))
+    _save_external(registry)
+    if CONFIG.get("default_instance") == name:
+        names = list_instances()
+        CONFIG.set("default_instance", names[0] if names else "default")
+        CONFIG.save()
+
+
 def list_instances() -> list:
-    """返回所有实例名。"""
+    """返回所有实例名（含已注册且目录仍存在的外部游戏目录）。"""
     root = CONFIG.instances_dir
-    if not root.is_dir():
-        return []
     names = []
-    for child in root.iterdir():
-        if child.is_dir() and (child / INSTANCE_META).is_file():
-            names.append(child.name)
+    if root.is_dir():
+        for child in root.iterdir():
+            if child.is_dir() and (child / INSTANCE_META).is_file():
+                names.append(child.name)
+    for name, path in external_instances().items():
+        if name not in names and Path(path).is_dir():
+            names.append(name)
     return sorted(names)
 
 
@@ -78,6 +137,9 @@ def get_instance_path(name) -> Path:
     root = CONFIG.instances_dir.resolve()
     if not name or name in (".", "..") or not re.fullmatch(r"[^\\/:*?\"<>|]+", name):
         raise InstanceError(f"非法实例名: {name!r}")
+    ext = external_instances().get(str(name))
+    if ext:
+        return Path(ext)
     path = (root / name).resolve()
     # 防路径穿越：实例必须直接位于实例目录之下
     if path.parent != root:
@@ -103,6 +165,10 @@ class Instance:
         utils.write_json(self.path / INSTANCE_META, data)
 
     def delete(self):
+        if is_external(self.name):
+            # 外部目录是用户自己的 .minecraft：只解除注册，绝不删文件
+            unlink_external_instance(self.name)
+            return
         if not self.path.is_dir():
             raise InstanceError(f"实例 {self.name} 不存在。")
         utils.remove_tree(self.path)
@@ -112,6 +178,21 @@ class Instance:
             CONFIG.save()
 
     def rename(self, new_name):
+        if is_external(self.name):
+            # 外部目录只改注册名，不动文件夹本身
+            if not re.fullmatch(r"[^\\/:*?\"<>|]+", str(new_name or "")):
+                raise InstanceError(f"非法实例名: {new_name!r}")
+            registry = external_instances()
+            if (new_name in registry or new_name in list_instances()
+                    or (CONFIG.instances_dir / new_name).exists()):
+                raise InstanceError(f"实例 {new_name} 已存在。")
+            registry[str(new_name)] = registry.pop(self.name)
+            _save_external(registry)
+            if CONFIG.get("default_instance") == self.name:
+                CONFIG.set("default_instance", new_name)
+                CONFIG.save()
+            self.name = new_name
+            return
         new_path = get_instance_path(new_name)
         if new_path.exists():
             raise InstanceError(f"实例 {new_name} 已存在。")

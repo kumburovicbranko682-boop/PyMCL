@@ -10,6 +10,9 @@ DEFAULT_CONFIG = {
     # 实例目录名（相对于启动器主目录）。与 PCL/HMCL 一样用 .minecraft
     "instances_dir": ".minecraft",
     "default_instance": "default",
+    # 外部游戏目录注册表 {实例名: 绝对路径}：把已有 .minecraft 原地当实例用，
+    # 不复制文件（对齐 HMCL「游戏目录」/ PCL 的「添加已有文件夹」）
+    "external_instances": {},
     # Java 运行时目录名（所有实例共享）
     "java_dir": "java",
     # 版本隔离选项：False 时每个实例拥有独立的 libraries/assets；True 时共享以节省空间

@@ -860,6 +860,13 @@ class BackendAPI(QObject):
         Instance(name).create()
         self._emit_ui_changed()
 
+    def link_external_instance(self, name: str, path: str) -> str:
+        """把已有游戏目录（如官方 .minecraft）原地注册为实例，不复制文件。"""
+        from mclauncher import instances as inst_mod
+        final = inst_mod.link_external_instance(name, path)
+        self._emit_ui_changed()
+        return final
+
     def delete_instance(self, name: str):
         Instance(name).delete()
         self._emit_ui_changed()
@@ -1500,6 +1507,8 @@ class BackendAPI(QObject):
         if self._inst_cache is not None and now - self._inst_cache_at < 2.5:
             return self._inst_cache
         self._ensure_default_instance()
+        from mclauncher.instances import external_instances
+        externals = external_instances()
         rows = []
         for name in list_instances():
             inst = Instance(name)
@@ -1517,6 +1526,8 @@ class BackendAPI(QObject):
                 "mc_version": (pack.get("mc_version") if pack else None) or meta.get("mc_version") or "",
                 "java": inst.java_pref(),
                 "java_label": self.instance_java_label(name),
+                "external": name in externals,
+                "path": str(inst.path),
             })
         self._inst_cache = rows
         self._inst_cache_at = now
