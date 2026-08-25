@@ -1294,6 +1294,48 @@ class BackendAPI(QObject):
             acc = self.accounts.get_account(account_name) or {"type": "offline", "name": account_name}
         return {"avatar": skin_mod.avatar_url(acc), "body": skin_mod.body_url(acc)}
 
+    # ---- 皮肤管理（微软账号走官方接口；皮肤站账号引导去站点改）
+
+    def _ms_account(self, account_name: str) -> dict:
+        from mclauncher.auth import AuthError
+        acc = self.accounts.get_account(account_name)
+        if not acc:
+            raise AuthError(f"账号不存在: {account_name}")
+        if acc.get("type") != "microsoft":
+            raise AuthError(tr("只有微软正版账号支持在启动器内更换皮肤。"))
+        return self.accounts.ensure_valid(acc)
+
+    def get_skin_profile(self, account_name: str) -> dict:
+        """当前皮肤 / 披风信息（微软账号）。同步网络调用，UI 请走 call_async。"""
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(skin_mod.fetch_profile(acc["access_token"]))
+
+    def upload_skin(self, account_name: str, file_path: str, variant: str = "classic") -> dict:
+        """上传 64x64 / 64x32 PNG 皮肤并设为当前皮肤。"""
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(
+            skin_mod.upload_skin(acc["access_token"], file_path, variant))
+
+    def reset_skin(self, account_name: str) -> dict:
+        """恢复默认皮肤。"""
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(skin_mod.reset_skin(acc["access_token"]))
+
+    def set_cape(self, account_name: str, cape_id: str = "") -> dict:
+        """启用披风；cape_id 为空则隐藏披风。"""
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(
+            skin_mod.set_cape(acc["access_token"], cape_id))
+
+    def skin_site_url(self, account_name: str) -> str:
+        """皮肤站账号对应站点首页；非皮肤站账号返回空字符串。"""
+        from mclauncher import skin as skin_mod
+        return skin_mod.skin_site_url(self.accounts.get_account(account_name))
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)

@@ -1,17 +1,166 @@
 # -*- coding: utf-8 -*-
-"""账号页：微软 / 离线 / 皮肤站，带皮肤预览。"""
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+"""账号页：微软 / 离线 / 皮肤站，带皮肤预览与皮肤管理。"""
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
-    LineEdit, PasswordLineEdit, PrimaryPushButton, PushButton, SimpleCardWidget,
-    StrongBodyLabel, SubtitleLabel, TransparentPushButton,
+    LineEdit, MessageBoxBase, PasswordLineEdit, PrimaryPushButton, PushButton,
+    SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentPushButton,
 )
 
 from ..widgets import DeviceCodeDialog, IconTile, Pill, ThumbnailTile
 from ..pcl_chrome import Theme
+from ..ui_alive import guard
 from mclauncher.i18n import tr
+
+
+class SkinManagerDialog(MessageBoxBase):
+    """微软账号皮肤 / 披风管理：上传、重置、启用/隐藏披风。"""
+
+    def __init__(self, backend, account_name: str, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.account = account_name
+        self._capes = []
+        self._busy = False
+
+        self.viewLayout.addWidget(SubtitleLabel(tr("管理皮肤"), self))
+        self.status = BodyLabel(tr("正在读取当前皮肤…"), self)
+        self.status.setWordWrap(True)
+        self.viewLayout.addWidget(self.status)
+
+        row = QHBoxLayout()
+        row.addWidget(BodyLabel(tr("模型"), self))
+        self.variant_box = ComboBox(self)
+        self.variant_box.addItems([tr("经典（粗臂）"), tr("纤细（细臂）")])
+        self.variant_box.setFixedWidth(150)
+        row.addWidget(self.variant_box)
+        self.upload_btn = PushButton(FIF.PHOTO, tr("上传皮肤 PNG…"), self)
+        self.upload_btn.clicked.connect(self._pick_and_upload)
+        row.addWidget(self.upload_btn)
+        self.reset_btn = PushButton(tr("重置为默认"), self)
+        self.reset_btn.clicked.connect(self._reset)
+        row.addWidget(self.reset_btn)
+        row.addStretch(1)
+        host = QWidget(self)
+        host.setLayout(row)
+        self.viewLayout.addWidget(host)
+
+        cape_row = QHBoxLayout()
+        cape_row.addWidget(BodyLabel(tr("披风"), self))
+        self.cape_box = ComboBox(self)
+        self.cape_box.setFixedWidth(220)
+        self.cape_box.addItem(tr("（读取中…）"))
+        self.cape_box.setEnabled(False)
+        cape_row.addWidget(self.cape_box)
+        self.cape_btn = PushButton(tr("应用披风"), self)
+        self.cape_btn.setEnabled(False)
+        self.cape_btn.clicked.connect(self._apply_cape)
+        cape_row.addWidget(self.cape_btn)
+        cape_row.addStretch(1)
+        cape_host = QWidget(self)
+        cape_host.setLayout(cape_row)
+        self.viewLayout.addWidget(cape_host)
+
+        tip = CaptionLabel(tr("皮肤要求 64x64（旧版 64x32）PNG。上传后游戏与预览可能需要几分钟生效。"), self)
+        tip.setWordWrap(True)
+        self.viewLayout.addWidget(tip)
+
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(520)
+        self._refresh()
+
+    # ---- 数据
+
+    def _refresh(self):
+        self.backend.call_async(
+            lambda: self.backend.get_skin_profile(self.account),
+            guard(self, self._on_profile), guard(self, self._on_err))
+
+    def _on_profile(self, profile: dict):
+        profile = profile or {}
+        variant = profile.get("variant") or "classic"
+        self.variant_box.setCurrentIndex(1 if variant == "slim" else 0)
+        self._capes = list(profile.get("capes") or [])
+        self.cape_box.clear()
+        self.cape_box.addItem(tr("隐藏披风"))
+        active_idx = 0
+        for i, cape in enumerate(self._capes):
+            self.cape_box.addItem(cape.get("alias") or "?")
+            if cape.get("active"):
+                active_idx = i + 1
+        self.cape_box.setCurrentIndex(active_idx)
+        has_capes = bool(self._capes)
+        self.cape_box.setEnabled(has_capes)
+        self.cape_btn.setEnabled(has_capes)
+        model = tr("纤细") if variant == "slim" else tr("经典")
+        parts = [tr("当前模型：{model}").format(model=model)]
+        if profile.get("skin_url"):
+            parts.append(tr("已设置自定义皮肤"))
+        else:
+            parts.append(tr("使用默认皮肤"))
+        if not has_capes:
+            parts.append(tr("该账号没有可用披风"))
+        self.status.setText("  ·  ".join(parts))
+        self._set_busy(False)
+
+    def _on_err(self, err):
+        self.status.setText(tr("操作失败：{err}").format(err=err))
+        self._set_busy(False)
+
+    def _set_busy(self, busy: bool):
+        self._busy = busy
+        self.upload_btn.setEnabled(not busy)
+        self.reset_btn.setEnabled(not busy)
+        if busy:
+            self.cape_btn.setEnabled(False)
+        elif self._capes:
+            self.cape_btn.setEnabled(True)
+
+    # ---- 操作
+
+    def _pick_and_upload(self):
+        if self._busy:
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选择皮肤 PNG"), "", "PNG (*.png)")
+        if not path:
+            return
+        variant = "slim" if self.variant_box.currentIndex() == 1 else "classic"
+        self._set_busy(True)
+        self.status.setText(tr("正在上传皮肤…"))
+        self.backend.call_async(
+            lambda: self.backend.upload_skin(self.account, path, variant),
+            guard(self, self._on_changed), guard(self, self._on_err))
+
+    def _reset(self):
+        if self._busy:
+            return
+        self._set_busy(True)
+        self.status.setText(tr("正在重置皮肤…"))
+        self.backend.call_async(
+            lambda: self.backend.reset_skin(self.account),
+            guard(self, self._on_changed), guard(self, self._on_err))
+
+    def _apply_cape(self):
+        if self._busy:
+            return
+        idx = self.cape_box.currentIndex()
+        cape_id = ""
+        if idx > 0 and idx - 1 < len(self._capes):
+            cape_id = self._capes[idx - 1].get("id") or ""
+        self._set_busy(True)
+        self.status.setText(tr("正在更新披风…"))
+        self.backend.call_async(
+            lambda: self.backend.set_cape(self.account, cape_id),
+            guard(self, self._on_changed), guard(self, self._on_err))
+
+    def _on_changed(self, profile: dict):
+        InfoBar.success(tr("已更新"), tr("皮肤设置已保存，游戏内可能需要几分钟生效。"),
+                        parent=self, position=InfoBarPosition.TOP, duration=3000)
+        self._on_profile(profile)
 
 
 class AccountPage(QWidget):
@@ -23,6 +172,7 @@ class AccountPage(QWidget):
         self._login_task = None
         self._pix_token = 0
         self._auth_busy = False
+        self._active_account = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 20, 28, 20)
@@ -42,6 +192,10 @@ class AccountPage(QWidget):
         self.skin_name = StrongBodyLabel(tr("未登录"))
         self.skin_name.setAlignment(Qt.AlignCenter)
         sl.addWidget(self.skin_name)
+        self.skin_btn = PushButton(tr("管理皮肤"))
+        self.skin_btn.clicked.connect(self._manage_skin)
+        self.skin_btn.hide()
+        sl.addWidget(self.skin_btn)
         top.addWidget(skin_card)
 
         list_card = SimpleCardWidget(self)
@@ -192,6 +346,16 @@ class AccountPage(QWidget):
         active = next((r for r in rows if r.get("active")), None) or (rows[0] if rows else None)
         self.skin_name.setText(active["name"] if active else "Steve")
         self._load_skin(active["body"] if active else "")
+        self._active_account = active
+        kind = active.get("type") if active else ""
+        if kind == "microsoft":
+            self.skin_btn.setText(tr("管理皮肤"))
+            self.skin_btn.show()
+        elif kind == "authlib":
+            self.skin_btn.setText(tr("打开皮肤站"))
+            self.skin_btn.show()
+        else:
+            self.skin_btn.hide()
 
     def restyle(self):
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
@@ -236,6 +400,23 @@ class AccountPage(QWidget):
     def _use(self, name):
         self.backend.set_active_account(name)
         self.reload()
+
+    def _manage_skin(self):
+        active = getattr(self, "_active_account", None)
+        if not active:
+            return
+        if active.get("type") == "microsoft":
+            dlg = SkinManagerDialog(self.backend, active["name"], self.window())
+            dlg.exec()
+            self.reload()
+            return
+        if active.get("type") == "authlib":
+            url = self.backend.skin_site_url(active["name"])
+            if url:
+                QDesktopServices.openUrl(QUrl(url))
+            else:
+                InfoBar.warning(tr("无法打开"), tr("该账号没有对应的皮肤站地址。"),
+                                parent=self, position=InfoBarPosition.TOP, duration=3000)
 
     def _set_auth_busy(self, busy: bool):
         self._auth_busy = busy

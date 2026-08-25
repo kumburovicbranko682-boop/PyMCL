@@ -814,6 +814,43 @@ class BackendAPI:
             })
         return rows
 
+    # ---- 皮肤管理（与 app.backend.BackendAPI 对齐）
+
+    def _ms_account(self, account_name: str) -> dict:
+        from mclauncher.auth import AuthError
+        acc = self.accounts.get_account(account_name)
+        if not acc:
+            raise AuthError(f"账号不存在: {account_name}")
+        if acc.get("type") != "microsoft":
+            raise AuthError("只有微软正版账号支持在启动器内更换皮肤。")
+        return self.accounts.ensure_valid(acc)
+
+    def get_skin_profile(self, account_name: str) -> dict:
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(skin_mod.fetch_profile(acc["access_token"]))
+
+    def upload_skin(self, account_name: str, file_path: str, variant: str = "classic") -> dict:
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(
+            skin_mod.upload_skin(acc["access_token"], file_path, variant))
+
+    def reset_skin(self, account_name: str) -> dict:
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(skin_mod.reset_skin(acc["access_token"]))
+
+    def set_cape(self, account_name: str, cape_id: str = "") -> dict:
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(
+            skin_mod.set_cape(acc["access_token"], cape_id))
+
+    def skin_site_url(self, account_name: str) -> str:
+        from mclauncher import skin as skin_mod
+        return skin_mod.skin_site_url(self.accounts.get_account(account_name))
+
     def remove_account(self, name: str):
         self.accounts.remove_account(name)
         self._emit("ui_changed", {})
