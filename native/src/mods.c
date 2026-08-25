@@ -543,11 +543,20 @@ cJSON *list_instance_files(const char *instance, const char *subdir) {
 
 int delete_instance_file(const char *instance, const char *subdir, const char *filename) {
     char ip[PYMCL_PATH], dir[PYMCL_PATH], p[PYMCL_PATH];
+    /* 空文件名拼出来的 p 就是子目录本身，remove_tree 会把整个 mods/
+     * 文件夹连锅端；Python 侧 _mod_file_at 对这种输入是直接报错。 */
+    if (!filename || !filename[0] || strstr(filename, "..")
+        || strchr(filename, '/') || strchr(filename, '\\')) {
+        pymcl_set_error("非法路径: %s", filename ? filename : "");
+        return -1;
+    }
     instance_path(instance, ip, sizeof(ip));
     pymcl_path_join(dir, sizeof(dir), ip, subdir);
     pymcl_path_join(p, sizeof(p), dir, filename);
-    if (strstr(filename, "..") || strchr(filename, '/') || strchr(filename, '\\')) {
-        pymcl_set_error("非法路径: %s", filename);
+    if (!pymcl_file_exists(p) && !pymcl_dir_exists(p)) {
+        /* 与 mclauncher/mods.py delete_mod 一致：删不存在的文件要报错，
+         * 不能让前端土司「已删除」而磁盘上原样没动。 */
+        pymcl_set_error("文件不存在: %s", filename);
         return -1;
     }
     pymcl_remove_tree(p);

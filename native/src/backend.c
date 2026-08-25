@@ -830,7 +830,10 @@ cJSON *backend_call(const char *method, cJSON *params) {
     if (strcmp(method, "get_installed_datapacks") == 0)
         return list_instance_files(pstr(params, "instance", "default"), "datapacks");
     if (strcmp(method, "delete_mod") == 0) {
-        delete_instance_file(pstr(params, "instance", "default"), "mods", pstr(params, "filename", ""));
+        /* 返回值以前被无视：非法路径 / 文件不存在照样报 true，前端假成功 */
+        if (delete_instance_file(pstr(params, "instance", "default"), "mods",
+                                 pstr(params, "filename", "")) != 0)
+            return NULL;
         return cJSON_CreateTrue();
     }
     if (strcmp(method, "get_crash") == 0) {
