@@ -396,6 +396,28 @@ class BackendAPI(QObject):
     def task_title(self, task_id: str) -> str:
         return self._titles.get(task_id, task_id)
 
+    def list_tasks(self) -> list[dict]:
+        """运行中 + 近期结束的任务快照。与 bridge/api.py 的 list_tasks 保持同构。"""
+        running = list(self._workers)
+        rows = [{
+            "id": tid,
+            "title": self._titles.get(tid, tid),
+            "status": "running",
+            "success": None,
+            "message": "",
+        } for tid in running]
+        for tid, (ok, msg) in list(self._task_results.items())[-20:]:
+            if tid in running:
+                continue
+            rows.append({
+                "id": tid,
+                "title": self._titles.get(tid, tid),
+                "status": "done" if ok else "failed",
+                "success": bool(ok),
+                "message": msg,
+            })
+        return rows
+
     def _dm(self, progress, log) -> DownloadManager:
         worker = QThread.currentThread()
         last_key = [""]
