@@ -130,6 +130,55 @@ static int ctx_cancel(void *ud) {
     return t->cancelled;
 }
 
+static void record_playtime(const char *inst, const char *ver, long long dur) {
+    /* 结构与 mclauncher/playtime.py 完全一致，两个桥写同一份 playtime.json。 */
+    if (dur <= 0 || !inst || !inst[0]) return;
+    char path[PYMCL_PATH];
+    pymcl_path_join(path, sizeof(path), g_root, "playtime.json");
+    cJSON *data = pymcl_read_json(path);
+    if (!cJSON_IsObject(data)) {
+        cJSON_Delete(data);
+        data = cJSON_CreateObject();
+    }
+    cJSON *insts = cJSON_GetObjectItem(data, "instances");
+    if (!cJSON_IsObject(insts)) {
+        cJSON_DeleteItemFromObject(data, "instances");
+        insts = cJSON_AddObjectToObject(data, "instances");
+    }
+    cJSON *node = cJSON_GetObjectItem(insts, inst);
+    if (!cJSON_IsObject(node)) {
+        cJSON_DeleteItemFromObject(insts, inst);
+        node = cJSON_AddObjectToObject(insts, inst);
+    }
+    cJSON *tot = cJSON_GetObjectItem(node, "total");
+    double total = cJSON_IsNumber(tot) ? tot->valuedouble : 0;
+    cJSON_DeleteItemFromObject(node, "total");
+    cJSON_AddNumberToObject(node, "total", total + (double)dur);
+    cJSON *vers = cJSON_GetObjectItem(node, "versions");
+    if (!cJSON_IsObject(vers)) {
+        cJSON_DeleteItemFromObject(node, "versions");
+        vers = cJSON_AddObjectToObject(node, "versions");
+    }
+    cJSON *vv = cJSON_GetObjectItem(vers, ver ? ver : "");
+    double vtot = cJSON_IsNumber(vv) ? vv->valuedouble : 0;
+    cJSON_DeleteItemFromObject(vers, ver ? ver : "");
+    cJSON_AddNumberToObject(vers, ver ? ver : "", vtot + (double)dur);
+    cJSON *sess = cJSON_GetObjectItem(node, "sessions");
+    if (!cJSON_IsArray(sess)) {
+        cJSON_DeleteItemFromObject(node, "sessions");
+        sess = cJSON_AddArrayToObject(node, "sessions");
+    }
+    cJSON *row = cJSON_CreateObject();
+    cJSON_AddNumberToObject(row, "start", (double)(time(NULL) - (time_t)dur));
+    cJSON_AddNumberToObject(row, "duration", (double)dur);
+    cJSON_AddStringToObject(row, "version", ver ? ver : "");
+    cJSON_AddItemToArray(sess, row);
+    while (cJSON_GetArraySize(sess) > 500)
+        cJSON_DeleteItemFromArray(sess, 0);
+    pymcl_write_json(path, data);
+    cJSON_Delete(data);
+}
+
 static void finish_task(task_t *t, int ok, const char *msg) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "task_id", t->id);
@@ -280,6 +329,12 @@ static void *task_run(void *p) {
                     snprintf(g_launch_id, sizeof(g_launch_id), "%s", t->id);
                     pthread_mutex_unlock(&g_mu);
                     if (proc) {
+                        {
+                            /* WinUI/EziApp 靠这两个事件切换启动按钮与运行状态 */
+                            cJSON *gs = cJSON_CreateObject();
+                            emit("game_started", gs);
+                            cJSON_Delete(gs);
+                        }
                         char buf[4096]; DWORD got;
                         char *tail[CRASH_TAIL];
                         int tn = 0, ts = 0;
@@ -311,10 +366,17 @@ static void *task_run(void *p) {
                         pthread_mutex_lock(&g_mu);
                         if (g_game == proc) g_game = NULL;
                         pthread_mutex_unlock(&g_mu);
+                        long scode = (long)code;
+                        if (code > 0x7FFFFFFFu) scode = (long)(code - 0x100000000ull);
+                        record_playtime(inst, ver, (long long)((double)time(NULL) - started));
+                        {
+                            cJSON *ge = cJSON_CreateObject();
+                            cJSON_AddNumberToObject(ge, "code", (double)scode);
+                            emit("game_exited", ge);
+                            cJSON_Delete(ge);
+                        }
                         if (t->cancelled) { ok = 1; snprintf(msg, sizeof(msg), "已停止游戏"); }
                         else {
-                            long scode = (long)code;
-                            if (code > 0x7FFFFFFFu) scode = (long)(code - 0x100000000ull);
                             cJSON *rep = analyze_game_crash(inst, ver, scode, tail, tn, ts, started);
                             int crashed = 0;
                             const char *summary = NULL;
