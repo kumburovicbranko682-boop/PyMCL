@@ -493,7 +493,43 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     if (strcmp(method, "update_server") == 0) {
         cJSON *r = py_rpc_call(method, params);
         if (r) return r;
-        return cJSON_CreateTrue();
+        /* C-only 兜底：以前直接返回 true——「编辑服务器」看似保存实际没写，
+         * 假成功。这里按下标真改真写。 */
+        const char *inst = pstr(params, "instance", "default");
+        int idx = cJSON_IsNumber(cJSON_GetObjectItem(params, "index"))
+                      ? (int)cJSON_GetObjectItem(params, "index")->valuedouble : -1;
+        char path[PYMCL_PATH];
+        servers_path(inst, path, sizeof(path));
+        cJSON *arr = pymcl_read_json(path);
+        cJSON *entry = cJSON_IsArray(arr) ? cJSON_GetArrayItem(arr, idx) : NULL;
+        if (!entry) {
+            cJSON_Delete(arr);
+            pymcl_set_error("服务器不存在: index=%d", idx);
+            return NULL;
+        }
+        const char *skeys[] = { "name", "ip", "description", "icon" };
+        for (size_t i = 0; i < sizeof(skeys) / sizeof(skeys[0]); i++) {
+            const char *v = cJSON_GetStringValue(cJSON_GetObjectItem(params, skeys[i]));
+            if (v) {
+                cJSON_DeleteItemFromObject(entry, skeys[i]);
+                cJSON_AddStringToObject(entry, skeys[i], v);
+            }
+        }
+        cJSON *pn = cJSON_GetObjectItem(params, "port");
+        if (cJSON_IsNumber(pn)) {
+            cJSON_DeleteItemFromObject(entry, "port");
+            cJSON_AddNumberToObject(entry, "port", (int)pn->valuedouble);
+        }
+        cJSON *hd = cJSON_GetObjectItem(params, "hidden");
+        if (cJSON_IsBool(hd)) {
+            cJSON_DeleteItemFromObject(entry, "hidden");
+            cJSON_AddBoolToObject(entry, "hidden", cJSON_IsTrue(hd));
+        }
+        pymcl_write_json(path, arr);
+        cJSON *ret = cJSON_Duplicate(entry, 1);
+        cJSON_Delete(arr);
+        if (emit) emit("ui_changed", cJSON_CreateObject());
+        return ret;
     }
 
     /* ---- playtime ---- */
