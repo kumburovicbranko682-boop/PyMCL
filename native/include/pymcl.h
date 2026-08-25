@@ -245,6 +245,7 @@ typedef struct {
     char port[16];
     char pre_launch[1024];     /* 启动前命令（shell 原样执行） */
     char post_launch[1024];    /* 退出后命令 */
+    char nide8_id[128];        /* 版本设置的统一通行证服务器 ID */
 } pymcl_launch_prep;
 void pymcl_launch_prep_load(const char *instance, const char *version_id, pymcl_launch_prep *out);
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,
@@ -283,6 +284,9 @@ void pymcl_playtime_record(const char *instance_name, const char *version_id, lo
 void pymcl_format_playtime(long long seconds, char *out, size_t n);
 void pymcl_global_mods_root(char *out, size_t n);
 int pymcl_global_mods_apply(const char *game_mods_dir);
+int pymcl_nide8_sid(const char *raw, char *out, size_t n);
+void pymcl_authlib_normalize_api(const char *raw, char *out, size_t n);
+int pymcl_ensure_auth_agents(cJSON *account_props, const char *prep_nide8, pymcl_ctx *ctx);
 
 /* ---------- backend / server ---------- */
 typedef void (*sse_emit_fn)(const char *event, cJSON *data);

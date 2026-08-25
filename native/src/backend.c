@@ -399,7 +399,10 @@ static void *task_run(void *p) {
                 pymcl_launch_prep hooks;
                 pymcl_launch_prep_load(inst, ver, &hooks);
                 run_launch_hook(t, hooks.pre_launch, ip, hooks.pre_launch_wait);
-                if (jexe && build_launch_command(inst, ver, props, jexe, mem, w, h,
+                /* 皮肤站 / 统一通行证注入器 jar：拿不到就明确失败
+                 * （对齐 Python 桥的 ensure_injector / ensure_jar）。 */
+                int agents_ok = pymcl_ensure_auth_agents(props, hooks.nide8_id, &ctx) == 0;
+                if (agents_ok && jexe && build_launch_command(inst, ver, props, jexe, mem, w, h,
                                                  cJSON_GetObjectItem(t->args, "extra_game_args"),
                                                  &argv, &argc, natives, sizeof(natives)) == 0) {
                     ctx_log(t, "正在启动游戏进程…");

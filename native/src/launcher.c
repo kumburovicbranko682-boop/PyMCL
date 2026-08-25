@@ -131,6 +131,21 @@ static const char *gc_preset_args(const char *key) {
     return tbl[0].a;
 }
 
+/* 把 agent 挤到 JVM 参数最前，并移除已有的所有 -javaagent:
+ * （对齐 mclauncher/launcher.py 的 authlib/nide8 注入语义）。 */
+static void prepend_javaagent(char ***args, int *n, const char *agent) {
+    char **in = *args; int nin = *n;
+    char **out = (char **)calloc((size_t)nin + 1, sizeof(char *));
+    int no = 0;
+    out[no++] = pymcl_strdup(agent);
+    for (int i = 0; i < nin; i++) {
+        if (pymcl_startswith(in[i], "-javaagent:")) { free(in[i]); continue; }
+        out[no++] = in[i];
+    }
+    free(in);
+    *args = out; *n = no;
+}
+
 /* GC 预设接到版本 jvm_args 前面；用户已写 GC 旗标时不叠加（对齐 gc.apply）。 */
 static void gc_merge_jvm(const char *preset, const char *existing, char *out, size_t n) {
     char **bits = NULL; int nb = 0;
@@ -407,6 +422,30 @@ int build_launch_command(const char *instance, const char *version, cJSON *accou
             snprintf(a, sizeof(a), "-Dlog4j.configurationFile=%s", lp);
             jvm = (char **)realloc(jvm, sizeof(char *) * (size_t)(nj + 1));
             jvm[nj++] = pymcl_strdup(a);
+        }
+    }
+    /* 皮肤站 / 统一通行证注入（对齐 mclauncher/launcher.py：先 authlib
+     * 后 nide8，各自清掉已有 -javaagent:，两者都有时 nide8 靠前）。
+     * 以前这两类账号在 C 桥下不注入 agent，启动等于静默降级为离线。 */
+    {
+        const char *alapi = cJSON_GetStringValue(cJSON_GetObjectItem(account_props, "authlib_api"));
+        if (alapi && alapi[0]) {
+            char api[512], jar[PYMCL_PATH], agent[PYMCL_PATH + 560];
+            pymcl_authlib_normalize_api(alapi, api, sizeof(api));
+            if (api[0]) {
+                pymcl_path_join(jar, sizeof(jar), g_root, "authlib-injector.jar");
+                snprintf(agent, sizeof(agent), "-javaagent:%s=%s", jar, api);
+                prepend_javaagent(&jvm, &nj, agent);
+            }
+        }
+        const char *nid = cJSON_GetStringValue(cJSON_GetObjectItem(account_props, "nide8_id"));
+        if ((!nid || !nid[0]) && prep.nide8_id[0]) nid = prep.nide8_id;
+        char sid[40];
+        if (nid && nid[0] && pymcl_nide8_sid(nid, sid, sizeof(sid)) == 0) {
+            char jar[PYMCL_PATH], agent[PYMCL_PATH + 64];
+            pymcl_path_join(jar, sizeof(jar), g_root, "nide8auth.jar");
+            snprintf(agent, sizeof(agent), "-javaagent:%s=%s", jar, sid);
+            prepend_javaagent(&jvm, &nj, agent);
         }
     }
     /* 附加游戏参数：RPC extra_game_args（WinUI 启动页直连服务器以前被

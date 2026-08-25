@@ -65,6 +65,23 @@ cJSON *account_launch_props(cJSON *acc) {
         cJSON_AddStringToObject(o, "token", cJSON_GetStringValue(cJSON_GetObjectItem(acc, "access_token")) ?: "0");
         cJSON_AddStringToObject(o, "user_type", "msa");
         cJSON_AddStringToObject(o, "xuid", cJSON_GetStringValue(cJSON_GetObjectItem(acc, "xuid")) ?: "");
+    } else if (type && (strcmp(type, "authlib") == 0 || strcmp(type, "nide8") == 0)) {
+        /* 对齐 mclauncher/auth.py launch_props：皮肤站/统一通行证要带真实
+         * token、user_type=mojang 和注入器参数。以前这两类账号被当离线
+         * 处理（token=0 + legacy + 无 javaagent），C 桥启动等于静默降级。 */
+        char uuid[40];
+        pymcl_dashed_uuid(cJSON_GetStringValue(cJSON_GetObjectItem(acc, "uuid")) ?: "", uuid);
+        cJSON_AddStringToObject(o, "name", name);
+        cJSON_AddStringToObject(o, "uuid", uuid);
+        cJSON_AddStringToObject(o, "token", cJSON_GetStringValue(cJSON_GetObjectItem(acc, "access_token")) ?: "0");
+        cJSON_AddStringToObject(o, "user_type", "mojang");
+        cJSON_AddStringToObject(o, "xuid", "");
+        if (strcmp(type, "authlib") == 0)
+            cJSON_AddStringToObject(o, "authlib_api",
+                                    cJSON_GetStringValue(cJSON_GetObjectItem(acc, "api")) ?: "");
+        else
+            cJSON_AddStringToObject(o, "nide8_id",
+                                    cJSON_GetStringValue(cJSON_GetObjectItem(acc, "server_id")) ?: "");
     } else {
         char uuid[40];
         const char *u = cJSON_GetStringValue(cJSON_GetObjectItem(acc, "uuid"));

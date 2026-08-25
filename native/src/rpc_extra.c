@@ -249,6 +249,8 @@ void pymcl_launch_prep_load(const char *inst, const char *ver, pymcl_launch_prep
     snprintf(out->post_launch, sizeof(out->post_launch), "%s",
              cJSON_GetStringValue(cJSON_GetObjectItem(j, "post_launch")) ?: "");
     out->pre_launch_wait = !cJSON_IsFalse(cJSON_GetObjectItem(j, "pre_launch_wait"));
+    snprintf(out->nide8_id, sizeof(out->nide8_id), "%s",
+             cJSON_GetStringValue(cJSON_GetObjectItem(j, "nide8_id")) ?: "");
     cJSON_Delete(j);
 }
 
@@ -307,6 +309,97 @@ int pymcl_global_mods_apply(const char *game_mods_dir) {
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     return n;
+}
+
+/* 统一通行证服务器 ID：取文本里的 32 位十六进制串并转小写
+ * （对齐 mclauncher/nide8.normalize_server_id，链接与裸 ID 都接受）。 */
+int pymcl_nide8_sid(const char *raw, char *out, size_t n) {
+    if (!raw || n < 33) return -1;
+    size_t run = 0;
+    const char *start = NULL;
+    for (const char *p = raw; ; p++) {
+        char c = *p;
+        int hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (hex) {
+            if (!run) start = p;
+            run++;
+            /* 与 Python 正则一致：最左边凑满 32 位就取，后面还有 hex 也不管 */
+            if (run == 32) break;
+        } else {
+            run = 0;
+        }
+        if (!c) break;
+    }
+    if (run < 32 || !start) return -1;
+    for (int i = 0; i < 32; i++) {
+        char c = start[i];
+        if (c >= 'A' && c <= 'F') c = (char)(c - 'A' + 'a');
+        out[i] = c;
+    }
+    out[32] = 0;
+    return 0;
+}
+
+/* 皮肤站 API 规范化（对齐 mclauncher/authlib.normalize_api：去尾斜杠、
+ * 无协议补 https://）。 */
+void pymcl_authlib_normalize_api(const char *raw, char *out, size_t n) {
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s", raw ? raw : "");
+    char *s = buf;
+    while (*s == ' ' || *s == '\t') s++;
+    size_t L = strlen(s);
+    while (L && (s[L - 1] == ' ' || s[L - 1] == '\t' || s[L - 1] == '/')) s[--L] = 0;
+    if (!L) { out[0] = 0; return; }
+    if (pymcl_startswith(s, "http")) snprintf(out, n, "%s", s);
+    else snprintf(out, n, "https://%s", s);
+}
+
+/* 确保注入器 jar 就位（对齐 nide8.ensure_jar / authlib.ensure_injector）。
+ * 皮肤站/统一通行证账号在 C 桥启动以前既不带 token 也不注入 agent，
+ * 现在补齐：jar 拿不到就让启动明确失败，而不是假装离线启动。 */
+int pymcl_ensure_auth_agents(cJSON *props, const char *prep_nide8, pymcl_ctx *ctx) {
+    const char *alapi = cJSON_GetStringValue(cJSON_GetObjectItem(props, "authlib_api"));
+    if (alapi && alapi[0]) {
+        char jar[PYMCL_PATH];
+        pymcl_path_join(jar, sizeof(jar), g_root, "authlib-injector.jar");
+        if (!(pymcl_file_exists(jar) && pymcl_file_size(jar) > 10000)) {
+            const char *metas[] = {
+                BMCLAPI "/mirrors/authlib-injector/artifact/latest.json",
+                "https://authlib-injector.yushi.moe/artifact/latest.json",
+            };
+            int got = 0;
+            for (int i = 0; i < 2 && !got; i++) {
+                cJSON *meta = http_get_json(metas[i], 20);
+                const char *dl = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "download_url"));
+                if (!dl) dl = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "url"));
+                if (dl && http_download_one(dl, jar, ctx, NULL, -1, NULL, 60) == 0
+                    && pymcl_file_size(jar) > 10000)
+                    got = 1;
+                cJSON_Delete(meta);
+            }
+            if (!got) { pymcl_set_error("无法下载 authlib-injector"); return -1; }
+        }
+    }
+    const char *nid = cJSON_GetStringValue(cJSON_GetObjectItem(props, "nide8_id"));
+    if ((!nid || !nid[0]) && prep_nide8 && prep_nide8[0]) nid = prep_nide8;
+    if (nid && nid[0]) {
+        char sid[40];
+        if (pymcl_nide8_sid(nid, sid, sizeof(sid)) != 0) {
+            pymcl_set_error("服务器 ID 应为 32 位十六进制，或含该 ID 的链接");
+            return -1;
+        }
+        char jar[PYMCL_PATH];
+        pymcl_path_join(jar, sizeof(jar), g_root, "nide8auth.jar");
+        if (!(pymcl_file_exists(jar) && pymcl_file_size(jar) > 8000)) {
+            if (http_download_one("https://login.mc-user.com:233/index/jar", jar, ctx,
+                                  NULL, -1, NULL, 60) != 0
+                || pymcl_file_size(jar) <= 8000) {
+                pymcl_set_error("无法下载 nide8auth.jar");
+                return -1;
+            }
+        }
+    }
+    return 0;
 }
 
 static cJSON *vs_defaults(void) {
