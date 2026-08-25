@@ -373,14 +373,55 @@ class SettingsPage(QWidget):
             FIF.LIBRARY, tr("社区资源源"),
             tr("模组 / 整合包：MCIM 国内镜像，挂了可改官方"),
             list(comm_map.values()), comm_map.get(settings.get("community_source") or "auto", comm_map["auto"]))
-        self.proxy_card, self.proxy_sw = _switch_card(
-            FIF.VPN, tr("跟随系统代理"),
-            tr("默认开。Clash 7897 会生效；关掉才强制直连"),
-            checked=bool(settings.get("use_system_proxy", True)))
+        # 代理（HMCL 设置同款）：系统 / 直连 / 自定义 HTTP / SOCKS5
+        proxy_map = {
+            "system": tr("跟随系统代理"),
+            "direct": tr("直连（禁用代理）"),
+            "http": tr("HTTP 代理"),
+            "socks5": tr("SOCKS5 代理"),
+        }
+        self._proxy_keys = {v: k for k, v in proxy_map.items()}
+        cur_proxy = settings.get("proxy_mode") or (
+            "system" if settings.get("use_system_proxy", True) else "direct")
+        self.proxy_card, self.proxy_box = _combo_card(
+            FIF.VPN, tr("代理"),
+            tr("跟随系统时 Clash 7897 会生效；也可强制直连或自定义代理服务器"),
+            list(proxy_map.values()), proxy_map.get(cur_proxy, proxy_map["system"]))
+        self.proxy_addr_card = SettingCard(
+            FIF.GLOBE if hasattr(FIF, "GLOBE") else FIF.VPN,
+            tr("代理服务器"), tr("主机与端口"))
+        self.proxy_host_edit = LineEdit(self.proxy_addr_card)
+        self.proxy_host_edit.setPlaceholderText("127.0.0.1")
+        self.proxy_host_edit.setFixedWidth(200)
+        self.proxy_host_edit.setText(settings.get("proxy_host") or "")
+        self.proxy_port_spin = SpinBox(self.proxy_addr_card)
+        self.proxy_port_spin.setRange(0, 65535)
+        self.proxy_port_spin.setValue(int(settings.get("proxy_port") or 0))
+        self.proxy_port_spin.setFixedWidth(130)
+        self.proxy_test_btn = PushButton(tr("测试代理"))
+        for w in (self.proxy_test_btn, self.proxy_host_edit, self.proxy_port_spin):
+            self.proxy_addr_card.hBoxLayout.addWidget(w, 0, Qt.AlignRight)
+        self.proxy_addr_card.hBoxLayout.addSpacing(16)
+        self.proxy_auth_card = SettingCard(
+            FIF.PEOPLE if hasattr(FIF, "PEOPLE") else FIF.VPN,
+            tr("代理认证"), tr("可选。代理不要账号密码就留空"))
+        self.proxy_user_edit = LineEdit(self.proxy_auth_card)
+        self.proxy_user_edit.setPlaceholderText(tr("用户名"))
+        self.proxy_user_edit.setFixedWidth(160)
+        self.proxy_user_edit.setText(settings.get("proxy_user") or "")
+        self.proxy_pass_edit = PasswordLineEdit(self.proxy_auth_card)
+        self.proxy_pass_edit.setFixedWidth(180)
+        self.proxy_pass_edit.setText(settings.get("proxy_pass") or "")
+        for w in (self.proxy_user_edit, self.proxy_pass_edit):
+            self.proxy_auth_card.hBoxLayout.addWidget(w, 0, Qt.AlignRight)
+        self.proxy_auth_card.hBoxLayout.addSpacing(16)
         perf_group.addSettingCard(self.threads_card)
         perf_group.addSettingCard(self.src_card)
         perf_group.addSettingCard(self.comm_card)
         perf_group.addSettingCard(self.proxy_card)
+        perf_group.addSettingCard(self.proxy_addr_card)
+        perf_group.addSettingCard(self.proxy_auth_card)
+        self._sync_proxy_mode()
         perf_group.addSettingCard(self.memory_card)
         perf_group.addSettingCard(self.auto_mem_card)
         perf_group.addSettingCard(self.gc_card)
@@ -547,6 +588,9 @@ class SettingsPage(QWidget):
         self.music_vol.editingFinished.connect(self._on_music_volume_commit)
         self.music_next_btn.clicked.connect(self._music_next)
         self.music_open_btn.clicked.connect(self._open_music_folder)
+        # 代理：切模式即时显隐地址/认证卡；测试按钮先落盘再试连
+        self.proxy_box.currentTextChanged.connect(self._sync_proxy_mode)
+        self.proxy_test_btn.clicked.connect(self._test_proxy)
 
     def refresh_from_config(self):
         """把磁盘上的最新设置推回控件。
@@ -566,6 +610,50 @@ class SettingsPage(QWidget):
         self.font_box.setCurrentText(cur_font or self._font_default_label)
         self.font_box.blockSignals(False)
         self.multi_sw.setChecked(bool(settings.get("allow_multi_instance", False)))
+
+    def _sync_proxy_mode(self, _text=""):
+        mode = self._proxy_keys.get(self.proxy_box.currentText(), "system")
+        custom = mode in ("http", "socks5")
+        self.proxy_addr_card.setVisible(custom)
+        self.proxy_auth_card.setVisible(custom)
+
+    def _collect_proxy(self) -> dict:
+        mode = self._proxy_keys.get(self.proxy_box.currentText(), "system")
+        return {
+            "proxy_mode": mode,
+            # 旧开关跟着走：system=跟随系统，其余都不读环境变量
+            "use_system_proxy": mode == "system",
+            "proxy_host": self.proxy_host_edit.text().strip(),
+            "proxy_port": int(self.proxy_port_spin.value()),
+            "proxy_user": self.proxy_user_edit.text().strip(),
+            "proxy_pass": self.proxy_pass_edit.text(),
+        }
+
+    def _test_proxy(self):
+        # 先把当前代理输入落盘并应用策略，测试的才是用户眼前的配置
+        self.backend.save_settings(self._collect_proxy())
+        self.proxy_test_btn.setEnabled(False)
+        self.proxy_test_btn.setText(tr("测试中…"))
+
+        def done(result):
+            self.proxy_test_btn.setEnabled(True)
+            self.proxy_test_btn.setText(tr("测试代理"))
+            result = result or {}
+            if result.get("ok"):
+                InfoBar.success(tr("代理可用"),
+                                tr("连通，延迟 {ms} 毫秒").format(ms=result.get("latency_ms", "?")),
+                                parent=self, position=InfoBarPosition.TOP, duration=3500)
+            else:
+                InfoBar.error(tr("代理不可用"), str(result.get("message") or ""),
+                              parent=self, position=InfoBarPosition.TOP, duration=5000)
+
+        def failed(exc):
+            self.proxy_test_btn.setEnabled(True)
+            self.proxy_test_btn.setText(tr("测试代理"))
+            InfoBar.error(tr("代理不可用"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=5000)
+
+        self.backend.call_async(self.backend.test_proxy, done, failed)
 
     def _sync_ai_mode(self, _text=""):
         custom = self.ai_mode.currentText() == tr("自定义 NewAPI")
@@ -1209,7 +1297,7 @@ class SettingsPage(QWidget):
             "download_threads": self.threads_spin.value(),
             "download_source": self._src_keys.get(self.src_box.currentText(), "auto"),
             "community_source": self._comm_keys.get(self.comm_box.currentText(), "auto"),
-            "use_system_proxy": self.proxy_sw.isChecked(),
+            **self._collect_proxy(),
             "default_memory_mb": self.memory_spin.value(),
             "auto_memory": self.auto_mem_sw.isChecked(),
             "default_resolution": [self.width_spin.value(), self.height_spin.value()],

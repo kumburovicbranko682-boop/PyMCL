@@ -1106,6 +1106,11 @@ class BackendAPI(QObject):
             "download_source": CONFIG.get("download_source") or "auto",
             "community_source": CONFIG.get("community_source") or "auto",
             "use_system_proxy": bool(CONFIG.get("use_system_proxy", True)),
+            "proxy_mode": CONFIG.get("proxy_mode") or "",
+            "proxy_host": CONFIG.get("proxy_host") or "",
+            "proxy_port": int(CONFIG.get("proxy_port") or 0),
+            "proxy_user": CONFIG.get("proxy_user") or "",
+            "proxy_pass": CONFIG.get("proxy_pass") or "",
             "feedback_url": CONFIG.get("feedback_url") or DEFAULT_FEEDBACK_URL or "",
             "feedback_heartbeat": bool(CONFIG.get("feedback_heartbeat", True)),
             "feedback_consent": CONFIG.get("feedback_consent") is True,
@@ -1182,6 +1187,14 @@ class BackendAPI(QObject):
             "download_source": (data.get("download_source") or CONFIG.get("download_source") or "auto"),
             "community_source": (data.get("community_source") or CONFIG.get("community_source") or "auto"),
             "use_system_proxy": bool(data.get("use_system_proxy", CONFIG.get("use_system_proxy", True))),
+            "proxy_mode": (data.get("proxy_mode") if str(data.get("proxy_mode") or "")
+                           in ("", "system", "direct", "http", "socks5")
+                           else CONFIG.get("proxy_mode") or "")
+                          if "proxy_mode" in data else CONFIG.get("proxy_mode") or "",
+            "proxy_host": str(_keep("proxy_host") or "").strip(),
+            "proxy_port": max(0, min(65535, int(_keep("proxy_port", default=0) or 0))),
+            "proxy_user": str(_keep("proxy_user") or ""),
+            "proxy_pass": str(_keep("proxy_pass") or ""),
             "ui_fly_animation": bool(data.get("ui_fly_animation", CONFIG.get("ui_fly_animation", True))),
             "ui_motion": bool(data.get("ui_motion", CONFIG.get("ui_motion", True))),
             "ui_fly_duration_ms": int(data.get("ui_fly_duration_ms")
@@ -1245,6 +1258,11 @@ class BackendAPI(QObject):
         """试连 AI。传 settings 就用它，让设置页能测「还没保存的值」而不必先落盘。"""
         from mclauncher.ai.client import test_connection
         return test_connection(settings if settings is not None else self.get_settings())
+
+    def test_proxy(self) -> dict:
+        """按当前代理策略试连（HMCL 代理设置同款）：{ok, latency_ms, message}。"""
+        from mclauncher.net import test_proxy
+        return test_proxy()
 
     def collect_sysinfo(self, force: bool = False, scan_system_java: bool = False) -> dict:
         from mclauncher import sysinfo as sysinfo_mod

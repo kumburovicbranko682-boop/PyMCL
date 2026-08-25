@@ -888,6 +888,11 @@ class BackendAPI:
             "download_source": CONFIG.get("download_source") or "auto",
             "community_source": CONFIG.get("community_source") or "auto",
             "use_system_proxy": bool(CONFIG.get("use_system_proxy", True)),
+            "proxy_mode": CONFIG.get("proxy_mode") or "",
+            "proxy_host": CONFIG.get("proxy_host") or "",
+            "proxy_port": int(CONFIG.get("proxy_port") or 0),
+            "proxy_user": CONFIG.get("proxy_user") or "",
+            "proxy_pass": CONFIG.get("proxy_pass") or "",
             "launcher_visibility": CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": CONFIG.get("gc_preset") or "auto",
             "download_limit_kbps": int(CONFIG.get("download_limit_kbps") or 0),
@@ -961,6 +966,18 @@ class BackendAPI:
             patch["community_source"] = data.get("community_source") or "auto"
         if "use_system_proxy" in data:
             patch["use_system_proxy"] = bool(data.get("use_system_proxy"))
+        if "proxy_mode" in data:
+            mode = str(data.get("proxy_mode") or "").strip().lower()
+            if mode in ("", "system", "direct", "http", "socks5"):
+                patch["proxy_mode"] = mode
+        if "proxy_host" in data:
+            patch["proxy_host"] = str(data.get("proxy_host") or "").strip()
+        if "proxy_port" in data:
+            patch["proxy_port"] = max(0, min(65535, int(data.get("proxy_port") or 0)))
+        if "proxy_user" in data:
+            patch["proxy_user"] = str(data.get("proxy_user") or "")
+        if "proxy_pass" in data:
+            patch["proxy_pass"] = str(data.get("proxy_pass") or "")
         for key in ("launcher_visibility", "gc_preset", "custom_homepage", "homepage_mode",
                     "window_mode", "offline_skin", "instances_dir", "default_java",
                     "game_lang"):
@@ -986,6 +1003,10 @@ class BackendAPI:
             patch["music_volume"] = max(0, min(100, int(data.get("music_volume") or 0)))
         CONFIG.update(patch)
         CONFIG.save()
+        if any(k in data for k in ("use_system_proxy", "proxy_mode", "proxy_host",
+                                   "proxy_port", "proxy_user", "proxy_pass")):
+            from mclauncher.net import apply_proxy_policy
+            apply_proxy_policy()
 
     def collect_sysinfo(self, force: bool = False, scan_system_java: bool = False) -> dict:
         from mclauncher import sysinfo as sysinfo_mod
@@ -2663,6 +2684,11 @@ class BackendAPI:
         """试连 AI。传 settings 就用它，让设置页能测「还没保存的值」而不必先落盘。"""
         from mclauncher.ai.client import test_connection
         return test_connection(settings if settings is not None else self.get_settings())
+
+    def test_proxy(self) -> dict:
+        """按当前代理策略试连（HMCL 代理设置同款）：{ok, latency_ms, message}。"""
+        from mclauncher.net import test_proxy
+        return test_proxy()
 
     def ai_list_chats(self) -> dict:
         from mclauncher.ai import store as chat_store

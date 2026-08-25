@@ -81,6 +81,13 @@ DEFAULT_CONFIG = {
     # 启动器背景音乐（PCL2 音乐播放器同款）：music/ 文件夹随机循环
     "music_enabled": False,
     "music_volume": 50,
+    # 代理（HMCL 设置同款）：mode 空 = 沿用 use_system_proxy 旧开关
+    # （system 跟随系统 / direct 直连 / http / socks5）
+    "proxy_mode": "",
+    "proxy_host": "",
+    "proxy_port": 0,
+    "proxy_user": "",
+    "proxy_pass": "",
     # 这三个键以前只在 save_settings 里写、没在这儿声明。
     # `save()` 落的是整份 data，`load()` 却只按本表的键名回读 ——
     # 结果就是「关掉飞入动画、重开启动器它又自己回来了」。

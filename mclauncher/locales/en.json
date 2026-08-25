@@ -1188,5 +1188,18 @@
   "原理图 (*.litematic *.schem *.schematic *.nbt)": "Schematics (*.litematic *.schem *.schematic *.nbt)",
   "选择原理图文件": "Select schematic files",
   "将删除原理图「{name}」（会尽量移入系统回收站，可找回）。": "Schematic \"{name}\" will be deleted (moved to the recycle bin when possible).",
-  "读取失败：{err}": "Read failed: {err}"
+  "读取失败：{err}": "Read failed: {err}",
+  "代理": "Proxy",
+  "直连（禁用代理）": "Direct (no proxy)",
+  "HTTP 代理": "HTTP proxy",
+  "SOCKS5 代理": "SOCKS5 proxy",
+  "跟随系统时 Clash 7897 会生效；也可强制直连或自定义代理服务器": "System mode picks up Clash 7897 etc.; or force direct / a custom proxy server",
+  "代理服务器": "Proxy server",
+  "主机与端口": "Host and port",
+  "测试代理": "Test proxy",
+  "代理认证": "Proxy authentication",
+  "可选。代理不要账号密码就留空": "Optional. Leave empty if the proxy needs no credentials",
+  "代理可用": "Proxy OK",
+  "连通，延迟 {ms} 毫秒": "Connected, latency {ms} ms",
+  "代理不可用": "Proxy failed"
 }
