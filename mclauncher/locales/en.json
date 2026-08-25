@@ -1011,5 +1011,20 @@
   "重置": "Reset",
   "整合包安装到实例": "Install modpack into instance",
   "推荐每个整合包一个独立实例：新名字会自动创建实例，填已有实例名则装进那个实例（会覆盖同名整合包文件）。": "One instance per modpack is recommended: a new name creates a fresh instance; an existing instance name installs into it (overwriting files managed by a same-name pack).",
-  "装进已有实例": "Installing into existing instance"
+  "装进已有实例": "Installing into existing instance",
+  "修改世界信息": "Edit world info",
+  "世界名称": "World name",
+  "游戏模式": "Game mode",
+  "难度": "Difficulty",
+  "锁定难度": "Lock difficulty",
+  "允许作弊": "Allow cheats",
+  "硬核模式": "Hardcore",
+  "种子": "Seed",
+  "修改失败": "Edit failed",
+  "无法读取世界信息": "Cannot read world info",
+  "旁观": "Spectator",
+  "和平": "Peaceful",
+  "简单": "Easy",
+  "普通": "Normal",
+  "困难": "Hard"
 }

@@ -5,14 +5,102 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QListWidgetItem, QVBoxLayout, QWidget,
+    QFileDialog, QFormLayout, QHBoxLayout, QListWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    ComboBox, ListWidget, MessageBox, MessageBoxBase, PushButton, SubtitleLabel,
+    CaptionLabel, CheckBox, ComboBox, LineEdit, ListWidget, MessageBox,
+    MessageBoxBase, PushButton, SubtitleLabel,
 )
 
 from mclauncher.utils import format_size
 from mclauncher.i18n import tr
+
+
+class WorldInfoDialog(MessageBoxBase):
+    """修改世界信息：世界名 / 游戏模式 / 难度 / 作弊（对齐 HMCL 世界管理）。"""
+
+    def __init__(self, backend, instance: str, save_name: str, version: str = "",
+                 parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.instance = instance
+        self.save_name = save_name
+        self.version = version
+        self.changed = False
+        # 构造前调用方已确认存档存在；level.dat 坏了这里会抛 SaveError
+        self.info = backend.get_world_info(instance, save_name, version)
+
+        self.viewLayout.addWidget(SubtitleLabel(tr("修改世界信息"), self))
+        form_host = QWidget(self)
+        form = QFormLayout(form_host)
+        form.setContentsMargins(0, 0, 0, 0)
+
+        self.name_edit = LineEdit()
+        self.name_edit.setText(self.info.get("level_name") or "")
+        form.addRow(CaptionLabel(tr("世界名称")), self.name_edit)
+
+        self.mode_box = ComboBox()
+        self.mode_box.addItems([tr("生存"), tr("创造"), tr("冒险"), tr("旁观")])
+        mode = int(self.info.get("game_type") or 0)
+        self.mode_box.setCurrentIndex(mode if 0 <= mode <= 3 else 0)
+        form.addRow(CaptionLabel(tr("游戏模式")), self.mode_box)
+
+        self.diff_box = ComboBox()
+        self.diff_box.addItems([tr("和平"), tr("简单"), tr("普通"), tr("困难")])
+        diff = self.info.get("difficulty")
+        self._diff_baseline = int(diff) if diff is not None else 2
+        self.diff_box.setCurrentIndex(
+            self._diff_baseline if 0 <= self._diff_baseline <= 3 else 2)
+        form.addRow(CaptionLabel(tr("难度")), self.diff_box)
+
+        self.lock_cb = CheckBox(tr("锁定难度"))
+        self.lock_cb.setChecked(bool(self.info.get("difficulty_locked")))
+        self.cheats_cb = CheckBox(tr("允许作弊"))
+        self.cheats_cb.setChecked(bool(self.info.get("cheats")))
+        self.hardcore_cb = CheckBox(tr("硬核模式"))
+        self.hardcore_cb.setChecked(bool(self.info.get("hardcore")))
+        for cb in (self.lock_cb, self.cheats_cb, self.hardcore_cb):
+            form.addRow("", cb)
+
+        seed = self.info.get("seed")
+        if seed is not None:
+            seed_label = CaptionLabel(f"{tr('种子')}: {seed}")
+            seed_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            form.addRow("", seed_label)
+
+        self.viewLayout.addWidget(form_host)
+        self.yesButton.setText(tr("保存"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(420)
+
+    def collect_changes(self) -> dict:
+        changes = {}
+        name = self.name_edit.text().strip()
+        if name and name != (self.info.get("level_name") or ""):
+            changes["level_name"] = name
+        if self.mode_box.currentIndex() != int(self.info.get("game_type") or 0):
+            changes["game_type"] = self.mode_box.currentIndex()
+        if self.diff_box.currentIndex() != self._diff_baseline:
+            changes["difficulty"] = self.diff_box.currentIndex()
+        if self.lock_cb.isChecked() != bool(self.info.get("difficulty_locked")):
+            changes["difficulty_locked"] = self.lock_cb.isChecked()
+        if self.cheats_cb.isChecked() != bool(self.info.get("cheats")):
+            changes["cheats"] = self.cheats_cb.isChecked()
+        if self.hardcore_cb.isChecked() != bool(self.info.get("hardcore")):
+            changes["hardcore"] = self.hardcore_cb.isChecked()
+        return changes
+
+    def validate(self) -> bool:
+        changes = self.collect_changes()
+        if not changes:
+            return True
+        try:
+            self.backend.edit_world(self.instance, self.save_name, changes, self.version)
+        except Exception as e:
+            MessageBox(tr("修改失败"), str(e), self.window()).exec()
+            return False
+        self.changed = True
+        return True
 
 
 class SavesDialog(MessageBoxBase):
@@ -43,9 +131,11 @@ class SavesDialog(MessageBoxBase):
         row.addWidget(self.del_btn)
         row.addWidget(self.dp_btn)
         row2 = QHBoxLayout()
+        self.info_btn = PushButton(tr("修改世界信息"))
         self.backup_btn = PushButton(tr("备份存档"))
         self.restore_btn = PushButton(tr("还原备份"))
         self.export_btn = PushButton(tr("导出为 zip"))
+        row2.addWidget(self.info_btn)
         row2.addWidget(self.backup_btn)
         row2.addWidget(self.restore_btn)
         row2.addWidget(self.export_btn)
@@ -60,6 +150,7 @@ class SavesDialog(MessageBoxBase):
         self.open_btn.clicked.connect(self._open)
         self.del_btn.clicked.connect(self._delete)
         self.dp_btn.clicked.connect(self._datapack)
+        self.info_btn.clicked.connect(self._edit_info)
         self.backup_btn.clicked.connect(self._backup)
         self.restore_btn.clicked.connect(self._restore)
         self.export_btn.clicked.connect(self._export)
@@ -72,6 +163,7 @@ class SavesDialog(MessageBoxBase):
         self.del_btn.setEnabled(is_save or is_backup)
         self.del_btn.setText(tr("删除备份") if is_backup else tr("删除存档"))
         self.dp_btn.setEnabled(is_save)
+        self.info_btn.setEnabled(is_save)
         self.backup_btn.setEnabled(is_save)
         self.export_btn.setEnabled(is_save)
         self.restore_btn.setEnabled(is_backup)
@@ -190,6 +282,21 @@ class SavesDialog(MessageBoxBase):
         box = MessageBox(tr("删除存档"), f"确定删除「{name}」？", self)
         if box.exec():
             self.backend.delete_save(self.instance, name, self.version)
+            self.reload()
+
+    def _edit_info(self):
+        name = self._selected_name()
+        if not name:
+            MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
+            return
+        try:
+            dlg = WorldInfoDialog(self.backend, self.instance, name, self.version,
+                                  self.window())
+        except Exception as e:
+            MessageBox(tr("无法读取世界信息"), str(e), self).exec()
+            return
+        dlg.exec()
+        if dlg.changed:
             self.reload()
 
     def _backup(self):

@@ -37,6 +37,7 @@ def _safe_child(folder: Path, name: str, what: str = "存档") -> Path:
 
 
 _GAME_MODES = {0: "生存", 1: "创造", 2: "冒险", 3: "旁观"}
+_DIFFICULTIES = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
 
 
 def read_level_meta(save_dir) -> dict:
@@ -66,6 +67,18 @@ def read_level_meta(save_dir) -> dict:
     game_type = int(val("GameType", 0) or 0)
     hardcore = bool(val("hardcore", 0))
     mode = "硬核" if hardcore else _GAME_MODES.get(game_type, "?")
+    # 种子：1.16+ 在 WorldGenSettings.seed，更早在 Data.RandomSeed
+    seed = None
+    wg = data.get("WorldGenSettings")
+    if isinstance(wg, tuple) and wg[0] == nbt.TAG_COMPOUND:
+        stag = wg[1].get("seed")
+        if isinstance(stag, tuple):
+            seed = int(stag[1])
+    if seed is None:
+        rtag = data.get("RandomSeed")
+        if isinstance(rtag, tuple):
+            seed = int(rtag[1])
+    diff = val("Difficulty")
     return {
         "level_name": str(val("LevelName", "") or ""),
         "version_name": str(version_name),
@@ -73,9 +86,108 @@ def read_level_meta(save_dir) -> dict:
         "mode": mode,
         "hardcore": hardcore,
         "cheats": bool(val("allowCommands", 0)),
+        # Difficulty 在老版本 level.dat 里可能不存在（当时难度是全局设置）
+        "difficulty": int(diff) if diff is not None else None,
+        "difficulty_locked": bool(val("DifficultyLocked", 0)),
+        "seed": seed,
         # LastPlayed 是毫秒时间戳
         "last_played": int(val("LastPlayed", 0) or 0) // 1000,
     }
+
+
+def world_info(instance: Instance, name: str, version_id: str = "") -> dict:
+    """单个存档的详细信息（供「修改世界信息」对话框使用）。"""
+    save_dir = _safe_child(_game_dir(instance, version_id) / "saves", name)
+    if not save_dir.is_dir():
+        raise SaveError(f"存档不存在: {name}")
+    meta = read_level_meta(save_dir)
+    if not meta:
+        raise SaveError(f"无法读取 level.dat: {name}")
+    meta["name"] = name
+    meta["path"] = str(save_dir)
+    return meta
+
+
+# 可编辑字段 → (Data 里的键, NBT tag 类型, 取值转换)。对齐 HMCL 世界信息编辑。
+def _world_fields():
+    from . import nbt_lite as nbt
+
+    def _mode(v):
+        n = int(v)
+        if n not in _GAME_MODES:
+            raise SaveError(f"游戏模式必须是 0-3，收到 {v}")
+        return n
+
+    def _diff(v):
+        n = int(v)
+        if n not in _DIFFICULTIES:
+            raise SaveError(f"难度必须是 0-3，收到 {v}")
+        return n
+
+    def _name(v):
+        s = str(v).strip()
+        if not s:
+            raise SaveError("世界名称不能为空")
+        return s
+
+    return {
+        "level_name": ("LevelName", nbt.TAG_STRING, _name),
+        "game_type": ("GameType", nbt.TAG_INT, _mode),
+        "difficulty": ("Difficulty", nbt.TAG_BYTE, _diff),
+        "difficulty_locked": ("DifficultyLocked", nbt.TAG_BYTE, lambda v: 1 if v else 0),
+        "cheats": ("allowCommands", nbt.TAG_BYTE, lambda v: 1 if v else 0),
+        "hardcore": ("hardcore", nbt.TAG_BYTE, lambda v: 1 if v else 0),
+    }
+
+
+def edit_world(instance: Instance, name: str, changes: dict, version_id: str = "") -> dict:
+    """改写存档 level.dat 的基本信息（世界名/模式/难度/作弊……）。
+
+    只动指定键，其余 NBT 原样保留；写入前把旧文件备份成 level.dat_old
+    （与游戏自身的保存行为一致）。返回修改后的 world_info。
+    """
+    import gzip
+
+    from . import nbt_lite as nbt
+    save_dir = _safe_child(_game_dir(instance, version_id) / "saves", name)
+    level = save_dir / "level.dat"
+    if not level.is_file():
+        raise SaveError(f"存档不存在或缺少 level.dat: {name}")
+
+    fields = _world_fields()
+    unknown = set(changes or {}) - set(fields)
+    if unknown:
+        raise SaveError("不支持修改这些字段: " + ", ".join(sorted(unknown)))
+    if not changes:
+        return world_info(instance, name, version_id)
+
+    raw = level.read_bytes()
+    was_gzip = raw[:2] == b"\x1f\x8b"
+    try:
+        root_name, root = nbt.loads(raw)
+    except Exception as exc:
+        raise SaveError(f"level.dat 解析失败: {exc}") from exc
+    data_tag = root.get("Data")
+    if not (isinstance(data_tag, tuple) and data_tag[0] == nbt.TAG_COMPOUND):
+        raise SaveError("level.dat 缺少 Data 标签，不是有效的存档")
+    data = data_tag[1]
+
+    for key, value in changes.items():
+        nbt_key, tag_type, convert = fields[key]
+        data[nbt_key] = (tag_type, convert(value))
+
+    out = nbt.dumps(root, root_name)
+    if was_gzip:
+        out = gzip.compress(out)
+    # 与游戏一致：旧内容挪到 level.dat_old，再原子替换
+    tmp = level.with_suffix(".dat.pymcl-new")
+    tmp.write_bytes(out)
+    try:
+        shutil.copy2(level, save_dir / "level.dat_old")
+    except OSError:
+        pass
+    tmp.replace(level)
+    return world_info(instance, name, version_id)
 
 
 def list_saves(instance: Instance, version_id: str = "") -> list[dict]:

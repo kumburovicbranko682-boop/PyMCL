@@ -601,6 +601,16 @@ class BackendAPI(QObject):
         from mclauncher import saves as saves_mod
         return saves_mod.open_save(self._instance(instance), name, version)
 
+    def get_world_info(self, instance: str, name: str, version: str = "") -> dict:
+        from mclauncher import saves as saves_mod
+        return saves_mod.world_info(self._instance(instance), name, version)
+
+    def edit_world(self, instance: str, name: str, changes: dict, version: str = "") -> dict:
+        from mclauncher import saves as saves_mod
+        out = saves_mod.edit_world(self._instance(instance), name, changes or {}, version)
+        self._emit_ui_changed()
+        return out
+
     def install_datapack_into_save(self, instance: str, filename: str, save_name: str,
                                    version: str = "") -> str:
         from mclauncher import saves as saves_mod
