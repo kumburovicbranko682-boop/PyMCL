@@ -371,8 +371,14 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         }
         cJSON_ReplaceItemInObject(root, "accounts", next);
         const char *active = cJSON_GetStringValue(cJSON_GetObjectItem(root, "active"));
-        if (active && strcmp(active, name) == 0)
-            cJSON_ReplaceItemInObject(root, "active", cJSON_CreateNull());
+        if (active && strcmp(active, name) == 0) {
+            /* 与 mclauncher/auth.py remove_account 一致：删掉活动账号后
+             * 自动落到第一个剩余账号，而不是留 null 让账号页失去活动标记 */
+            cJSON *first = cJSON_GetArrayItem(next, 0);
+            const char *fname = first ? cJSON_GetStringValue(cJSON_GetObjectItem(first, "name")) : NULL;
+            cJSON_ReplaceItemInObject(root, "active",
+                                      fname ? cJSON_CreateString(fname) : cJSON_CreateNull());
+        }
         accounts_save(root);
         cJSON_Delete(root);
         if (emit) emit("ui_changed", cJSON_CreateObject());
