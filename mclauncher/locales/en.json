@@ -748,6 +748,7 @@
   "离线模式": "Offline Mode",
   "离线用户名": "Offline username",
   "离线皮肤": "Offline skin",
+  "离线皮肤文件缺失或损坏，本次使用默认皮肤": "Offline skin file is missing or corrupt; using the default skin this time",
   "离线角色名": "Offline character name",
   "科技": "Tech",
   "移到「{0}」": "Move to “{0}”",

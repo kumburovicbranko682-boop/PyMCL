@@ -131,7 +131,11 @@ class TestChangeSupport(unittest.TestCase):
     def test_kinds(self):
         self.assertTrue(skin_ops.change_support({"type": "microsoft"})["ok"])
         self.assertTrue(skin_ops.change_support({"type": "authlib"})["ok"])
-        for kind in ("offline", "nide8", ""):
+        # 离线账号支持本地皮肤，并带一条说明文案
+        offline = skin_ops.change_support({"type": "offline"})
+        self.assertTrue(offline["ok"])
+        self.assertTrue(offline["note"])
+        for kind in ("nide8", ""):
             res = skin_ops.change_support({"type": kind})
             self.assertFalse(res["ok"])
             self.assertTrue(res["reason"])
@@ -202,9 +206,23 @@ class TestYggdrasilRequests(unittest.TestCase):
 
     def test_unsupported_account(self):
         with self.assertRaises(SkinError):
-            skin_ops.upload_skin({"type": "offline", "name": "x"}, str(self.png))
+            skin_ops.upload_skin({"type": "nide8", "name": "x"}, str(self.png))
         with self.assertRaises(SkinError):
             skin_ops.reset_skin({"type": "nide8", "name": "x"})
+
+    def test_offline_routes_to_local(self):
+        """离线账号走本地皮肤：写账号字段，不发任何网络请求。"""
+        from mclauncher import offline_skin, utils
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(utils, "ROOT", Path(tmp)):
+            acc = {"type": "offline", "name": "x", "uuid": ""}
+            msg = skin_ops.upload_skin(acc, str(self.png), "slim")
+            self.assertIn("离线皮肤", msg)
+            self.assertTrue(acc.get("skin_file"))
+            self.assertEqual(acc.get("skin_model"), "slim")
+            self.assertTrue(offline_skin.has_custom_skin(acc))
+            skin_ops.reset_skin(acc)
+            self.assertFalse(acc.get("skin_file"))
 
 
 class TestMicrosoftRequests(unittest.TestCase):

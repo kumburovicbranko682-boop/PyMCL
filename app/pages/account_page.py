@@ -219,9 +219,11 @@ class AccountPage(QWidget):
         self.upload_btn.setEnabled(can)
         self.reset_skin_btn.setEnabled(can)
         self.variant_box.setEnabled(can)
-        reason = "" if support.get("ok") else str(support.get("reason") or "")
-        self.skin_hint.setText(reason)
-        self.skin_hint.setVisible(bool(reason))
+        # 不支持时显示原因；支持但有说明（如离线本地皮肤）时显示说明
+        hint = (str(support.get("note") or "") if support.get("ok")
+                else str(support.get("reason") or ""))
+        self.skin_hint.setText(hint)
+        self.skin_hint.setVisible(bool(hint))
 
     def restyle(self):
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")

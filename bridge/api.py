@@ -1624,6 +1624,18 @@ class BackendAPI:
         log(f"Java -version: {ver_line}")
         log(f"使用 Java {java_mod.get_java_major(java_exe) or '?'}: {java_exe}")
         progress(2, 4, "构建启动参数")
+        skin_server = None
+        if (not props.get("authlib_api") and acc.get("type") == "offline"
+                and acc.get("skin_file")):
+            # 离线自定义皮肤：本地 Yggdrasil 纹理服务 + authlib-injector
+            from mclauncher import offline_skin
+            skin_server = offline_skin.serve_for_account(acc)
+            if skin_server is None:
+                log("离线皮肤文件缺失或损坏，本次使用默认皮肤")
+            else:
+                props = dict(props)
+                props["authlib_api"] = skin_server.api_root
+                log(f"离线皮肤: 本地纹理服务 {skin_server.api_root}")
         if props.get("authlib_api"):
             from mclauncher import authlib as authlib_mod
             authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
@@ -1636,21 +1648,26 @@ class BackendAPI:
         width, height = launch_flow.resolve_resolution(prep, width, height)
         if prep.get("wrapper"):
             log(f"包装器命令: {' '.join(prep['wrapper'])}")
-        cmd, _natives, _vdir, game_dir = build_launch_command(
-            inst, version, props, java_exe,
-            memory_mb=memory_mb, width=width, height=height,
-            extra_game_args=extra_game_args,
-            extra_jvm_args=prep["jvm_args"],
-            game_directory=game_dir,
-            authlib_api=props.get("authlib_api"),
-            wrapper=prep.get("wrapper"),
-        )
-        log(f"实际启动: {cmd[0]}")
-        log("正在启动游戏进程…")
-        progress(3, 4, "游戏启动中")
-        worker = getattr(_tls, "worker", None)
-        proc = GameProcess(cmd, cwd=game_dir, on_line=log, priority=prep["priority"],
-                           window_title=prep.get("window_title") or "")
+        try:
+            cmd, _natives, _vdir, game_dir = build_launch_command(
+                inst, version, props, java_exe,
+                memory_mb=memory_mb, width=width, height=height,
+                extra_game_args=extra_game_args,
+                extra_jvm_args=prep["jvm_args"],
+                game_directory=game_dir,
+                authlib_api=props.get("authlib_api"),
+                wrapper=prep.get("wrapper"),
+            )
+            log(f"实际启动: {cmd[0]}")
+            log("正在启动游戏进程…")
+            progress(3, 4, "游戏启动中")
+            worker = getattr(_tls, "worker", None)
+            proc = GameProcess(cmd, cwd=game_dir, on_line=log, priority=prep["priority"],
+                               window_title=prep.get("window_title") or "")
+        except BaseException:
+            if skin_server is not None:
+                skin_server.stop()
+            raise
         with self._game_lock:
             self._game_proc = proc
         self._emit("game_started", {})
@@ -1666,6 +1683,8 @@ class BackendAPI:
         try:
             code = proc.wait()
         finally:
+            if skin_server is not None:
+                skin_server.stop()
             if tracker is not None:
                 try:
                     dur = tracker.stop()
@@ -1736,6 +1755,9 @@ class BackendAPI:
         acc = self._skin_account(account_name)
         progress(1, 2, "上传皮肤")
         msg = skin_ops.upload_skin(acc, file_path, variant)
+        if acc.get("type") == "offline":
+            # 离线皮肤写在账号记录里，需要落盘
+            self.accounts.save()
         log(msg)
         return msg
 
@@ -1745,6 +1767,8 @@ class BackendAPI:
         acc = self._skin_account(account_name)
         progress(1, 2, "重置皮肤")
         msg = skin_ops.reset_skin(acc)
+        if acc.get("type") == "offline":
+            self.accounts.save()
         log(msg)
         return msg
 

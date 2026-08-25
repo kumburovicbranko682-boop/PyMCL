@@ -72,18 +72,20 @@ def normalize_variant(variant: str) -> str:
 # ---------------------------------------------------------------- 能力判定
 
 def change_support(account: dict | None) -> dict:
-    """账号是否支持在启动器内更换皮肤。返回 {ok, reason}。"""
+    """账号是否支持在启动器内更换皮肤。返回 {ok, reason, note}。"""
     acc = account or {}
     kind = acc.get("type") or ""
     if kind == "microsoft":
-        return {"ok": True, "reason": ""}
+        return {"ok": True, "reason": "", "note": ""}
     if kind == "authlib":
-        return {"ok": True, "reason": ""}
+        return {"ok": True, "reason": "", "note": ""}
     if kind == "nide8":
-        return {"ok": False, "reason": "统一通行证账号请到对应服务器的通行证网站更换皮肤"}
+        return {"ok": False, "reason": "统一通行证账号请到对应服务器的通行证网站更换皮肤",
+                "note": ""}
     if kind == "offline":
-        return {"ok": False, "reason": "离线账号仅支持本地默认皮肤（Steve / Alex）"}
-    return {"ok": False, "reason": "请先登录微软正版或皮肤站账号"}
+        return {"ok": True, "reason": "",
+                "note": "离线皮肤由 PyMCL 启动时在本机提供（authlib-injector），仅本机可见"}
+    return {"ok": False, "reason": "请先登录微软正版或皮肤站账号", "note": ""}
 
 
 # ---------------------------------------------------------------- 请求
@@ -132,6 +134,11 @@ def upload_skin(account: dict, path: str, variant: str = "classic", timeout: int
         raise SkinError(support["reason"])
     variant = normalize_variant(variant)
     kind = account.get("type")
+    if kind == "offline":
+        # 本地皮肤：写进账号记录（调用方负责 accounts.save()），
+        # 启动时由 offline_skin 的本地 Yggdrasil 服务提供
+        from . import offline_skin
+        return offline_skin.apply_to_account(account, path, variant)
     if kind == "microsoft":
         data = load_skin_file(path, strict_mojang=True)
         try:
@@ -170,6 +177,9 @@ def reset_skin(account: dict, timeout: int = 30) -> str:
     if not support["ok"]:
         raise SkinError(support["reason"])
     kind = account.get("type")
+    if kind == "offline":
+        from . import offline_skin
+        return offline_skin.clear_account(account)
     if kind == "microsoft":
         try:
             resp = requests.delete(MS_SKIN_RESET_URL, headers=_bearer(account), timeout=timeout)
