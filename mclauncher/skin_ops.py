@@ -17,6 +17,8 @@ from . import utils
 
 MS_SKIN_URL = "https://api.minecraftservices.com/minecraft/profile/skins"
 MS_SKIN_RESET_URL = "https://api.minecraftservices.com/minecraft/profile/skins/active"
+MS_PROFILE_URL = "https://api.minecraftservices.com/minecraft/profile"
+MS_CAPE_URL = "https://api.minecraftservices.com/minecraft/profile/capes/active"
 
 # Mojang 官方皮肤上限 24 KiB
 MS_MAX_BYTES = 24576
@@ -195,3 +197,61 @@ def reset_skin(account: dict, timeout: int = 30) -> str:
             raise SkinError("该皮肤站不支持在启动器内重置皮肤，请到皮肤站网站操作")
         _check(resp, "重置皮肤")
     return "皮肤已重置为默认。预览图可能延迟几分钟刷新"
+
+
+# ---------------------------------------------------------------- 披风（正版）
+
+def cape_support(account: dict | None) -> dict:
+    """是否支持在启动器内切换披风。只有微软正版有官方披风接口。"""
+    kind = (account or {}).get("type") or ""
+    if kind == "microsoft":
+        return {"ok": True, "reason": ""}
+    if kind == "authlib":
+        return {"ok": False, "reason": "皮肤站披风请到对应网站更换"}
+    if kind == "offline":
+        return {"ok": False, "reason": "离线账号没有官方披风"}
+    return {"ok": False, "reason": "请先登录微软正版账号"}
+
+
+def list_capes(account: dict, timeout: int = 30) -> list[dict]:
+    """列出正版账号拥有的披风。返回 [{id, alias, url, active}]。"""
+    support = cape_support(account)
+    if not support["ok"]:
+        raise SkinError(support["reason"])
+    try:
+        resp = requests.get(MS_PROFILE_URL, headers=_bearer(account), timeout=timeout)
+    except requests.RequestException as exc:
+        raise SkinError(f"获取披风列表失败：无法连接 Minecraft 服务: {exc}") from exc
+    _check(resp, "获取披风列表")
+    try:
+        data = resp.json()
+    except ValueError:
+        raise SkinError("获取披风列表失败：返回数据无法解析")
+    out = []
+    for cape in data.get("capes") or []:
+        out.append({
+            "id": str(cape.get("id") or ""),
+            "alias": str(cape.get("alias") or "") or "未命名披风",
+            "url": str(cape.get("url") or ""),
+            "active": str(cape.get("state") or "").upper() == "ACTIVE",
+        })
+    return out
+
+
+def set_cape(account: dict, cape_id: str = "", timeout: int = 30) -> str:
+    """激活指定披风；cape_id 为空则隐藏披风。返回成功提示文本。"""
+    support = cape_support(account)
+    if not support["ok"]:
+        raise SkinError(support["reason"])
+    cape_id = str(cape_id or "").strip()
+    try:
+        if cape_id:
+            resp = requests.put(
+                MS_CAPE_URL, headers=_bearer(account),
+                json={"capeId": cape_id}, timeout=timeout)
+        else:
+            resp = requests.delete(MS_CAPE_URL, headers=_bearer(account), timeout=timeout)
+    except requests.RequestException as exc:
+        raise SkinError(f"更换披风失败：无法连接 Minecraft 服务: {exc}") from exc
+    _check(resp, "更换披风")
+    return "披风已更换。游戏内立即生效" if cape_id else "已隐藏披风"

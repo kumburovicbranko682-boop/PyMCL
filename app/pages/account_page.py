@@ -25,6 +25,9 @@ class AccountPage(QWidget):
         self._active_name = ""
         self._pix_token = 0
         self._auth_busy = False
+        self._capes = []
+        self._capes_for = None
+        self._cape_loading = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 20, 28, 20)
@@ -56,6 +59,14 @@ class AccountPage(QWidget):
         self.reset_skin_btn = TransparentPushButton(tr("重置为默认皮肤"))
         self.reset_skin_btn.clicked.connect(self._reset_skin)
         sl.addWidget(self.reset_skin_btn)
+        cape_row = QHBoxLayout()
+        cape_row.addWidget(CaptionLabel(tr("披风")))
+        self.cape_box = ComboBox()
+        self.cape_box.addItem(tr("不显示披风"))
+        self.cape_box.setEnabled(False)
+        self.cape_box.activated.connect(self._apply_cape)
+        cape_row.addWidget(self.cape_box, 1)
+        sl.addLayout(cape_row)
         self.skin_hint = CaptionLabel("")
         self.skin_hint.setWordWrap(True)
         self.skin_hint.setVisible(False)
@@ -224,6 +235,62 @@ class AccountPage(QWidget):
                 else str(support.get("reason") or ""))
         self.skin_hint.setText(hint)
         self.skin_hint.setVisible(bool(hint))
+        self._sync_cape_controls()
+
+    def _set_cape_items(self, capes: list, active_idx: int):
+        self.cape_box.blockSignals(True)
+        self.cape_box.clear()
+        self.cape_box.addItem(tr("不显示披风"))
+        for cape in capes:
+            self.cape_box.addItem(str(cape.get("alias") or tr("未命名披风")))
+        self.cape_box.setCurrentIndex(active_idx)
+        self.cape_box.blockSignals(False)
+
+    def _sync_cape_controls(self):
+        cs = self.backend.cape_support(self._active_name)
+        if not cs.get("ok"):
+            self._capes = []
+            self._capes_for = None
+            self._set_cape_items([], 0)
+            self.cape_box.setEnabled(False)
+            self.cape_box.setToolTip(str(cs.get("reason") or ""))
+            return
+        self.cape_box.setToolTip("")
+        if self._capes_for == self._active_name:
+            self.cape_box.setEnabled(not self._skin_task)
+            return
+        call_async = getattr(self.backend, "call_async", None)
+        if not callable(call_async) or self._cape_loading:
+            return
+        self._cape_loading = True
+        self.cape_box.setEnabled(False)
+        name = self._active_name
+        call_async(lambda: self.backend.list_capes(name),
+                   lambda capes: self._fill_capes(name, capes),
+                   lambda *_: self._fill_capes(name, None))
+
+    def _fill_capes(self, name: str, capes):
+        self._cape_loading = False
+        if name != self._active_name:
+            return
+        self._capes = capes or []
+        self._capes_for = name if capes is not None else None
+        active_idx = 0
+        for i, cape in enumerate(self._capes, start=1):
+            if cape.get("active"):
+                active_idx = i
+        self._set_cape_items(self._capes, active_idx)
+        self.cape_box.setEnabled(capes is not None and not self._skin_task)
+
+    def _apply_cape(self, index: int):
+        if self._skin_task or not self._active_name:
+            self._sync_cape_controls()
+            return
+        cape_id = ""
+        if index > 0 and index - 1 < len(self._capes):
+            cape_id = str(self._capes[index - 1].get("id") or "")
+        self._skin_task = self.backend.set_cape(self._active_name, cape_id)
+        self._sync_skin_controls()
 
     def restyle(self):
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
@@ -360,6 +427,7 @@ class AccountPage(QWidget):
             if success:
                 InfoBar.success(tr("皮肤"), message, parent=self,
                                 position=InfoBarPosition.TOP, duration=4000)
+                self._capes_for = None  # 披风状态可能已变，强制重新拉取
                 self.reload()
             else:
                 self._sync_skin_controls()

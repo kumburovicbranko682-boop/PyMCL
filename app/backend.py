@@ -1376,6 +1376,21 @@ class BackendAPI(QObject):
     def reset_skin(self, account_name: str = "") -> str:
         return self.start_task(tr("重置皮肤"), self._reset_skin_impl, account_name)
 
+    def cape_support(self, account_name: str = "") -> dict:
+        from mclauncher import skin_ops
+        acc = (self.accounts.get_account(account_name) if account_name
+               else self.accounts.get_active())
+        return skin_ops.cape_support(acc)
+
+    def list_capes(self, account_name: str = "") -> list:
+        """列出正版账号的披风（网络请求，UI 请用 call_async 包一层）。"""
+        from mclauncher import skin_ops
+        return skin_ops.list_capes(self._skin_account(account_name))
+
+    def set_cape(self, account_name: str, cape_id: str = "") -> str:
+        return self.start_task(tr("更换披风"), self._set_cape_impl,
+                               account_name, cape_id)
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)
@@ -2185,6 +2200,15 @@ class BackendAPI(QObject):
         msg = skin_ops.reset_skin(acc)
         if acc.get("type") == "offline":
             self.accounts.save()
+        log(msg)
+        return msg
+
+    def _set_cape_impl(self, progress, log, account_name, cape_id):
+        from mclauncher import skin_ops
+        progress(0, 2, tr("校验登录状态"))
+        acc = self._skin_account(account_name)
+        progress(1, 2, tr("更换披风"))
+        msg = skin_ops.set_cape(acc, cape_id)
         log(msg)
         return msg
 

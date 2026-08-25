@@ -270,5 +270,71 @@ class TestMicrosoftRequests(unittest.TestCase):
         self.assertIn("重新登录", str(ctx.exception))
 
 
+class TestCapes(unittest.TestCase):
+    ACCOUNT = {"type": "microsoft", "name": "MS", "uuid": "u",
+               "access_token": "mstok"}
+
+    def test_support_kinds(self):
+        self.assertTrue(skin_ops.cape_support({"type": "microsoft"})["ok"])
+        for kind in ("offline", "authlib", "nide8", ""):
+            res = skin_ops.cape_support({"type": kind})
+            self.assertFalse(res["ok"])
+            self.assertTrue(res["reason"])
+        self.assertFalse(skin_ops.cape_support(None)["ok"])
+
+    def test_list_capes(self):
+        payload = {"capes": [
+            {"id": "c1", "state": "ACTIVE", "url": "http://x/1.png",
+             "alias": "Migrator"},
+            {"id": "c2", "state": "INACTIVE", "url": "http://x/2.png",
+             "alias": "Vanilla"},
+        ]}
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = payload
+        with mock.patch.object(skin_ops.requests, "get", return_value=resp) as get:
+            rows = skin_ops.list_capes(self.ACCOUNT)
+        self.assertEqual(get.call_args[0][0], skin_ops.MS_PROFILE_URL)
+        self.assertEqual(get.call_args[1]["headers"]["Authorization"], "Bearer mstok")
+        self.assertEqual(rows, [
+            {"id": "c1", "alias": "Migrator", "url": "http://x/1.png", "active": True},
+            {"id": "c2", "alias": "Vanilla", "url": "http://x/2.png", "active": False},
+        ])
+
+    def test_list_capes_empty_profile(self):
+        resp = mock.Mock(status_code=200)
+        resp.json.return_value = {"id": "u", "name": "MS"}
+        with mock.patch.object(skin_ops.requests, "get", return_value=resp):
+            self.assertEqual(skin_ops.list_capes(self.ACCOUNT), [])
+
+    def test_set_cape_put(self):
+        resp = mock.Mock(status_code=200)
+        with mock.patch.object(skin_ops.requests, "put", return_value=resp) as put:
+            msg = skin_ops.set_cape(self.ACCOUNT, "c2")
+        self.assertIn("披风已更换", msg)
+        self.assertEqual(put.call_args[0][0], skin_ops.MS_CAPE_URL)
+        self.assertEqual(put.call_args[1]["json"], {"capeId": "c2"})
+        self.assertEqual(put.call_args[1]["headers"]["Authorization"], "Bearer mstok")
+
+    def test_hide_cape_delete(self):
+        resp = mock.Mock(status_code=200)
+        with mock.patch.object(skin_ops.requests, "delete", return_value=resp) as dele:
+            msg = skin_ops.set_cape(self.ACCOUNT, "")
+        self.assertIn("隐藏", msg)
+        self.assertEqual(dele.call_args[0][0], skin_ops.MS_CAPE_URL)
+
+    def test_cape_401(self):
+        resp = mock.Mock(status_code=401)
+        with mock.patch.object(skin_ops.requests, "get", return_value=resp):
+            with self.assertRaises(SkinError) as ctx:
+                skin_ops.list_capes(self.ACCOUNT)
+        self.assertIn("重新登录", str(ctx.exception))
+
+    def test_unsupported_account_raises(self):
+        with self.assertRaises(SkinError):
+            skin_ops.list_capes({"type": "offline", "name": "x"})
+        with self.assertRaises(SkinError):
+            skin_ops.set_cape({"type": "authlib", "name": "x"}, "c1")
+
+
 if __name__ == "__main__":
     unittest.main()
