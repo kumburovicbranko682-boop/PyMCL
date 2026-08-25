@@ -122,6 +122,58 @@ class WorldDatapacksDialog(MessageBoxBase):
         self.reload()
 
 
+class WorldEditDialog(MessageBoxBase):
+    """世界信息编辑（对标 HMCL 世界信息页）：名字 / 作弊 / 难度 / 难度锁 / 模式。"""
+
+    MODES = ("生存", "创造", "冒险", "旁观", "极限")
+    DIFFS = ("和平", "简单", "普通", "困难")
+
+    def __init__(self, row: dict, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QFormLayout
+        from qfluentwidgets import LineEdit, SwitchButton
+        self.viewLayout.addWidget(SubtitleLabel(
+            tr("编辑世界 · {name}").format(name=row.get("name") or "")))
+        host = QWidget(self)
+        form = QFormLayout(host)
+        form.setContentsMargins(0, 8, 0, 0)
+        self.name_edit = LineEdit()
+        self.name_edit.setText(str(row.get("level_name") or row.get("name") or ""))
+        form.addRow(tr("世界名"), self.name_edit)
+        self.mode_box = ComboBox()
+        self.mode_box.addItems([tr(m) for m in self.MODES])
+        idx = row.get("game_mode_code")
+        if row.get("hardcore"):
+            idx = 4
+        self.mode_box.setCurrentIndex(idx if isinstance(idx, int) and 0 <= idx <= 4 else 0)
+        form.addRow(tr("游戏模式"), self.mode_box)
+        self.diff_box = ComboBox()
+        self.diff_box.addItems([tr(d) for d in self.DIFFS])
+        didx = row.get("difficulty_code")
+        self.diff_box.setCurrentIndex(didx if isinstance(didx, int) and 0 <= didx <= 3 else 2)
+        form.addRow(tr("难度"), self.diff_box)
+        self.lock_sw = SwitchButton()
+        self.lock_sw.setChecked(bool(row.get("difficulty_locked")))
+        form.addRow(tr("锁定难度"), self.lock_sw)
+        self.cheat_sw = SwitchButton()
+        self.cheat_sw.setChecked(bool(row.get("cheats")))
+        form.addRow(tr("允许作弊"), self.cheat_sw)
+        self.viewLayout.addWidget(host)
+        self.yesButton.setText(tr("保存"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(420)
+
+    def changes(self) -> dict:
+        mode_idx = self.mode_box.currentIndex()
+        return {
+            "level_name": self.name_edit.text().strip(),
+            "game_mode": "hardcore" if mode_idx == 4 else mode_idx,
+            "difficulty": self.diff_box.currentIndex(),
+            "difficulty_locked": self.lock_sw.isChecked(),
+            "allow_cheats": self.cheat_sw.isChecked(),
+        }
+
+
 class SavesDialog(MessageBoxBase):
     def __init__(self, backend, instance: str, version: str = "", parent=None):
         super().__init__(parent)
@@ -151,10 +203,13 @@ class SavesDialog(MessageBoxBase):
         row.addWidget(self.del_btn)
         row.addWidget(self.dp_btn)
         row2 = QHBoxLayout()
+        self.edit_btn = PushButton(tr("编辑世界"))
+        self.edit_btn.setToolTip(tr("改世界名 / 游戏模式 / 难度 / 允许作弊（写入 level.dat）"))
         self.backup_btn = PushButton(tr("备份存档"))
         self.restore_btn = PushButton(tr("还原备份"))
         self.export_btn = PushButton(tr("导出为 zip"))
         self.wdp_btn = PushButton(tr("存档数据包"))
+        row2.addWidget(self.edit_btn)
         row2.addWidget(self.backup_btn)
         row2.addWidget(self.restore_btn)
         row2.addWidget(self.export_btn)
@@ -170,6 +225,7 @@ class SavesDialog(MessageBoxBase):
         self.open_btn.clicked.connect(self._open)
         self.del_btn.clicked.connect(self._delete)
         self.dp_btn.clicked.connect(self._datapack)
+        self.edit_btn.clicked.connect(self._edit_world)
         self.backup_btn.clicked.connect(self._backup)
         self.restore_btn.clicked.connect(self._restore)
         self.export_btn.clicked.connect(self._export)
@@ -183,6 +239,7 @@ class SavesDialog(MessageBoxBase):
         self.del_btn.setEnabled(is_save or is_backup)
         self.del_btn.setText(tr("删除备份") if is_backup else tr("删除存档"))
         self.dp_btn.setEnabled(is_save)
+        self.edit_btn.setEnabled(is_save)
         self.backup_btn.setEnabled(is_save)
         self.export_btn.setEnabled(is_save)
         self.wdp_btn.setEnabled(is_save)
@@ -352,6 +409,26 @@ class SavesDialog(MessageBoxBase):
             MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
             return
         WorldDatapacksDialog(self.backend, self.instance, name, self.version, self).exec()
+
+    def _edit_world(self):
+        name = self._selected_name()
+        if not name:
+            MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
+            return
+        rows = self.backend.list_saves(self.instance, self.version)
+        row = next((r for r in rows if r.get("name") == name), None)
+        if row is None:
+            MessageBox(tr("存档不存在"), name, self).exec()
+            return
+        dlg = WorldEditDialog(row, self)
+        if not dlg.exec():
+            return
+        try:
+            self.backend.edit_world(self.instance, name, dlg.changes(), self.version)
+        except Exception as e:
+            MessageBox(tr("编辑失败"), str(e), self).exec()
+            return
+        self.reload()
 
     def _datapack(self):
         name = self._selected_name()

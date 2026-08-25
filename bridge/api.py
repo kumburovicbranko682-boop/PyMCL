@@ -458,6 +458,14 @@ class BackendAPI:
         from mclauncher import saves as saves_mod
         saves_mod.delete_save(self._instance(instance), name, version)
 
+    def edit_world(self, instance: str, name: str, changes: dict,
+                   version: str = "") -> dict:
+        """编辑存档 level.dat：世界名/作弊/难度/难度锁/游戏模式（HMCL 同款）。"""
+        from mclauncher import saves as saves_mod
+        out = saves_mod.edit_world(self._instance(instance), name, changes, version)
+        self._emit("ui_changed", {})
+        return out
+
     def open_save(self, instance: str, name: str, version: str = "") -> str:
         from mclauncher import saves as saves_mod
         return saves_mod.open_save(self._instance(instance), name, version)

@@ -1134,5 +1134,15 @@
   "选择要添加的游戏目录": "Choose a game directory to add",
   "（不存在）": " (missing)",
   "默认目录": "Default directory",
-  "打开 MC 百科页面": "Open mcmod.cn wiki page"
+  "打开 MC 百科页面": "Open mcmod.cn wiki page",
+  "编辑世界": "Edit world",
+  "改世界名 / 游戏模式 / 难度 / 允许作弊（写入 level.dat）": "Change world name / game mode / difficulty / cheats (writes level.dat)",
+  "编辑世界 · {name}": "Edit world · {name}",
+  "世界名": "World name",
+  "游戏模式": "Game mode",
+  "难度": "Difficulty",
+  "锁定难度": "Lock difficulty",
+  "允许作弊": "Allow cheats",
+  "编辑失败": "Edit failed",
+  "存档不存在": "World not found"
 }

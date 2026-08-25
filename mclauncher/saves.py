@@ -78,6 +78,8 @@ def level_summary(save_dir) -> dict:
         "game_mode": GAME_MODES.get(mode_code, ""),
         "game_mode_code": mode_code,
         "difficulty": DIFFICULTIES.get(diff_code, ""),
+        "difficulty_code": diff_code,
+        "difficulty_locked": bool(data.get("DifficultyLocked")),
         "hardcore": bool(data.get("hardcore")),
         "cheats": bool(data.get("allowCommands")),
         "seed": str(seed) if seed is not None else "",
@@ -116,6 +118,84 @@ def delete_save(instance: Instance, name: str, version_id: str = ""):
         raise SaveError(f"存档不存在: {name}")
     from . import trash
     trash.trash_or_delete(target)
+
+
+# ---------------------------------------------------------------- 世界信息编辑
+
+GAME_MODE_CODES = {"survival": 0, "creative": 1, "adventure": 2, "spectator": 3}
+
+
+def edit_world(instance: Instance, name: str, changes: dict,
+               version_id: str = "") -> dict:
+    """编辑 level.dat（HMCL 世界信息页同款字段）。返回更新后的 level_summary。
+
+    changes 支持的键（都可选）：
+      level_name        世界名（非空字符串）
+      allow_cheats      允许作弊 bool → Data.allowCommands
+      difficulty        0~3 → Data.Difficulty
+      difficulty_locked bool → Data.DifficultyLocked
+      game_mode         0~3 / survival/creative/adventure/spectator / "hardcore"
+                        → Data.GameType + Data.hardcore + Data.Player.playerGameType
+                        （极限 = 生存 + hardcore 标记，同 HMCL）
+
+    写之前把原 level.dat 复制成 level.dat.pymcl_bak（每次编辑刷新）。
+    """
+    from . import nbt
+    save_dir = _safe_child(_game_dir(instance, version_id) / "saves", name)
+    f = save_dir / "level.dat"
+    if not f.is_file():
+        raise SaveError(f"存档没有 level.dat: {name}")
+    changes = dict(changes or {})
+    raw = f.read_bytes()
+    compressed = raw[:2] == b"\x1f\x8b"
+    try:
+        root_name, root = nbt.loads_typed(raw)
+    except nbt.NBTError as e:
+        raise SaveError(f"level.dat 损坏，无法编辑: {e}")
+    data_tag = root[1].get("Data")
+    if not data_tag or data_tag[0] != nbt.TAG_COMPOUND:
+        raise SaveError("level.dat 缺少 Data 复合标签")
+    d = data_tag[1]
+
+    if "level_name" in changes:
+        new_name = str(changes["level_name"] or "").strip()
+        if not new_name:
+            raise SaveError("世界名不能为空")
+        d["LevelName"] = (nbt.TAG_STRING, new_name)
+    if "allow_cheats" in changes:
+        d["allowCommands"] = (nbt.TAG_BYTE, 1 if changes["allow_cheats"] else 0)
+    if "difficulty" in changes:
+        try:
+            diff = int(changes["difficulty"])
+        except (TypeError, ValueError):
+            raise SaveError(f"难度无效: {changes['difficulty']}")
+        if diff not in (0, 1, 2, 3):
+            raise SaveError(f"难度无效: {diff}")
+        d["Difficulty"] = (nbt.TAG_BYTE, diff)
+    if "difficulty_locked" in changes:
+        d["DifficultyLocked"] = (nbt.TAG_BYTE, 1 if changes["difficulty_locked"] else 0)
+    if "game_mode" in changes:
+        mode_raw = changes["game_mode"]
+        hardcore = str(mode_raw).lower() == "hardcore"
+        if hardcore:
+            mode = 0
+        else:
+            mode = GAME_MODE_CODES.get(str(mode_raw).lower(), mode_raw)
+            try:
+                mode = int(mode)
+            except (TypeError, ValueError):
+                raise SaveError(f"游戏模式无效: {mode_raw}")
+            if mode not in (0, 1, 2, 3):
+                raise SaveError(f"游戏模式无效: {mode_raw}")
+        d["GameType"] = (nbt.TAG_INT, mode)
+        d["hardcore"] = (nbt.TAG_BYTE, 1 if hardcore else 0)
+        player = d.get("Player")
+        if player and player[0] == nbt.TAG_COMPOUND:
+            player[1]["playerGameType"] = (nbt.TAG_INT, mode)
+
+    shutil.copy2(f, save_dir / "level.dat.pymcl_bak")
+    f.write_bytes(nbt.dumps_typed(root_name, root, compress=compressed))
+    return level_summary(save_dir)
 
 
 def open_save(instance: Instance, name: str, version_id: str = "") -> str:

@@ -599,6 +599,14 @@ class BackendAPI(QObject):
         saves_mod.delete_save(self._instance(instance), name, version)
         self._emit_ui_changed()
 
+    def edit_world(self, instance: str, name: str, changes: dict,
+                   version: str = "") -> dict:
+        """编辑存档 level.dat：世界名/作弊/难度/难度锁/游戏模式（HMCL 同款）。"""
+        from mclauncher import saves as saves_mod
+        out = saves_mod.edit_world(self._instance(instance), name, changes, version)
+        self._emit_ui_changed()
+        return out
+
     def backup_save(self, instance: str, name: str, version: str = "") -> str:
         return self.start_task(f"备份存档 {name}", self._backup_save_impl, instance, name, version)
 

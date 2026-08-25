@@ -1,8 +1,13 @@
 # -*- coding: utf-8 -*-
-"""最小 NBT 读取器（level.dat 等小文件用）。
+"""最小 NBT 读写器（level.dat 等小文件用）。
 
-只读不写。大端 Java 版格式，支持 gzip / 未压缩两种存储。
-列表/数组按 Python list 返回，复合标签按 dict 返回。
+大端 Java 版格式，支持 gzip / 未压缩两种存储。
+
+两套 API：
+- loads / read_file：只读，丢类型（复合→dict、数值→int/float），看数据方便；
+- loads_typed / dumps_typed：带类型无损往返，编辑 level.dat 用。
+  带类型表示：标签 = (tag_type, value)；复合 value 是 {名字: 标签}；
+  列表 value 是 (元素类型, [元素负载, ...])。
 """
 from __future__ import annotations
 
@@ -127,3 +132,104 @@ def read_file(path) -> dict:
     if p.stat().st_size > MAX_NBT_BYTES:
         raise NBTError("NBT 文件过大")
     return loads(p.read_bytes())
+
+
+# ================================================================ 带类型读写
+
+
+def _read_typed_payload(r: _Reader, tag: int):
+    if tag == TAG_LIST:
+        elem_tag = r.unpack(">B")
+        n = r.unpack(">i")
+        if n < 0 or n > _MAX_ELEMS:
+            raise NBTError(f"列表长度异常: {n}")
+        return (elem_tag, [_read_typed_payload(r, elem_tag) for _ in range(n)])
+    if tag == TAG_COMPOUND:
+        out = {}
+        while True:
+            child = r.unpack(">B")
+            if child == TAG_END:
+                return out
+            name = r.string()
+            out[name] = (child, _read_typed_payload(r, child))
+    return _read_payload(r, tag)
+
+
+def loads_typed(data: bytes) -> tuple:
+    """解析成带类型树。返回 (根名, (TAG_COMPOUND, {...}))。"""
+    if data[:2] == b"\x1f\x8b":
+        try:
+            data = gzip.decompress(data)
+        except OSError as e:
+            raise NBTError(f"gzip 解压失败: {e}") from e
+    if len(data) > MAX_NBT_BYTES:
+        raise NBTError("NBT 数据过大")
+    if not data:
+        raise NBTError("NBT 数据为空")
+    r = _Reader(data)
+    tag = r.unpack(">B")
+    if tag != TAG_COMPOUND:
+        raise NBTError(f"根标签不是 Compound: {tag}")
+    root_name = r.string()
+    return root_name, (TAG_COMPOUND, _read_typed_payload(r, TAG_COMPOUND))
+
+
+_SCALAR_FMT = {
+    TAG_BYTE: ">b", TAG_SHORT: ">h", TAG_INT: ">i", TAG_LONG: ">q",
+    TAG_FLOAT: ">f", TAG_DOUBLE: ">d",
+}
+
+
+def _write_string(out: bytearray, s: str):
+    raw = str(s).encode("utf-8")
+    if len(raw) > 0xFFFF:
+        raise NBTError("字符串过长")
+    out += struct.pack(">H", len(raw))
+    out += raw
+
+
+def _write_typed_payload(out: bytearray, tag: int, value):
+    fmt = _SCALAR_FMT.get(tag)
+    if fmt:
+        out += struct.pack(fmt, value)
+        return
+    if tag == TAG_STRING:
+        _write_string(out, value)
+        return
+    if tag == TAG_BYTE_ARRAY:
+        out += struct.pack(">i", len(value))
+        out += bytes((b & 0xFF) for b in value)
+        return
+    if tag == TAG_INT_ARRAY:
+        out += struct.pack(f">i{len(value)}i", len(value), *value)
+        return
+    if tag == TAG_LONG_ARRAY:
+        out += struct.pack(f">i{len(value)}q", len(value), *value)
+        return
+    if tag == TAG_LIST:
+        elem_tag, items = value
+        out += struct.pack(">Bi", elem_tag, len(items))
+        for item in items:
+            _write_typed_payload(out, elem_tag, item)
+        return
+    if tag == TAG_COMPOUND:
+        for name, (child_tag, child_value) in value.items():
+            out += struct.pack(">B", child_tag)
+            _write_string(out, name)
+            _write_typed_payload(out, child_tag, child_value)
+        out += struct.pack(">B", TAG_END)
+        return
+    raise NBTError(f"未知标签类型: {tag}")
+
+
+def dumps_typed(root_name: str, root: tuple, compress: bool = True) -> bytes:
+    """把带类型树编码回 NBT 字节串（compress=True 时 gzip，level.dat 默认压缩）。"""
+    tag, value = root
+    if tag != TAG_COMPOUND:
+        raise NBTError("根标签必须是 Compound")
+    out = bytearray()
+    out += struct.pack(">B", TAG_COMPOUND)
+    _write_string(out, root_name or "")
+    _write_typed_payload(out, TAG_COMPOUND, value)
+    data = bytes(out)
+    return gzip.compress(data) if compress else data
