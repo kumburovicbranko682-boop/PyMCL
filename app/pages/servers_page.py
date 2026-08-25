@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QHeaderView, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
@@ -34,6 +35,9 @@ class ServerPage(QWidget):
         self.backend = backend
         self._instance = ""
         self._servers = []
+        # 状态刷新令牌：reload 后旧的 ping 回调直接作废，避免写错行
+        self._status_token = 0
+        self._status_pending = 0
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -60,6 +64,11 @@ class ServerPage(QWidget):
         add_btn.setIcon(FIF.ADD)
         add_btn.clicked.connect(self._on_add)
         tl.addWidget(add_btn)
+        self.status_btn = PushButton(tr("刷新状态"))
+        self.status_btn.setIcon(FIF.SYNC)
+        self.status_btn.setToolTip(tr("查询每个服务器的在线状态、延迟与在线人数"))
+        self.status_btn.clicked.connect(self._refresh_status)
+        tl.addWidget(self.status_btn)
         import_btn = PushButton(tr("导入"))
         import_btn.clicked.connect(self._on_import)
         tl.addWidget(import_btn)
@@ -70,13 +79,15 @@ class ServerPage(QWidget):
 
         # 表格
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels([tr("名称"), tr("地址"), tr("端口"), tr("描述"), tr("操作")])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(
+            [tr("名称"), tr("地址"), tr("端口"), tr("状态"), tr("描述"), tr("操作")])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.verticalHeader().hide()
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -134,6 +145,11 @@ class ServerPage(QWidget):
             self.empty.restyle()
 
     def _render(self):
+        # 表格重建后，旧的状态查询回调不能再往单元格里写
+        self._status_token += 1
+        self._status_pending = 0
+        self.status_btn.setEnabled(bool(self._servers))
+        self.status_btn.setText(tr("刷新状态"))
         self.table.setRowCount(0)
         if not self._servers:
             self._body.setCurrentWidget(self.empty)
@@ -144,8 +160,9 @@ class ServerPage(QWidget):
             self.table.setItem(i, 0, QTableWidgetItem(s.get("name", "?")))
             self.table.setItem(i, 1, QTableWidgetItem(s.get("ip", "")))
             self.table.setItem(i, 2, QTableWidgetItem(str(s.get("port", 25565))))
+            self.table.setItem(i, 3, QTableWidgetItem("—"))
             desc = (s.get("description", "") or "")[:40]
-            self.table.setItem(i, 3, QTableWidgetItem(desc))
+            self.table.setItem(i, 4, QTableWidgetItem(desc))
             btn_w = QWidget()
             btn_l = QHBoxLayout(btn_w)
             btn_l.setContentsMargins(4, 2, 4, 2)
@@ -157,7 +174,61 @@ class ServerPage(QWidget):
             del_b.clicked.connect(lambda checked, idx=i: self._on_delete(idx))
             btn_l.addWidget(edit_b)
             btn_l.addWidget(del_b)
-            self.table.setCellWidget(i, 4, btn_w)
+            self.table.setCellWidget(i, 5, btn_w)
+
+    # ------------------------------------------------------------ 状态查询
+
+    def _refresh_status(self):
+        """并发查询所有服务器的在线状态（Server List Ping）。"""
+        if not self._servers or self._status_pending:
+            return
+        self._status_token += 1
+        token = self._status_token
+        self._status_pending = len(self._servers)
+        self.status_btn.setEnabled(False)
+        self.status_btn.setText(tr("查询中…"))
+        for i, s in enumerate(self._servers):
+            self._set_status_cell(i, QTableWidgetItem(tr("查询中…")))
+            host, port = s.get("ip", ""), s.get("port", 25565)
+            self.backend.call_async(
+                lambda h=host, p=port: self.backend.ping_server(h, p),
+                lambda result, row=i: self._on_status(token, row, result),
+                lambda err, row=i: self._on_status(token, row, {"online": False, "error": str(err)}),
+            )
+
+    def _set_status_cell(self, row: int, item: QTableWidgetItem):
+        if 0 <= row < self.table.rowCount():
+            self.table.setItem(row, 3, item)
+
+    def _on_status(self, token: int, row: int, result: dict):
+        if token != self._status_token:
+            return
+        self._status_pending -= 1
+        if self._status_pending <= 0:
+            self._status_pending = 0
+            self.status_btn.setEnabled(True)
+            self.status_btn.setText(tr("刷新状态"))
+        result = result or {}
+        if result.get("online"):
+            text = f"{result.get('latency_ms', 0)}ms · {result.get('players_online', 0)}/{result.get('players_max', 0)}"
+            item = QTableWidgetItem(text)
+            item.setForeground(QColor("#2FA36B"))
+            tip_parts = []
+            if result.get("motd"):
+                tip_parts.append(str(result["motd"]))
+            if result.get("version"):
+                tip_parts.append(tr("版本: {v}").format(v=result["version"]))
+            names = [p.get("name", "") for p in result.get("players_sample") or [] if p.get("name")]
+            if names:
+                tip_parts.append(tr("在线玩家: {names}").format(names=", ".join(names[:12])))
+            if tip_parts:
+                item.setToolTip("\n".join(tip_parts))
+        else:
+            item = QTableWidgetItem(tr("离线"))
+            item.setForeground(QColor("#D84A4A"))
+            if result.get("error"):
+                item.setToolTip(str(result["error"]))
+        self._set_status_cell(row, item)
 
     def _on_add(self):
         dlg = InputDialog(tr("添加服务器"), tr("服务器名称"), placeholder=tr("可选"))

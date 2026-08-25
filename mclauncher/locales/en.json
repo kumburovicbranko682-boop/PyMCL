@@ -1037,5 +1037,11 @@
   "修改离线 UUID（服务器白名单 / 跨启动器迁移用）": "Edit offline UUID (for server whitelists / migrating from other launchers)",
   "修改离线 UUID": "Edit offline UUID",
   "其他启动器或服务器白名单里的 UUID 可以填到这里；留空则恢复按角色名推导的标准离线 UUID。": "Paste the UUID used by another launcher or a server whitelist; leave empty to restore the standard offline UUID derived from the player name.",
-  "UUID 已更新": "UUID updated"
+  "UUID 已更新": "UUID updated",
+  "状态": "Status",
+  "刷新状态": "Refresh status",
+  "查询每个服务器的在线状态、延迟与在线人数": "Query each server's online status, latency and player count",
+  "查询中…": "Querying…",
+  "版本: {v}": "Version: {v}",
+  "在线玩家: {names}": "Online players: {names}"
 }

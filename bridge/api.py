@@ -1944,6 +1944,11 @@ class BackendAPI:
         inst = self._instance(instance)
         return servers_mod.list_servers(inst)
 
+    def ping_server(self, host: str, port: int = 25565) -> dict:
+        """查询服务器状态（Server List Ping）。离线返回 online=False，不抛异常。"""
+        from mclauncher import server_ping
+        return server_ping.ping(host, port)
+
     def add_server(self, instance: str, name: str, ip: str, port: int = 25565,
                    description: str = "") -> dict:
         from mclauncher import servers as servers_mod
