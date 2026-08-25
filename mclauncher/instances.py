@@ -277,3 +277,101 @@ def create_unique_instance(raw, fallback="游戏", meta=None) -> Instance:
     inst = Instance(unique_instance_name(raw, fallback))
     inst.create(meta=meta)
     return inst
+
+
+# 复制实例时跳过的顶层运行残留（HMCL 复制实例也不带日志）
+_SKIP_COPY_DIRS = {"logs", "crash-reports"}
+
+
+def duplicate_instance(name, new_name="", on_progress=None) -> str:
+    """复制实例为一个新实例（对齐 HMCL「复制实例」/ PCL2「复制版本」）。
+
+    整个实例目录原样复制：版本、模组、存档、配置全带走，跳过
+    logs / crash-reports 运行残留。外部游戏目录也能复制——得到一份
+    托管副本，原目录不动。on_progress(已复制字节, 总字节)。
+    返回新实例名（重名自动加 -2/-3）。
+    """
+    import os
+    import shutil
+
+    src = Instance(name).path
+    if not src.is_dir():
+        raise InstanceError(f"实例 {name} 不存在。")
+    new_name = unique_instance_name(new_name or f"{name}-副本", fallback="副本")
+    dst = CONFIG.instances_dir / new_name
+    if dst.exists():
+        raise InstanceError(f"实例 {new_name} 已存在。")
+    instances_root = CONFIG.instances_dir.resolve()
+
+    # 一次遍历收集目录/文件/符号链接，顺便统计总字节数用于进度
+    dirs: list[Path] = []
+    files: list[tuple[Path, Path, int]] = []
+    links: list[tuple[Path, Path]] = []
+    total = 0
+    for dirpath, dirnames, filenames in os.walk(src, followlinks=False):
+        cur = Path(dirpath)
+        rel = cur.relative_to(src)
+        if cur == src:
+            dirnames[:] = [d for d in dirnames if d not in _SKIP_COPY_DIRS]
+        keep = []
+        for d in dirnames:
+            child = cur / d
+            # 外部目录可能是实例根的祖先：绝不把实例目录复制进自己
+            try:
+                if child.resolve() == instances_root:
+                    continue
+            except OSError:
+                continue
+            # 符号链接目录原样重建为链接，不追进去（防环、防复制半个磁盘）
+            if child.is_symlink():
+                links.append((child, rel / d))
+            else:
+                keep.append(d)
+        dirnames[:] = keep
+        dirs.append(rel)
+        for fn in filenames:
+            p = cur / fn
+            n = 0
+            if not p.is_symlink():
+                try:
+                    n = p.stat().st_size
+                except OSError:
+                    pass
+            files.append((p, rel / fn, n))
+            total += n
+
+    done = 0
+    try:
+        for rel in dirs:
+            utils.ensure_dir(dst / rel)
+        for srcf, rel, n in files:
+            target = dst / rel
+            if srcf.is_symlink():
+                try:
+                    os.symlink(os.readlink(srcf), target)
+                except OSError:
+                    try:
+                        shutil.copy2(srcf, target)
+                    except OSError:
+                        pass  # 坏链接 / 无权限建链：跳过，不拖垮整个复制
+            else:
+                shutil.copy2(srcf, target)
+            done += n
+            if on_progress and total:
+                on_progress(done, total)
+        for linkp, rel in links:
+            try:
+                os.symlink(os.readlink(linkp), dst / rel,
+                           target_is_directory=True)
+            except OSError:
+                pass
+    except BaseException:
+        utils.remove_tree(dst)
+        raise
+
+    meta = utils.read_json(dst / INSTANCE_META, {}) or {}
+    meta["name"] = new_name
+    meta.setdefault("java", JAVA_AUTO)
+    utils.write_json(dst / INSTANCE_META, meta)
+    Instance(new_name).ensure_standard_dirs()
+    return new_name

@@ -51,6 +51,9 @@ class InstanceCard(SimpleCardWidget):
         java_btn.setToolTip(tr("选择此实例使用的 Java"))
         rename_btn = TransparentToolButton(FIF.EDIT)
         rename_btn.setToolTip(tr("重命名"))
+        copy_btn = TransparentToolButton(FIF.COPY)
+        copy_btn.setToolTip(tr("复制为托管副本（原目录不动）")
+                            if info.get("external") else tr("复制实例"))
         delete_btn = TransparentToolButton(FIF.DELETE)
         delete_btn.setToolTip(tr("删除实例"))
         export_btn = TransparentToolButton(FIF.SHARE if hasattr(FIF, "SHARE") else FIF.DOWNLOAD)
@@ -60,6 +63,7 @@ class InstanceCard(SimpleCardWidget):
         open_btn.clicked.connect(lambda: page.open_folder(info["name"]))
         java_btn.clicked.connect(lambda: page.pick_java(info["name"]))
         rename_btn.clicked.connect(lambda: page.rename(info["name"]))
+        copy_btn.clicked.connect(lambda: page.duplicate(info["name"]))
         delete_btn.clicked.connect(
             lambda: page.delete(info["name"], bool(info.get("external"))))
         if info.get("external"):
@@ -71,6 +75,7 @@ class InstanceCard(SimpleCardWidget):
         actions.addWidget(saves_btn)
         actions.addWidget(java_btn)
         actions.addWidget(rename_btn)
+        actions.addWidget(copy_btn)
         actions.addWidget(export_btn)
         if info.get("pack"):
             update_btn = TransparentToolButton(
@@ -219,6 +224,18 @@ class InstancePage(QWidget):
             except Exception as e:
                 MessageBox(tr("重命名失败"), str(e), self).exec()
             self.reload()
+
+    def duplicate(self, name: str):
+        dlg = InputDialog(
+            tr("复制实例"),
+            tr("把「{name}」的版本、模组、存档与配置整体复制成一个新实例：").format(name=name),
+            text=f"{name}-" + tr("副本"), parent=self)
+        if not dlg.exec():
+            return
+        try:
+            self.backend.duplicate_instance(name, dlg.value())
+        except Exception as e:
+            MessageBox(tr("复制失败"), str(e), self).exec()
 
     def export_pack(self, name: str):
         self.backend.export_modpack(name)

@@ -901,6 +901,21 @@ class BackendAPI(QObject):
         self._emit_ui_changed()
         return final
 
+    def duplicate_instance(self, name: str, new_name: str = "") -> str:
+        """复制实例为新实例（含版本/模组/存档/配置）。异步任务，返回任务 id。"""
+        return self.start_task(tr("复制实例") + f" {name}",
+                               self._duplicate_instance_impl, name, new_name)
+
+    def _duplicate_instance_impl(self, progress, log, name, new_name):
+        from mclauncher import instances as inst_mod
+        log(tr("正在复制实例 {name}…").format(name=name))
+        final = inst_mod.duplicate_instance(
+            name, new_name,
+            on_progress=lambda done, total: progress(done, total, tr("复制文件")))
+        self._emit_ui_changed()
+        log(tr("已复制为新实例：{name}").format(name=final))
+        return final
+
     def delete_instance(self, name: str):
         Instance(name).delete()
         self._emit_ui_changed()
