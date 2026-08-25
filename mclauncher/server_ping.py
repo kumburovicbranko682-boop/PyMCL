@@ -4,8 +4,9 @@
 对齐 PCL2 联机页 / HMCL 多人游戏：不进游戏就能看到服务器是否在线、
 延迟、在线人数、版本与 MOTD。纯 TCP 实现，无第三方依赖。
 
-不做 SRV 记录解析（标准库没有 DNS SRV 查询）；绝大多数服务器
-直接按 host:port 可达，与游戏内直连行为一致。
+与游戏直连行为一致：地址是域名且未显式指定端口（默认 25565）时，
+先查 _minecraft._tcp SRV 记录拿到真实的 主机:端口（见 dns_srv 模块），
+否则「好记域名 + SRV 转发」的服务器会被误报离线。
 """
 from __future__ import annotations
 
@@ -200,6 +201,7 @@ def ping(host: str, port: int = 25565, timeout: float = 5.0) -> dict:
     永不抛异常：离线/超时/协议错误返回 {"online": False, "error": 原因}，
     在线返回 {"online": True, latency_ms, version, protocol,
     players_online, players_max, players_sample, motd, favicon}。
+    跟随了 SRV 记录时额外带 "srv": "目标主机:端口"。
     """
     host = str(host or "").strip()
     try:
@@ -210,7 +212,22 @@ def ping(host: str, port: int = 25565, timeout: float = 5.0) -> dict:
         return {"online": False, "error": "服务器地址为空"}
     if port < 1 or port > 65535:
         return {"online": False, "error": "端口号必须在 1-65535 之间"}
+
+    # 与原版客户端一致：域名 + 默认端口才查 SRV；显式端口/IP 直写不查
+    srv = None
+    if port == 25565 and "." in host:
+        try:
+            from . import dns_srv
+            if not dns_srv.is_ip_literal(host):
+                srv = dns_srv.resolve_minecraft_srv(host, timeout=min(1.5, timeout))
+        except Exception:
+            srv = None
+    real_host, real_port = srv if srv else (host, port)
+
     try:
-        return _ping_impl(host, port, timeout)
+        result = _ping_impl(real_host, real_port, timeout)
     except Exception as e:
-        return {"online": False, "error": _friendly_error(e)}
+        result = {"online": False, "error": _friendly_error(e)}
+    if srv:
+        result["srv"] = f"{srv[0]}:{srv[1]}"
+    return result
