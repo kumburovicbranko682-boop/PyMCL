@@ -284,6 +284,7 @@ void pymcl_playtime_record(const char *instance_name, const char *version_id, lo
 void pymcl_format_playtime(long long seconds, char *out, size_t n);
 void pymcl_global_mods_root(char *out, size_t n);
 int pymcl_global_mods_apply(const char *game_mods_dir);
+int pymcl_default_isolation_apply(const char *instance, const char *version_id);
 int pymcl_nide8_sid(const char *raw, char *out, size_t n);
 void pymcl_authlib_normalize_api(const char *raw, char *out, size_t n);
 int pymcl_ensure_auth_agents(cJSON *account_props, const char *prep_nide8, pymcl_ctx *ctx);

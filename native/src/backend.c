@@ -291,13 +291,22 @@ static void *task_run(void *p) {
             cJSON *sk = cJSON_GetObjectItem(extra, "skip_assets");
             ctx.skip_assets = sk ? cJSON_IsTrue(sk) : config_bool("skip_assets", 0);
             ctx_log(t, "安装到实例");
+            char vid[256] = {0};
             if (loader && loader[0] && strcmp(loader, "无") != 0) {
-                char vid[256];
                 ok = install_loader(inst, loader, lv[0] ? lv : NULL, ver, &ctx, vid, sizeof(vid)) == 0;
                 if (ok) snprintf(msg, sizeof(msg), "加载器安装完成: %s", vid);
             } else {
                 ok = install_version(inst, ver, &ctx) == 0;
-                if (ok) snprintf(msg, sizeof(msg), "版本 %s 安装完成", ver);
+                if (ok) {
+                    snprintf(msg, sizeof(msg), "版本 %s 安装完成", ver);
+                    snprintf(vid, sizeof(vid), "%s", ver);
+                }
+            }
+            /* 安装收尾套用全局默认隔离（对齐 Python 的 _install_game_impl）。 */
+            if (ok && vid[0] && pymcl_default_isolation_apply(inst, vid)) {
+                char lbuf[96];
+                snprintf(lbuf, sizeof(lbuf), "已套用默认隔离: %s", config_str("default_isolation", "none"));
+                ctx_log(t, lbuf);
             }
         }
     } else if (strcmp(t->method, "download_java") == 0) {

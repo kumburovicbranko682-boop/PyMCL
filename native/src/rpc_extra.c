@@ -402,6 +402,40 @@ int pymcl_ensure_auth_agents(cJSON *props, const char *prep_nide8, pymcl_ctx *ct
     return 0;
 }
 
+static cJSON *vs_defaults(void);
+
+/* 安装成功后把全局「默认隔离」写进新版本的 pymcl.json（对齐两个 Python
+ * 门面 _install_game_impl 的收尾）。Python 的 version_settings.load 不看
+ * 全局隔离（DEFAULTS 的 "none" 挡住了回落），物化是它唯一生效的机制；
+ * C 原生安装路径以前不物化，结果 C 桥装的版本换到 Qt 启动就不隔离。 */
+int pymcl_default_isolation_apply(const char *inst, const char *vid) {
+    const char *iso = config_str("default_isolation", "none");
+    if (!iso[0] || strcmp(iso, "none") == 0) return 0;
+    if (strcmp(iso, "saves") != 0 && strcmp(iso, "mods") != 0 && strcmp(iso, "all") != 0)
+        return 0;
+    char path[PYMCL_PATH], parent[PYMCL_PATH];
+    version_settings_path(inst, vid, path, sizeof(path));
+    pymcl_parent(path, parent, sizeof(parent));
+    pymcl_ensure_dir(parent);
+    cJSON *cur = vs_defaults();
+    cJSON *stored = pymcl_read_json(path);
+    if (cJSON_IsObject(stored)) {
+        cJSON *it = stored->child;
+        while (it) {
+            cJSON *n = it->next;
+            cJSON_DeleteItemFromObject(cur, it->string);
+            cJSON_AddItemToObject(cur, it->string, cJSON_Duplicate(it, 1));
+            it = n;
+        }
+    }
+    cJSON_Delete(stored);
+    cJSON_DeleteItemFromObject(cur, "isolation");
+    cJSON_AddStringToObject(cur, "isolation", iso);
+    pymcl_write_json(path, cur);
+    cJSON_Delete(cur);
+    return 1;
+}
+
 static cJSON *vs_defaults(void) {
     return cJSON_Parse(
         "{\"isolation\":\"none\",\"memory_mb\":null,\"java\":\"自动选择\","
