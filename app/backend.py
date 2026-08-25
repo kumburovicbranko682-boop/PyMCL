@@ -1189,6 +1189,39 @@ class BackendAPI(QObject):
     def repair_version(self, instance: str, version: str) -> str:
         return self.start_task(f"修复 {version}", self._repair_impl, instance, version)
 
+    def asset_categories(self) -> list[dict]:
+        """可提取的资源类别（对标 PCL2 百宝箱 → 提取游戏资源）。"""
+        from mclauncher import asset_extract as ax
+        return [{"key": k, "label": tr(v[0])} for k, v in ax.CATEGORIES.items()]
+
+    def list_game_assets(self, instance: str, version: str,
+                         category: str = "music", query: str = "") -> list[dict]:
+        """按类别列出版本 assets 里可提取的资源文件。"""
+        from mclauncher import asset_extract as ax
+        return ax.list_assets(self._instance(instance), version,
+                              category=category, query=query)
+
+    def extract_game_assets(self, instance: str, version: str, names: list,
+                            dest: str = "") -> str:
+        """把选中资源按真实文件名导出（后台任务），返回任务 id。"""
+        return self.start_task(
+            tr("提取游戏资源"), self._extract_assets_impl, instance, version,
+            list(names or []), dest)
+
+    def _extract_assets_impl(self, progress, log, instance, version, names, dest):
+        from mclauncher import asset_extract as ax
+        inst = self._instance(instance)
+        dest_dir = Path(dest) if dest else (utils.ROOT / "exports" / f"assets-{version}")
+        log(tr("提取 {n} 个资源到 {d}").format(n=len(names), d=dest_dir))
+        result = ax.extract_assets(
+            inst, version, names, dest_dir,
+            on_progress=lambda msg, done, total: progress(done, total, msg))
+        for name in result.get("skipped") or []:
+            log(tr("本地缺失，已跳过: {f}").format(f=name))
+        log(tr("提取完成: {n} 个文件 → {d}").format(
+            n=result["count"], d=result["dest"]))
+        return result["dest"]
+
     def preflight_launch(self, instance: str, version: str, memory_mb: int = 0,
                          java: str = "") -> dict:
         from mclauncher import preflight as preflight_mod

@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """版本页：版本卡片网格 + 加载器安装 + 已安装管理。"""
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import (
+    QGridLayout, QHBoxLayout, QListWidget, QListWidgetItem, QVBoxLayout, QWidget,
+)
 from qfluentwidgets import (
     Action, BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
     LineEdit, MessageBox, MessageBoxBase, Pivot, PushButton, CheckBox, RoundMenu,
@@ -67,6 +69,83 @@ class ExportPackDialog(MessageBoxBase):
         self.yesButton.setText(tr("导出"))
         self.cancelButton.setText(tr("取消"))
         self.widget.setMinimumWidth(420)
+
+
+class AssetExtractDialog(MessageBoxBase):
+    """提取游戏资源（对标 PCL2 百宝箱）：音乐 / 音效 / 语言文件按真实文件名导出。"""
+
+    def __init__(self, backend, instance: str, version: str, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.instance = instance
+        self.version = version
+        self.extracted_names: list[str] = []
+        self.viewLayout.addWidget(SubtitleLabel(tr("提取游戏资源"), self))
+        hint = BodyLabel(tr("游戏资源按哈希存放，这里还原成真实文件名导出到 exports 目录。"), self)
+        hint.setWordWrap(True)
+        self.viewLayout.addWidget(hint)
+        row = QHBoxLayout()
+        self.kind = ComboBox(self)
+        self._cats = backend.asset_categories()
+        for c in self._cats:
+            self.kind.addItem(c["label"])
+        self.kind.currentIndexChanged.connect(self._refill)
+        self.search = SearchLineEdit(self)
+        self.search.setPlaceholderText(tr("搜索文件名…"))
+        self.search.textChanged.connect(self._refill)
+        row.addWidget(self.kind)
+        row.addWidget(self.search, 1)
+        self.viewLayout.addLayout(row)
+        self.all_box = CheckBox(tr("全选"), self)
+        self.all_box.toggled.connect(self._toggle_all)
+        self.viewLayout.addWidget(self.all_box)
+        self.listw = QListWidget(self)
+        self.listw.setMinimumHeight(280)
+        self.viewLayout.addWidget(self.listw)
+        self.count_label = CaptionLabel("", self)
+        self.viewLayout.addWidget(self.count_label)
+        self.yesButton.setText(tr("提取选中"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(560)
+        self.yesButton.clicked.connect(self._collect)
+        self._refill()
+
+    def _refill(self, *_a):
+        key = self._cats[self.kind.currentIndex()]["key"] if self._cats else "all"
+        try:
+            rows = self.backend.list_game_assets(
+                self.instance, self.version, category=key,
+                query=self.search.text().strip())
+        except Exception as e:
+            self.listw.clear()
+            self.count_label.setText(str(e))
+            return
+        self.listw.clear()
+        shown = rows[:800]
+        for r in shown:
+            size_kb = max(1, int(r.get("size") or 0) // 1024)
+            suffix = "" if r.get("present") else tr("（本地缺失）")
+            item = QListWidgetItem(f"{r['name']}  ({size_kb} KB){suffix}")
+            item.setData(Qt.UserRole, r["name"])
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            self.listw.addItem(item)
+        more = len(rows) - len(shown)
+        self.count_label.setText(
+            tr("{n} 个文件").format(n=len(rows))
+            + (tr("，仅显示前 {m} 个，可用搜索缩小范围").format(m=len(shown)) if more > 0 else ""))
+
+    def _toggle_all(self, on):
+        state = Qt.Checked if on else Qt.Unchecked
+        for i in range(self.listw.count()):
+            self.listw.item(i).setCheckState(state)
+
+    def _collect(self):
+        self.extracted_names = [
+            self.listw.item(i).data(Qt.UserRole)
+            for i in range(self.listw.count())
+            if self.listw.item(i).checkState() == Qt.Checked
+        ]
 
 
 class VersionPage(QWidget):
@@ -340,7 +419,20 @@ class VersionPage(QWidget):
         add(tr("创建桌面快捷方式"), lambda: self._shortcut(instance, version))
         add(tr("导出启动脚本"), lambda: self.backend.export_launch_script(instance, version))
         add(tr("导出整合包…"), lambda: self._export_pack(instance, version))
+        add(tr("提取游戏资源…"), lambda: self._extract_assets(instance, version))
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _extract_assets(self, instance, version):
+        try:
+            dlg = AssetExtractDialog(self.backend, instance, version, self.window())
+        except Exception as e:
+            MessageBox(tr("无法读取资源索引"), str(e), self).exec()
+            return
+        if dlg.exec() and dlg.extracted_names:
+            self.backend.extract_game_assets(instance, version, dlg.extracted_names)
+            InfoBar.success(
+                tr("已开始提取"), tr("完成后文件在 exports 目录，进度见下载任务。"),
+                parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def _export_pack(self, instance, version):
         dlg = ExportPackDialog(version, self.window())
