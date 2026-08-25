@@ -829,6 +829,14 @@ class BackendAPI:
         from mclauncher.net import apply_proxy_policy
         apply_proxy_policy()
         warmup_async()
+        # 与 Qt 设置页一致：同意/撤回上传诊断数据要当场启停心跳，
+        # 不然 WinUI/EziApp 勾了开关也得等重启桥进程才生效。
+        if "feedback_consent" in patch or "feedback_heartbeat" in patch:
+            from mclauncher import feedback as fb
+            if fb.heartbeat_enabled():
+                fb.start_heartbeat()
+            else:
+                fb.stop_heartbeat(send_offline=False)
 
     def collect_sysinfo(self, force: bool = False, scan_system_java: bool = False) -> dict:
         from mclauncher import sysinfo as sysinfo_mod

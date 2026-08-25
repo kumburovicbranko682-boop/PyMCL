@@ -12,6 +12,8 @@
             <TextBox x:Name="BodyBox" Header="详细描述" PlaceholderText="发生了什么、怎么复现、期望结果"
                       AcceptsReturn="True" TextWrapping="Wrap" MinHeight="160"/>
             <CheckBox x:Name="AttachBox" Content="附带本机配置" IsChecked="True"/>
+            <CheckBox x:Name="ConsentBox" Content="允许上传诊断数据（未同意时后端会拒绝发送反馈）"
+                      Checked="Consent_Toggled" Unchecked="Consent_Toggled"/>
             <Button Content="发送反馈" Click="Send_Click" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Left"/>
             <TextBlock Text="常见问题" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,0"/>
             <TextBlock Text="先扫一眼，很多启动 / 崩溃问题这里就有答案。" Opacity="0.7" TextWrapping="Wrap"/>

@@ -76,6 +76,7 @@ public sealed class SettingsDto
     [JsonPropertyName("game_dir")] public string GameDir { get; set; } = "";
     [JsonPropertyName("ui_fly_animation")] public bool UiFlyAnimation { get; set; } = true;
     [JsonPropertyName("ui_fly_duration_ms")] public int UiFlyDurationMs { get; set; } = 620;
+    [JsonPropertyName("feedback_consent")] public bool FeedbackConsent { get; set; }
 }
 
 public sealed class VersionSettingsDto

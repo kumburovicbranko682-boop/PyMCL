@@ -348,11 +348,20 @@ def main(argv=None):
     sys.stdout.write(banner)
     sys.stdout.flush()
     sys.stderr.write(banner)
+    # 与 Qt 主窗口一致：用户此前已同意上传诊断数据的话，桥进程也要拉起心跳，
+    # 否则 WinUI/EziApp 用户看着设置里开着「定时上报」，实际上从来没跑过。
+    from mclauncher import feedback as fb
+    try:
+        if fb.heartbeat_enabled():
+            fb.start_heartbeat()
+    except Exception:
+        pass
     try:
         httpd.serve_forever(poll_interval=0.3)
     except KeyboardInterrupt:
         pass
     finally:
+        fb.stop_heartbeat()
         httpd.server_close()
         if args.ready_file:
             try:

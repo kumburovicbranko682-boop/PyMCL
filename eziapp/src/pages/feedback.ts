@@ -30,12 +30,14 @@ export function renderFeedbackPage(container: HTMLElement) {
 
 async function loadAndRender(container: HTMLElement) {
   try {
-    const [history, articles] = await Promise.all([
+    const [history, articles, settings] = await Promise.all([
       bridge.call<FeedbackRecord[]>('feedback_history'),
       bridge.call<HelpArticle[]>('help_articles').catch(() => [] as HelpArticle[]),
+      bridge.call<{ feedback_consent?: boolean }>('get_settings'),
     ]);
     if (!container.isConnected) return;
-    render(container, Array.isArray(history) ? history : [], Array.isArray(articles) ? articles : []);
+    render(container, Array.isArray(history) ? history : [], Array.isArray(articles) ? articles : [],
+      settings?.feedback_consent === true);
   } catch (error) {
     if (!container.isConnected) return;
     showError(container, `加载反馈记录失败：${errorMessage(error, '未知错误')}`, () => void loadAndRender(container));
@@ -48,7 +50,7 @@ interface HelpArticle {
   body?: string;
 }
 
-function render(container: HTMLElement, history: FeedbackRecord[], articles: HelpArticle[]) {
+function render(container: HTMLElement, history: FeedbackRecord[], articles: HelpArticle[], consent: boolean) {
   container.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:16px;max-width:900px">
       <div class="card">
@@ -79,6 +81,10 @@ function render(container: HTMLElement, history: FeedbackRecord[], articles: Hel
           <button class="btn btn-primary" id="feedback-submit">发送反馈</button>
           <button class="btn" id="feedback-sysinfo-preview">查看系统信息</button>
         </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:4px">
+          <input type="checkbox" id="feedback-consent" ${consent ? 'checked' : ''}>
+          允许上传诊断数据（未同意时后端会拒绝发送反馈，可随时取消）
+        </label>
       </div>
       <div class="card">
         <div class="card-header">常见问题</div>
@@ -109,6 +115,18 @@ function render(container: HTMLElement, history: FeedbackRecord[], articles: Hel
   `;
 
   container.querySelector<HTMLButtonElement>('#feedback-refresh')?.addEventListener('click', () => void loadAndRender(container));
+  container.querySelector<HTMLInputElement>('#feedback-consent')?.addEventListener('change', async (event) => {
+    const box = event.currentTarget as HTMLInputElement;
+    const granted = box.checked;
+    try {
+      // 只提交这一个键：桥端 save_settings 是补丁语义，不会动别的设置。
+      await bridge.call('save_settings', { data: { feedback_consent: granted } });
+      store.setSettings({ ...(store.settings || {}), feedback_consent: granted } as any);
+    } catch (error) {
+      box.checked = !granted;
+      toast(errorMessage(error, '保存失败'), 'error');
+    }
+  });
   container.querySelector<HTMLButtonElement>('#feedback-submit')?.addEventListener('click', async () => {
     const category = container.querySelector<HTMLSelectElement>('#feedback-category')!.value;
     const title = container.querySelector<HTMLInputElement>('#feedback-title')!.value.trim();
@@ -117,6 +135,10 @@ function render(container: HTMLElement, history: FeedbackRecord[], articles: Hel
     const includeSysinfo = container.querySelector<HTMLInputElement>('#feedback-sysinfo')!.checked;
     if (!title || !body) {
       toast('请填写标题和详细说明', 'warning');
+      return;
+    }
+    if (!container.querySelector<HTMLInputElement>('#feedback-consent')?.checked) {
+      toast('请先勾选「允许上传诊断数据」，否则后端会拒绝这次反馈', 'warning');
       return;
     }
     const button = container.querySelector<HTMLButtonElement>('#feedback-submit')!;
