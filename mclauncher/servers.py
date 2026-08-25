@@ -1,40 +1,146 @@
 # -*- coding: utf-8 -*-
 """服务器列表管理：增删改查、批量导入导出。
 
-数据存储：实例独立的 servers.json 文件，格式与官方启动器兼容。
+数据存储：实例的 servers.dat（NBT），也就是游戏「多人游戏」列表
+真正读写的文件——在启动器里加的服务器进游戏立刻可见。
+旧版 PyMCL 写的 servers.json 首次读取时自动迁移进 servers.dat。
 """
 from __future__ import annotations
 
 import json
 import re
+import struct
 from pathlib import Path
 from typing import Optional
 
+from . import nbt_lite as nbt
 from . import utils
 from .instances import Instance
 
-SERVER_FILE = "servers.json"
+SERVER_FILE = "servers.json"   # 旧格式，仅迁移时读一次
+SERVER_DAT = "servers.dat"     # 游戏真实读取的 NBT 列表
 
 
 class ServerError(Exception):
     pass
 
 
-def _server_path(instance: Instance) -> Path:
+def _dat_path(instance: Instance) -> Path:
+    return instance.path / SERVER_DAT
+
+
+def _json_path(instance: Instance) -> Path:
     return instance.path / SERVER_FILE
 
 
+def _split_address(addr: str) -> tuple[str, int]:
+    """servers.dat 的 ip 字段是 host[:port]；支持 [IPv6]:port 与裸 IPv6。"""
+    addr = str(addr or "").strip()
+    if addr.startswith("[") and "]" in addr:
+        host, _, rest = addr.partition("]")
+        host = host[1:]
+        rest = rest.lstrip(":")
+        return host, int(rest) if rest.isdigit() else 25565
+    if addr.count(":") == 1:
+        host, p = addr.rsplit(":", 1)
+        if p.isdigit():
+            return host, int(p)
+    return addr, 25565
+
+
+def _join_address(host: str, port) -> str:
+    host = str(host or "").strip()
+    try:
+        port = int(port or 25565)
+    except (TypeError, ValueError):
+        port = 25565
+    if port == 25565:
+        return host
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
+
+_KNOWN_NBT_KEYS = {"name", "ip", "icon", "hidden", "description"}
+
+
+def _entry_from_nbt(comp: dict) -> dict:
+    def val(key, default=""):
+        tag = comp.get(key)
+        return tag[1] if isinstance(tag, tuple) else default
+
+    host, port = _split_address(val("ip"))
+    return {
+        "name": str(val("name")),
+        "ip": host,
+        "port": port,
+        "icon": str(val("icon")),
+        "description": str(val("description")),
+        "hidden": bool(val("hidden", 0)),
+        # 游戏写的其他字段（acceptTextures 等）原样保留
+        "_extra": {k: v for k, v in comp.items() if k not in _KNOWN_NBT_KEYS},
+    }
+
+
+def _entry_to_nbt(entry: dict) -> dict:
+    comp = dict(entry.get("_extra") or {})
+    comp["name"] = (nbt.TAG_STRING, str(entry.get("name") or entry.get("ip") or ""))
+    comp["ip"] = (nbt.TAG_STRING, _join_address(entry.get("ip"), entry.get("port")))
+    if entry.get("icon"):
+        comp["icon"] = (nbt.TAG_STRING, str(entry["icon"]))
+    if entry.get("hidden"):
+        comp["hidden"] = (nbt.TAG_BYTE, 1)
+    if entry.get("description"):
+        comp["description"] = (nbt.TAG_STRING, str(entry["description"]))
+    return comp
+
+
+def read_servers_dat(path: Path) -> list[dict]:
+    """读任意 servers.dat（游戏格式），返回启动器内部条目列表。"""
+    p = Path(path)
+    if not p.is_file():
+        return []
+    try:
+        _root_name, root = nbt.load(p)
+    except (nbt.NBTError, OSError, struct.error) as e:
+        utils.log.warning("servers.dat 解析失败（%s），按空列表处理", e)
+        return []
+    tag = root.get("servers")
+    if not (isinstance(tag, tuple) and tag[0] == nbt.TAG_LIST):
+        return []
+    _elem_type, items = tag[1]
+    return [_entry_from_nbt(c) for c in items if isinstance(c, dict)]
+
+
+def write_servers_dat(path: Path, entries: list[dict]):
+    """把条目列表写成游戏可读的 servers.dat（未压缩 NBT）。"""
+    p = Path(path)
+    items = [_entry_to_nbt(s) for s in entries if isinstance(s, dict)]
+    root = {"servers": (nbt.TAG_LIST, (nbt.TAG_COMPOUND, items))}
+    utils.ensure_dir(p.parent)
+    nbt.dump(p, root)
+
+
 def _read_servers(instance: Instance) -> list[dict]:
-    path = _server_path(instance)
-    return utils.read_json(path, [])
+    dat = _dat_path(instance)
+    if dat.is_file():
+        return read_servers_dat(dat)
+    # 迁移旧版 servers.json（一次性；此后以 servers.dat 为准）
+    legacy = utils.read_json(_json_path(instance), [])
+    if isinstance(legacy, list) and legacy:
+        entries = [dict(s) for s in legacy if isinstance(s, dict)]
+        _write_servers(instance, entries)
+        utils.log.info("已把 %d 条服务器从 servers.json 迁移进 servers.dat", len(entries))
+        return _read_servers(instance)
+    return []
 
 
 def _write_servers(instance: Instance, servers: list[dict]):
-    utils.write_json(_server_path(instance), servers)
+    write_servers_dat(_dat_path(instance), servers)
 
 
 def list_servers(instance: Instance) -> list[dict]:
-    """返回该实例的所有服务器，格式与官方启动器 servers.json 兼容。
+    """返回该实例的所有服务器（读游戏的 servers.dat）。
 
     每条记录：{name, ip, port, icon, description, hidden}
     """
