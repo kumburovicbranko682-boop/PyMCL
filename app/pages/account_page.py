@@ -15,6 +15,134 @@ from ..ui_alive import guard
 from mclauncher.i18n import tr
 
 
+class PlayerLookupDialog(MessageBoxBase):
+    """玩家档案查询（PCL2 百宝箱「IGN / UUID 查询」同款）。
+
+    输入任意正版玩家名或 UUID，展示档案、皮肤模型与预览。
+    """
+
+    def __init__(self, backend, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self._profile = {}
+        self._pix_token = 0
+        self.viewLayout.addWidget(SubtitleLabel(tr("玩家档案查询"), self))
+        self.viewLayout.addWidget(CaptionLabel(
+            tr("输入正版玩家名或 UUID（带不带连字符都行）"), self))
+        row = QHBoxLayout()
+        self.query = LineEdit(self)
+        self.query.setPlaceholderText("Notch")
+        self.query.setClearButtonEnabled(True)
+        self.query.returnPressed.connect(self._go)
+        self.go_btn = PushButton(tr("查询"), self)
+        self.go_btn.clicked.connect(self._go)
+        row.addWidget(self.query, 1)
+        row.addWidget(self.go_btn)
+        host = QWidget(self)
+        host.setLayout(row)
+        self.viewLayout.addWidget(host)
+
+        result = QHBoxLayout()
+        self.body = BodyLabel("")
+        self.body.setFixedSize(120, 240)
+        self.body.setAlignment(Qt.AlignCenter)
+        self.body.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
+        result.addWidget(self.body)
+        info = QVBoxLayout()
+        self.name_label = StrongBodyLabel("—", self)
+        self.uuid_label = CaptionLabel("", self)
+        self.uuid_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.meta_label = CaptionLabel("", self)
+        info.addWidget(self.name_label)
+        info.addWidget(self.uuid_label)
+        info.addWidget(self.meta_label)
+        btns = QHBoxLayout()
+        self.copy_btn = PushButton(tr("复制 UUID"), self)
+        self.copy_btn.setEnabled(False)
+        self.copy_btn.clicked.connect(self._copy_uuid)
+        self.skin_dl_btn = PushButton(tr("打开皮肤 PNG"), self)
+        self.skin_dl_btn.setEnabled(False)
+        self.skin_dl_btn.clicked.connect(self._open_skin)
+        btns.addWidget(self.copy_btn)
+        btns.addWidget(self.skin_dl_btn)
+        btns.addStretch(1)
+        info.addLayout(btns)
+        info.addStretch(1)
+        result.addLayout(info, 1)
+        result_host = QWidget(self)
+        result_host.setLayout(result)
+        self.viewLayout.addWidget(result_host)
+
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(520)
+
+    def _go(self):
+        q = self.query.text().strip()
+        if not q:
+            return
+        self.go_btn.setEnabled(False)
+        self.go_btn.setText(tr("查询中…"))
+
+        def ok(profile):
+            self.go_btn.setEnabled(True)
+            self.go_btn.setText(tr("查询"))
+            self._profile = profile or {}
+            self.name_label.setText(self._profile.get("name") or "—")
+            self.uuid_label.setText(self._profile.get("uuid") or "")
+            bits = [tr("细臂 (slim)") if self._profile.get("variant") == "slim"
+                    else tr("粗臂 (classic)")]
+            bits.append(tr("有披风") if self._profile.get("cape_url") else tr("无披风"))
+            self.meta_label.setText(" · ".join(bits))
+            self.copy_btn.setEnabled(bool(self._profile.get("uuid")))
+            self.skin_dl_btn.setEnabled(bool(self._profile.get("skin_url")))
+            self._load_body(self._profile.get("body") or "")
+
+        def fail(exc):
+            self.go_btn.setEnabled(True)
+            self.go_btn.setText(tr("查询"))
+            InfoBar.error(tr("查询失败"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        self.backend.call_async(lambda: self.backend.lookup_player(q), ok, fail)
+
+    def _load_body(self, url: str):
+        self.body.setText(tr("加载预览…") if url else "")
+        if not url:
+            self.body.setPixmap(QPixmap())
+            return
+        self._pix_token += 1
+        token = self._pix_token
+
+        def fetch():
+            import requests
+            resp = requests.get(url, timeout=12)
+            resp.raise_for_status()
+            return resp.content
+
+        def ok(data):
+            if token != self._pix_token:
+                return
+            pix = QPixmap()
+            if pix.loadFromData(data):
+                self.body.setText("")
+                self.body.setPixmap(pix.scaled(
+                    120, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
+        self.backend.call_async(fetch, ok, lambda *_: self.body.setText(""))
+
+    def _copy_uuid(self):
+        from PySide6.QtWidgets import QApplication
+        QApplication.clipboard().setText(self._profile.get("uuid") or "")
+        InfoBar.success(tr("已复制"), self._profile.get("uuid") or "", parent=self,
+                        position=InfoBarPosition.TOP, duration=2000)
+
+    def _open_skin(self):
+        url = self._profile.get("skin_url") or ""
+        if url:
+            QDesktopServices.openUrl(QUrl(url))
+
+
 class SkinManagerDialog(MessageBoxBase):
     """微软账号皮肤 / 披风管理：上传、重置、启用/隐藏披风。"""
 
@@ -400,6 +528,10 @@ class AccountPage(QWidget):
         self.skin_btn.clicked.connect(self._manage_skin)
         self.skin_btn.hide()
         sl.addWidget(self.skin_btn)
+        self.lookup_btn = PushButton(tr("查询玩家档案"))
+        self.lookup_btn.setToolTip(tr("输入任意正版玩家名或 UUID，查看档案与皮肤"))
+        self.lookup_btn.clicked.connect(self._lookup_player)
+        sl.addWidget(self.lookup_btn)
         top.addWidget(skin_card)
 
         list_card = SimpleCardWidget(self)
@@ -607,6 +739,9 @@ class AccountPage(QWidget):
     def _use(self, name):
         self.backend.set_active_account(name)
         self.reload()
+
+    def _lookup_player(self):
+        PlayerLookupDialog(self.backend, self.window()).exec()
 
     def _manage_skin(self):
         active = getattr(self, "_active_account", None)

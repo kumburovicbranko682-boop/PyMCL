@@ -2,6 +2,7 @@
 """皮肤头像 / 全身预览 URL + 微软账号皮肤/披风管理。"""
 from __future__ import annotations
 
+import re
 import struct
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -225,3 +226,74 @@ def skin_site_url(account: dict | None) -> str:
     if acc.get("type") == "authlib" and acc.get("api"):
         return _site_origin(acc["api"])
     return ""
+
+
+# ---------------------------------------------------------------- 玩家档案查询
+# PCL2 百宝箱「IGN / UUID 查询」同款：任意正版玩家名或 UUID → 档案 + 皮肤。
+
+LOOKUP_NAME_URL = "https://api.mojang.com/users/profiles/minecraft/{}"
+SESSION_PROFILE_URL = "https://sessionserver.mojang.com/session/minecraft/profile/{}"
+_NAME_RE = re.compile(r"[A-Za-z0-9_]{1,16}$")
+_HEX_RE = re.compile(r"[0-9a-fA-F]{32}$")
+
+
+def lookup_player(query: str, session=None, timeout=15) -> dict:
+    """按正版玩家名或 UUID（带不带连字符都行）查询档案。
+
+    返回 {name, uuid, skin_url, cape_url, variant, avatar, body}。
+    找不到 / 输入不合法抛 SkinError。
+    """
+    import base64
+    import json as _json
+
+    q = str(query or "").strip()
+    if not q:
+        raise SkinError("请输入玩家名或 UUID")
+    s = session or _api_session()
+    hexq = q.replace("-", "")
+    if _HEX_RE.fullmatch(hexq):
+        raw_uuid = hexq.lower()
+    else:
+        if not _NAME_RE.fullmatch(q):
+            raise SkinError("玩家名只能是 1~16 位字母 / 数字 / 下划线")
+        resp = s.get(LOOKUP_NAME_URL.format(quote(q)), timeout=timeout)
+        if resp.status_code in (204, 404):
+            raise SkinError(f"找不到玩家: {q}")
+        if resp.status_code == 429:
+            raise SkinError("查询太频繁，请稍后再试")
+        if resp.status_code != 200:
+            raise SkinError(f"查询失败（HTTP {resp.status_code}）")
+        raw_uuid = str((resp.json() or {}).get("id") or "").lower()
+        if not raw_uuid:
+            raise SkinError(f"找不到玩家: {q}")
+    resp = s.get(SESSION_PROFILE_URL.format(raw_uuid), timeout=timeout)
+    if resp.status_code in (204, 404):
+        raise SkinError(f"找不到该 UUID 的档案: {q}")
+    if resp.status_code != 200:
+        raise SkinError(f"查询失败（HTTP {resp.status_code}）")
+    data = resp.json() or {}
+    name = data.get("name") or q
+    skin_url = cape_url = ""
+    variant = "classic"
+    for prop in data.get("properties") or []:
+        if prop.get("name") != "textures":
+            continue
+        try:
+            tex = _json.loads(base64.b64decode(prop.get("value") or "").decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            continue
+        textures = (tex or {}).get("textures") or {}
+        skin = textures.get("SKIN") or {}
+        skin_url = skin.get("url") or ""
+        if str((skin.get("metadata") or {}).get("model") or "").lower() == "slim":
+            variant = "slim"
+        cape_url = (textures.get("CAPE") or {}).get("url") or ""
+    return {
+        "name": name,
+        "uuid": utils.dashed_uuid(raw_uuid),
+        "skin_url": skin_url,
+        "cape_url": cape_url,
+        "variant": variant,
+        "avatar": f"https://crafatar.com/avatars/{raw_uuid}?overlay=true&size=128",
+        "body": f"https://crafatar.com/renders/body/{raw_uuid}?overlay=true&scale=6",
+    }

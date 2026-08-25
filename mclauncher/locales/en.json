@@ -1226,5 +1226,18 @@
   "清除版本图标": "Clear version icon",
   "选择版本图标": "Select version icon",
   "图片 (*.png *.jpg *.jpeg *.gif *.webp *.bmp)": "Images (*.png *.jpg *.jpeg *.gif *.webp *.bmp)",
-  "设置失败": "Failed to set"
+  "设置失败": "Failed to set",
+  "玩家档案查询": "Player profile lookup",
+  "输入正版玩家名或 UUID（带不带连字符都行）": "Enter a Mojang player name or UUID (dashes optional)",
+  "查询": "Look up",
+  "查询失败": "Lookup failed",
+  "查询玩家档案": "Look up player",
+  "输入任意正版玩家名或 UUID，查看档案与皮肤": "Look up any Mojang player by name or UUID to view profile and skin",
+  "复制 UUID": "Copy UUID",
+  "打开皮肤 PNG": "Open skin PNG",
+  "细臂 (slim)": "Slim arms",
+  "粗臂 (classic)": "Classic arms",
+  "有披风": "Has cape",
+  "无披风": "No cape",
+  "加载预览…": "Loading preview…"
 }

@@ -1141,6 +1141,11 @@ class BackendAPI:
         from mclauncher import skin as skin_mod
         return skin_mod.skin_site_url(self.accounts.get_account(account_name))
 
+    def lookup_player(self, query: str) -> dict:
+        """按正版玩家名或 UUID 查询档案（PCL2 百宝箱 IGN 查询同款）。"""
+        from mclauncher import skin as skin_mod
+        return skin_mod.lookup_player(query)
+
     # ---- 离线账户皮肤（本地皮肤服务 + authlib-injector，进游戏可见）
 
     def _offline_account(self, account_name: str) -> dict:
