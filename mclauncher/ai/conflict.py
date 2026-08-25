@@ -233,17 +233,17 @@ def inspect_jar(path: Path) -> dict:
     return info
 
 
-def _mod_files(instance: Instance) -> list[Path]:
-    mods_dir = instance.path / "mods"
-    if not mods_dir.is_dir():
+def _mod_files(instance: Instance, mods_dir=None) -> list[Path]:
+    d = Path(mods_dir) if mods_dir else instance.path / "mods"
+    if not d.is_dir():
         return []
     out = []
-    for p in sorted(mods_dir.iterdir()):
+    for p in sorted(d.iterdir()):
         n = p.name.lower()
         if n.endswith(".jar") or n.endswith(".jar.disabled") or n.endswith(".disabled"):
             if p.is_file():
                 out.append(p)
-    if not out:
+    if not out and not mods_dir:
         out = list_instance_mods(instance)
     return out
 
@@ -254,10 +254,11 @@ _SKIP_DEP = {
 }
 
 
-def scan_conflicts(instance: Instance) -> dict:
+def scan_conflicts(instance: Instance, mods_dir=None) -> dict:
+    """扫描模组冲突。mods_dir 指定时扫该目录（版本隔离的独立 mods）。"""
     loader = detect_loader(instance)
     mc = detect_mc_version(instance)
-    files = _mod_files(instance)
+    files = _mod_files(instance, mods_dir=mods_dir)
     mods = [inspect_jar(p) for p in files]
     by_id = {}
     issues = []

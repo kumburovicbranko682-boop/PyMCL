@@ -646,6 +646,16 @@ class BackendAPI:
     def get_installed_mods(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_instance_mods(self._instance(instance))]
 
+    def scan_mod_conflicts(self, instance: str, version: str = "") -> dict:
+        """扫描已装模组：重复安装 / 缺前置 / 加载器不匹配 / 声明不兼容。
+
+        version 指定时扫描该版本的独立 mods 目录（版本隔离）。
+        """
+        from mclauncher.ai.conflict import scan_conflicts
+        inst = self._instance(instance)
+        mods_dir = self._mods_folder(inst, version) if version else None
+        return scan_conflicts(inst, mods_dir=mods_dir)
+
     def get_installed_shaders(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "shaderpacks")]
 

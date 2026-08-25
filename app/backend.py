@@ -898,6 +898,17 @@ class BackendAPI(QObject):
             return mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
         return mods_mod.list_instance_mod_entries(inst)
 
+    def scan_mod_conflicts(self, instance: str, version: str = "") -> dict:
+        """扫描已装模组：重复安装 / 缺前置 / 加载器不匹配 / 声明不兼容。
+
+        对标 HMCL 模组列表警告与 PCL2 崩溃前排查；此前只能通过 AI 工具触发。
+        version 指定时扫描该版本的独立 mods 目录（版本隔离）。
+        """
+        from mclauncher.ai.conflict import scan_conflicts
+        inst = self._instance(instance)
+        mods_dir = self._mods_folder(inst, version) if version else None
+        return scan_conflicts(inst, mods_dir=mods_dir)
+
     def get_mods_targets(self, instance: str) -> list[dict]:
         """Mod 安装目标列表：实例共享 mods + 开了版本隔离的版本各自目录。"""
         from mclauncher import version_settings as vs

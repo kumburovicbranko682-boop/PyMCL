@@ -12,9 +12,9 @@ from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition, LineEdit,
-    MessageBox, PushButton, SubtitleLabel, SwitchButton, TransparentPushButton,
-    TransparentToolButton,
+    BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
+    LineEdit, MessageBox, MessageBoxBase, PushButton, ScrollArea, SubtitleLabel,
+    SwitchButton, TransparentPushButton, TransparentToolButton,
 )
 
 from mclauncher.config import CONFIG
@@ -80,6 +80,88 @@ class _ModRow(QFrame):
         lay.addWidget(btn)
 
 
+_ISSUE_LABELS = {
+    "duplicate_id": "重复安装",
+    "loader_mismatch": "加载器不匹配",
+    "missing_dep": "缺少前置",
+    "breaks": "互不兼容",
+}
+
+
+class ConflictScanDialog(MessageBoxBase):
+    """模组冲突扫描结果（对标 HMCL 模组警告；核心与 AI 工具共用）。"""
+
+    def __init__(self, result: dict, parent=None):
+        super().__init__(parent)
+        result = result or {}
+        issues = list(result.get("issues") or [])
+
+        self.viewLayout.addWidget(SubtitleLabel(tr("模组冲突扫描"), self))
+        bits = [f"{tr('模组')} {result.get('enabled', 0)}/{result.get('mod_count', 0)}"]
+        if result.get("loader"):
+            bits.append(str(result["loader"]))
+        if result.get("mc_version"):
+            bits.append(f"MC {result['mc_version']}")
+        summary = BodyLabel("  ·  ".join(bits), self)
+        summary.setStyleSheet(f"color: {Theme.muted}; background: transparent;")
+        self.viewLayout.addWidget(summary)
+
+        if not issues:
+            ok = BodyLabel(tr("未发现重复安装、缺失前置或不兼容声明。"), self)
+            ok.setStyleSheet("color: #2E9E5B; font-weight: 600; background: transparent;")
+            self.viewLayout.addWidget(ok)
+        else:
+            scroll = ScrollArea(self)
+            scroll.setWidgetResizable(True)
+            scroll.setStyleSheet("ScrollArea { background: transparent; border: none; }")
+            host = QWidget()
+            lay = QVBoxLayout(host)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(4)
+            for issue in issues:
+                lay.addWidget(self._issue_row(issue))
+            lay.addStretch(1)
+            scroll.setWidget(host)
+            scroll.setMinimumSize(560, min(320, 60 * len(issues) + 16))
+            self.viewLayout.addWidget(scroll, 1)
+
+        self.yesButton.setText(tr("我知道了"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(620)
+
+    def _issue_row(self, issue: dict) -> QFrame:
+        row = QFrame()
+        row.setObjectName("conflictRow")
+        row.setStyleSheet(row_qss("conflictRow"))
+        row.setMinimumHeight(52)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(12, 8, 12, 8)
+        h.setSpacing(10)
+        sev = str(issue.get("severity") or "warn")
+        color = "#D95568" if sev == "error" else "#D9A441"
+        pill = QLabel(tr("错误") if sev == "error" else tr("警告"))
+        pill.setStyleSheet(
+            f"color: white; background: {color}; border-radius: 9px;"
+            " padding: 2px 10px; font-size: 11px; font-weight: 600;")
+        h.addWidget(pill)
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        msg = QLabel(str(issue.get("message") or "?"))
+        msg.setWordWrap(True)
+        msg.setStyleSheet(
+            f"color: {Theme.title}; font-size: 13px; background: transparent;")
+        col.addWidget(msg)
+        detail_bits = [tr(_ISSUE_LABELS.get(str(issue.get("type")), str(issue.get("type") or "")))]
+        files = issue.get("files") or ([issue.get("file")] if issue.get("file") else [])
+        if files:
+            detail_bits.append(", ".join(str(f) for f in files[:4]))
+        cap = QLabel("  ·  ".join(b for b in detail_bits if b))
+        cap.setStyleSheet(f"color: {Theme.muted}; font-size: 11px; background: transparent;")
+        col.addWidget(cap)
+        h.addLayout(col, 1)
+        return row
+
+
 class ModManagerPage(QWidget):
     def __init__(self, backend, parent=None):
         super().__init__(parent)
@@ -127,7 +209,8 @@ class ModManagerPage(QWidget):
         self.folder_btn = TransparentPushButton(FIF.FOLDER, tr("打开 mods 文件夹"))
         self.import_btn = TransparentPushButton(FIF.ADD, tr("导入 jar"))
         self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
-        for b in (self.folder_btn, self.import_btn, self.update_btn):
+        self.scan_btn = TransparentPushButton(FIF.SEARCH, tr("扫描冲突"))
+        for b in (self.folder_btn, self.import_btn, self.update_btn, self.scan_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
         cv.addLayout(bar)
@@ -159,6 +242,7 @@ class ModManagerPage(QWidget):
         self.folder_btn.clicked.connect(self._open_folder)
         self.import_btn.clicked.connect(self._import_local)
         self.update_btn.clicked.connect(self._check_updates)
+        self.scan_btn.clicked.connect(self._scan_conflicts)
         self.setAcceptDrops(True)
 
         self._reload_instances()
@@ -313,6 +397,30 @@ class ModManagerPage(QWidget):
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+
+    def _scan_conflicts(self):
+        inst = self._current_instance()
+        ver = self._current_version()
+        self.scan_btn.setEnabled(False)
+        self.scan_btn.setText(tr("扫描中…"))
+
+        def restore():
+            import shiboken6
+            if shiboken6.isValid(self.scan_btn):
+                self.scan_btn.setEnabled(True)
+                self.scan_btn.setText(tr("扫描冲突"))
+
+        def ok(result):
+            restore()
+            ConflictScanDialog(result or {}, self.window()).exec()
+
+        def err(message):
+            restore()
+            InfoBar.error(tr("扫描失败"), str(message), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        self.backend.call_async(
+            lambda: self.backend.scan_mod_conflicts(inst, ver), ok, err)
 
     # ------------------------------------------------------------------
     def dragEnterEvent(self, event):
