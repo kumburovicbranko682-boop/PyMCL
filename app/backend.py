@@ -876,6 +876,10 @@ class BackendAPI(QObject):
             raise LaunchError(f"无法打开: {folder}")
         return str(folder)
 
+    def get_mods_folder(self, instance: str, version: str = "") -> str:
+        """当前 mods 目录路径（版本隔离时为该版本独立目录），供 UI 显示与目录监视。"""
+        return str(self._mods_folder(self._instance(instance), version))
+
     def delete_mod(self, instance: str, filename: str, version: str = ""):
         inst = self._instance(instance)
         folder = self._mods_folder(inst, version)

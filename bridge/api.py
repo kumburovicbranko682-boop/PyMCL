@@ -659,6 +659,10 @@ class BackendAPI:
             return vs.mods_dir(inst, version)
         return inst.path / "mods"
 
+    def get_mods_folder(self, instance: str, version: str = "") -> str:
+        """当前 mods 目录路径（版本隔离时为该版本独立目录），供 UI 显示与目录监视。"""
+        return str(self._mods_folder(self._instance(instance), version))
+
     def get_installed_mods(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_instance_mods(self._instance(instance))]
 

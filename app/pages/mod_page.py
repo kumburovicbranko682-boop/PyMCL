@@ -7,7 +7,7 @@
 import html
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QFileSystemWatcher, Qt, QTimer
 from PySide6.QtGui import QGuiApplication, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
@@ -276,6 +276,16 @@ class ModManagerPage(QWidget):
         self.conflict_btn.clicked.connect(self._scan_conflicts)
         self.setAcceptDrops(True)
 
+        # 目录监视（PCL2 同款）：在文件管理器里往 mods 文件夹放/删文件，
+        # 切回启动器列表自动刷新，不用手动切换实例。600ms 去抖，
+        # 批量复制几十个 jar 只触发一次重读。
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.directoryChanged.connect(self._on_dir_changed)
+        self._watch_timer = QTimer(self)
+        self._watch_timer.setSingleShot(True)
+        self._watch_timer.setInterval(600)
+        self._watch_timer.timeout.connect(self.reload_list)
+
         self._reload_instances()
         self._reload_targets()
         self.reload_list()
@@ -333,7 +343,23 @@ class ModManagerPage(QWidget):
                           position=InfoBarPosition.TOP, duration=4000)
         self._apply_subtitle()
         self._refill()
+        self._watch_current(inst, ver)
         self._load_details(inst, ver)
+
+    def _watch_current(self, inst: str, ver: str):
+        """让目录监视跟随当前实例/版本的 mods 目录。"""
+        old = self._watcher.directories()
+        if old:
+            self._watcher.removePaths(old)
+        try:
+            folder = self.backend.get_mods_folder(inst, ver)
+        except Exception:
+            return
+        if folder and Path(folder).is_dir():
+            self._watcher.addPath(folder)
+
+    def _on_dir_changed(self, _path):
+        self._watch_timer.start()
 
     def _load_details(self, inst: str, ver: str):
         """后台解析 jar 元数据（有缓存），回来后把文件名列表换成模组名列表。"""
