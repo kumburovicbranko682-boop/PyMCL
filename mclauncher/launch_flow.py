@@ -68,6 +68,9 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     settings = version_settings.load(instance, version_id)
     gdir = version_settings.apply_isolation(instance, version_id, settings)
     n = global_mods.apply(gdir / "mods")
+    # 首次启动把游戏语言对齐启动器语言（玩家改过就不碰）
+    from . import game_options
+    game_options.ensure_language(gdir, version_id)
     mem = settings.get("memory_mb") or memory_mb
     extras = [str(a) for a in (extra_game_args or []) if a not in (None, "")]
     extras += split_args(settings.get("game_args"))
