@@ -582,6 +582,21 @@ class BackendAPI:
         Instance(name).rename(new_name)
         self._emit("ui_changed", {})
 
+    def duplicate_instance(self, name: str, new_name: str = "") -> str:
+        """复制整个实例（版本、mods、config、存档）为试验副本。"""
+        return self.start_task(f"复制实例 {name}", self._duplicate_instance_impl,
+                               name, new_name)
+
+    def _duplicate_instance_impl(self, progress, log, name, new_name):
+        from mclauncher.instances import duplicate_instance
+        log(f"复制实例 {name} …")
+        out = duplicate_instance(
+            name, new_name,
+            on_progress=lambda done, total: progress(done, total, "复制实例文件"))
+        self._emit("ui_changed", {})
+        log(f"实例已复制: {name} -> {out}")
+        return f"已复制为实例：{out}"
+
     def open_instance_folder(self, name: str):
         path = self._instance(name).path
         if os.name == "nt":

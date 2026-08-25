@@ -70,6 +70,14 @@ class InstanceCard(SimpleCardWidget):
         actions.addWidget(delete_btn)
         layout.addLayout(actions)
 
+    def contextMenuEvent(self, event):
+        from qfluentwidgets import Action, RoundMenu
+        menu = RoundMenu(parent=self)
+        dup = Action(FIF.COPY, tr("复制实例"))
+        dup.triggered.connect(lambda: self.page.duplicate(self.info["name"]))
+        menu.addAction(dup)
+        menu.exec(event.globalPos())
+
 
 class NewInstanceCard(SimpleCardWidget):
     def __init__(self, page, parent=None):
@@ -176,6 +184,15 @@ class InstancePage(QWidget):
             except Exception as e:
                 MessageBox(tr("重命名失败"), str(e), self).exec()
             self.reload()
+
+    def duplicate(self, name: str):
+        dlg = InputDialog(tr("复制实例"), tr("新实例名称（版本、模组、存档都会复制）"),
+                          text=f"{name}-副本", parent=self)
+        if dlg.exec() and dlg.value():
+            try:
+                self.backend.duplicate_instance(name, dlg.value())
+            except Exception as e:
+                MessageBox(tr("复制失败"), str(e), self).exec()
 
     def check_pack_update(self, name: str):
         def done(info):

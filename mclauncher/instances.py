@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """实例（版本隔离）管理。每个实例是一个独立的 .minecraft 目录。"""
 import re
+import shutil
 from pathlib import Path
 
 from . import utils
@@ -196,3 +197,48 @@ def create_unique_instance(raw, fallback="游戏", meta=None) -> Instance:
     inst = Instance(unique_instance_name(raw, fallback))
     inst.create(meta=meta)
     return inst
+
+
+# 复制实例时跳过的顶层目录：运行垃圾，副本里不需要。
+_DUPLICATE_SKIP = frozenset(("logs", "crash-reports"))
+
+
+def duplicate_instance(src_name, new_name="", on_progress=None) -> str:
+    """复制整个实例（版本、mods、config、存档、资源包等）。
+
+    对标 HMCL 的「复制实例」/ PCL2 隔离版本复制：给整合包实例留试验
+    副本、升级前留退路。logs 与 crash-reports 是运行垃圾不带。
+    new_name 留空自动用「原名-副本」，重名自动加序号。返回新实例名。
+    """
+    src = Instance(src_name)
+    if not src.path.is_dir():
+        raise InstanceError(f"实例 {src_name} 不存在。")
+    base = str(new_name or "").strip() or f"{src_name}-副本"
+    dest_name = unique_instance_name(base, fallback=f"{src_name}-2")
+    dest = get_instance_path(dest_name)
+
+    files = []
+    for item in src.path.iterdir():
+        if item.name in _DUPLICATE_SKIP:
+            continue
+        if item.is_file():
+            files.append(item)
+        elif item.is_dir():
+            files.extend(p for p in item.rglob("*") if p.is_file())
+    total = len(files)
+
+    utils.ensure_dir(dest)
+    try:
+        for i, p in enumerate(files):
+            target = dest / p.relative_to(src.path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, target)
+            if on_progress and (i % 50 == 0 or i == total - 1):
+                on_progress(i + 1, total)
+        inst = Instance(dest_name)
+        inst.ensure_standard_dirs()
+        inst.set_meta("name", dest_name)
+        return dest_name
+    except Exception:
+        utils.remove_tree(dest)
+        raise
