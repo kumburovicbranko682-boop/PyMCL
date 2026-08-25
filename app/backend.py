@@ -1361,7 +1361,10 @@ class BackendAPI(QObject):
             acc = {"type": "offline", "name": "Steve"}
         else:
             acc = self.accounts.get_account(account_name) or {"type": "offline", "name": account_name}
-        return {"avatar": skin_mod.avatar_url(acc), "body": skin_mod.body_url(acc)}
+        out = {"avatar": skin_mod.avatar_url(acc), "body": skin_mod.body_url(acc)}
+        # 离线自定义皮肤：在线渲染服务不认识，预览需本地渲染
+        out.update(skin_mod.local_skin(acc))
+        return out
 
     def skin_change_support(self, account_name: str = "") -> dict:
         from mclauncher import skin_ops

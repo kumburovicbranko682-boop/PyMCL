@@ -305,10 +305,19 @@ class AccountPage(QWidget):
         self.reload()
 
     def _load_skin(self, url: str):
-        if not url:
-            return
         self._pix_token += 1
         token = self._pix_token
+        # 离线自定义皮肤：在线渲染服务不认识本地文件，直接从 PNG 拼正面像素画
+        urls = self.backend.skin_urls(self._active_name) if self._active_name else {}
+        local_file = urls.get("local_file")
+        if local_file:
+            from ..widgets import render_skin_front
+            pix = render_skin_front(local_file, urls.get("model") or "classic", height=260)
+            if pix:
+                self.skin.setPixmap(pix)
+                return
+        if not url:
+            return
 
         def fetch():
             import requests

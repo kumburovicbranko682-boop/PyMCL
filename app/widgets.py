@@ -14,6 +14,55 @@ from qfluentwidgets import (
 from mclauncher.i18n import tr
 
 
+def render_skin_front(file_path: str, model: str = "classic", height: int = 256):
+    """把皮肤纹理 PNG 拼成正面全身像素画（QPixmap），失败返回 None。
+
+    支持 64x64 现代格式（含第二层）、64x32 旧格式（左侧镜像右侧）、
+    HD 皮肤（64 的整数倍），slim 模型手臂宽 3。
+    """
+    from PySide6.QtGui import QImage
+    img = QImage(str(file_path or ""))
+    if img.isNull() or img.width() < 64 or img.width() % 64:
+        return None
+    s = img.width() // 64
+    legacy = img.height() == 32 * s
+    if not legacy and img.height() != 64 * s:
+        return None
+    img = img.convertToFormat(QImage.Format_ARGB32)
+    aw = 3 if model == "slim" else 4  # 手臂宽
+    canvas = QImage(16 * s, 32 * s, QImage.Format_ARGB32)
+    canvas.fill(Qt.transparent)
+    painter = QPainter(canvas)
+
+    def blit(sx, sy, w, h, dx, dy, mirror=False):
+        part = img.copy(sx * s, sy * s, w * s, h * s)
+        if mirror:
+            part = part.mirrored(True, False)
+        painter.drawImage(dx * s, dy * s, part)
+
+    blit(8, 8, 8, 8, 4, 0)              # 头
+    blit(20, 20, 8, 12, 4, 8)           # 身体
+    blit(44, 20, aw, 12, 4 - aw, 8)     # 右臂（观察者左侧）
+    blit(4, 20, 4, 12, 4, 20)           # 右腿
+    if legacy:
+        blit(44, 20, aw, 12, 12, 8, mirror=True)   # 左臂 = 右臂镜像
+        blit(4, 20, 4, 12, 8, 20, mirror=True)     # 左腿 = 右腿镜像
+    else:
+        blit(36, 52, aw, 12, 12, 8)     # 左臂
+        blit(20, 52, 4, 12, 8, 20)      # 左腿
+        blit(20, 36, 8, 12, 4, 8)       # 身体外层
+        blit(44, 36, aw, 12, 4 - aw, 8)  # 右臂外层
+        blit(52, 52, aw, 12, 12, 8)     # 左臂外层
+        blit(4, 36, 4, 12, 4, 20)       # 右腿外层
+        blit(4, 52, 4, 12, 8, 20)       # 左腿外层
+    blit(40, 8, 8, 8, 4, 0)             # 帽子层最后盖在头上
+    painter.end()
+    scale = max(1, int(height) // canvas.height())
+    out = canvas.scaled(canvas.width() * scale, canvas.height() * scale,
+                        Qt.KeepAspectRatio, Qt.FastTransformation)
+    return QPixmap.fromImage(out)
+
+
 class InputDialog(MessageBoxBase):
     """Fluent 风格的单行输入对话框。"""
 

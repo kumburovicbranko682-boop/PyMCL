@@ -2,6 +2,7 @@
 """皮肤头像 / 全身预览 URL。"""
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import quote, urlparse
 
 from . import utils
@@ -51,3 +52,18 @@ def body_url(account: dict | None) -> str:
 
 def steve_url() -> str:
     return STEVE
+
+
+def local_skin(account: dict | None) -> dict:
+    """离线账号的本地自定义皮肤 {local_file, model}；没有则 {}。
+
+    在线渲染服务不知道本地皮肤，预览必须从这份文件本地渲染。
+    """
+    acc = account or {}
+    if acc.get("type") != "offline" or not acc.get("skin_file"):
+        return {}
+    p = Path(acc["skin_file"])
+    if not p.is_file():
+        return {}
+    model = "slim" if acc.get("skin_model") == "slim" else "classic"
+    return {"local_file": str(p), "model": model}
