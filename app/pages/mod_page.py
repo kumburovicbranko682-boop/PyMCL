@@ -199,7 +199,10 @@ class ModManagerPage(QWidget):
         self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
         self.conflict_btn = TransparentPushButton(
             getattr(FIF, "SEARCH_MIRROR", None) or FIF.SEARCH, tr("冲突扫描"))
-        for b in (self.folder_btn, self.import_btn, self.update_btn, self.conflict_btn):
+        self.i18n_btn = TransparentPushButton(FIF.LANGUAGE, tr("一键汉化"))
+        self.i18n_btn.setToolTip(tr("安装 I18nUpdateMod：进游戏自动下载 CFPA 简体中文汉化包"))
+        for b in (self.folder_btn, self.import_btn, self.update_btn,
+                  self.conflict_btn, self.i18n_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
         cv.addLayout(bar)
@@ -232,6 +235,7 @@ class ModManagerPage(QWidget):
         self.import_btn.clicked.connect(self._import_local)
         self.update_btn.clicked.connect(self._check_updates)
         self.conflict_btn.clicked.connect(self._scan_conflicts)
+        self.i18n_btn.clicked.connect(self._install_i18n)
         self.setAcceptDrops(True)
 
         self._reload_instances()
@@ -386,6 +390,27 @@ class ModManagerPage(QWidget):
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+
+    def _install_i18n(self):
+        inst = self._current_instance()
+        ver = self._current_version()
+        box = MessageBox(
+            tr("一键汉化"),
+            tr("将安装 I18nUpdateMod（CFPA 官方推荐）。进入游戏后它会自动下载并应用"
+               "「简体中文资源包」，把已装模组的文本翻译成中文。需要联网。"),
+            self.window())
+        box.yesButton.setText(tr("安装"))
+        box.cancelButton.setText(tr("取消"))
+        if not box.exec():
+            return
+        try:
+            self.backend.install_i18n_mod(inst, ver)
+        except Exception as e:
+            InfoBar.error(tr("汉化安装失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=5000)
+            return
+        InfoBar.success(tr("已开始安装"), tr("完成后回到本页可看到 I18nUpdateMod"),
+                        parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def _scan_conflicts(self):
         inst = self._current_instance()

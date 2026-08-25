@@ -1043,5 +1043,13 @@
   "查询每个服务器的在线状态、延迟与在线人数": "Query each server's online status, latency and player count",
   "查询中…": "Querying…",
   "版本: {v}": "Version: {v}",
-  "在线玩家: {names}": "Online players: {names}"
+  "在线玩家: {names}": "Online players: {names}",
+  "一键汉化": "Auto-translate mods",
+  "安装 I18nUpdateMod：进游戏自动下载 CFPA 简体中文汉化包": "Install I18nUpdateMod: auto-downloads the CFPA Simplified Chinese translation pack in game",
+  "将安装 I18nUpdateMod（CFPA 官方推荐）。进入游戏后它会自动下载并应用「简体中文资源包」，把已装模组的文本翻译成中文。需要联网。": "This installs I18nUpdateMod (recommended by CFPA). In game it automatically downloads and applies the community Chinese translation pack for your installed mods. Requires internet access.",
+  "汉化安装失败": "Translation install failed",
+  "完成后回到本页可看到 I18nUpdateMod": "When it finishes, I18nUpdateMod will show up on this page",
+  "需要先安装模组加载器（Fabric / Forge / Quilt / NeoForge）": "Install a mod loader first (Fabric / Forge / Quilt / NeoForge)",
+  "已安装汉化模组: {name}": "Translation mod already installed: {name}",
+  "已开始安装": "Install started"
 }

@@ -773,6 +773,25 @@ def _resolve_mods_dir(instance: Instance, mods_dir=None) -> Path:
     return folder
 
 
+# CFPA 官方推荐的自动汉化模组（对齐 PCL2「一键汉化」）：进游戏后自动
+# 下载、合并并应用「简体中文资源包」，把已装模组的文本翻译成中文。
+I18N_MOD_SLUG = "i18nupdatemod"
+
+
+def i18n_mod_installed(instance: Instance, mods_dir=None) -> str:
+    """已装的汉化模组文件名（含被禁用的 .disabled）；未装返回空串。"""
+    folder = Path(mods_dir) if mods_dir else instance.path / "mods"
+    if not folder.is_dir():
+        return ""
+    for f in folder.iterdir():
+        low = f.name.lower()
+        if not f.is_file() or not low.endswith((".jar", ".jar.disabled")):
+            continue
+        if "i18nupdatemod" in low.replace("-", "").replace("_", ""):
+            return f.name
+    return ""
+
+
 # CurseForge 依赖类型（docs.curseforge.com）：3 = RequiredDependency
 CF_REQUIRED_DEPENDENCY = 3
 

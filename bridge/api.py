@@ -329,6 +329,22 @@ class BackendAPI:
         return self.start_task(f"安装模组 {Path(str(name)).name}", self._install_mod_impl,
                                name, instance, extra or {})
 
+    def install_i18n_mod(self, instance: str = "default", version: str = "") -> str:
+        """一键模组汉化（对齐 PCL2）：安装 I18nUpdateMod。
+
+        进游戏后它会自动下载并应用 CFPA「简体中文资源包」。
+        需要模组加载器；已安装时抛错提示。返回任务 id。
+        """
+        inst = self._instance(instance)
+        if not mods_mod.detect_loader(inst):
+            raise ValueError("需要先安装模组加载器（Fabric / Forge / Quilt / NeoForge）")
+        mods_dir = self._mods_folder(inst, version) if version else None
+        existing = mods_mod.i18n_mod_installed(inst, mods_dir)
+        if existing:
+            raise ValueError(f"已安装汉化模组: {existing}")
+        return self.install_mod(mods_mod.I18N_MOD_SLUG, inst.name, {
+            "slug": mods_mod.I18N_MOD_SLUG, "version": version})
+
     def install_shader(self, name: str, instance: str = "default", extra: dict | None = None) -> str:
         return self.start_task(f"安装光影 {Path(str(name)).name}", self._install_content_impl,
                                "shader", name, instance, extra or {})
