@@ -234,6 +234,7 @@ void game_kill(HANDLE proc);
 cJSON *accounts_load(void);
 void accounts_save(cJSON *root);
 cJSON *account_offline(const char *username);
+void account_apply_offline_skin(cJSON *acc, const char *skin);
 cJSON *account_launch_props(cJSON *acc);
 cJSON *account_ensure_valid(cJSON *acc);
 int ms_login(pymcl_ctx *ctx, void (*on_code)(void *, const char *, const char *), void *ud, cJSON **out_acc);

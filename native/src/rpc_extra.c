@@ -295,18 +295,7 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     if (strcmp(method, "add_offline_account") == 0) {
         const char *user = pstr(params, "username", pstr(params, "name", "Player"));
         cJSON *acc = account_offline(user);
-        /* 离线皮肤靠 UUID 奇偶生效：Steve/Alex 必须用固定 UUID，
-         * 和 AccountManager.offline_account 一致；只存 skin 字段游戏不认。 */
-        const char *skin = pstr(params, "skin", "");
-        if (skin[0]) {
-            cJSON_AddStringToObject(acc, "skin", skin);
-            if (pymcl_ieq(skin, "steve"))
-                cJSON_ReplaceItemInObject(acc, "uuid",
-                    cJSON_CreateString("8667ba71-b85a-4004-af54-457a9734eed7"));
-            else if (pymcl_ieq(skin, "alex"))
-                cJSON_ReplaceItemInObject(acc, "uuid",
-                    cJSON_CreateString("ec561538-f3fd-461d-a7c9-7aa354f5bba9"));
-        }
+        account_apply_offline_skin(acc, pstr(params, "skin", ""));
         cJSON *root = accounts_load();
         cJSON *arr = cJSON_GetObjectItem(root, "accounts");
         if (!cJSON_IsArray(arr)) {

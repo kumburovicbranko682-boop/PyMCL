@@ -256,9 +256,12 @@ static void *task_run(void *p) {
             config_set_str("default_instance", inst);
             config_save();
             cJSON *acc = NULL;
-            if (!account[0] || strcmp(account, "离线模式") == 0)
+            if (!account[0] || strcmp(account, "离线模式") == 0) {
                 acc = account_offline(user);
-            else {
+                /* 设置页选的全局离线皮肤（Steve/Alex 固定 UUID）。Python 桥
+                 * 启动时一直应用，这里以前忽略，同一账号两个桥皮肤不一致。 */
+                account_apply_offline_skin(acc, config_str("offline_skin", ""));
+            } else {
                 cJSON *root = accounts_load();
                 cJSON *it;
                 cJSON_ArrayForEach(it, cJSON_GetObjectItem(root, "accounts")) {
@@ -283,6 +286,12 @@ static void *task_run(void *p) {
                 const char *prefer;
                 if (!java || pymcl_ieq(java, PYMCL_JAVA_AUTO)) {
                     instance_java_pref(inst, jpbuf, sizeof(jpbuf));
+                    /* 实例也是「自动」时用全局默认 Java（设置页「设为默认」写的键）。
+                     * Python 桥一直是这个次序，这里以前直接跳过全局默认。 */
+                    if (pymcl_ieq(jpbuf, PYMCL_JAVA_AUTO)) {
+                        const char *gd = config_str("default_java", "");
+                        if (gd[0]) snprintf(jpbuf, sizeof(jpbuf), "%s", gd);
+                    }
                     prefer = jpbuf;
                 } else prefer = java;
                 cJSON *jprobe = vj ? vj : cJSON_Parse("{}");
@@ -582,6 +591,10 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_AddNumberToObject(o, "ui_fly_duration_ms", config_int("ui_fly_duration_ms", 620));
         cJSON_AddBoolToObject(o, "ui_motion", config_bool("ui_motion", 1));
         cJSON_AddBoolToObject(o, "skip_assets", config_bool("skip_assets", 0));
+        /* EziApp 主题开关 / Java 页「设为默认」/ 离线皮肤读的键 */
+        cJSON_AddBoolToObject(o, "ui_dark", config_bool("ui_dark", 0));
+        cJSON_AddStringToObject(o, "default_java", config_str("default_java", ""));
+        cJSON_AddStringToObject(o, "offline_skin", config_str("offline_skin", "default"));
         {
             char gd[PYMCL_PATH];
             pymcl_path_join(gd, sizeof(gd), g_root, config_str("instances_dir", ".minecraft"));
@@ -629,6 +642,10 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cfg_patch_int(d, "ui_fly_duration_ms", "ui_fly_duration_ms");
         cfg_patch_bool(d, "ui_motion", "ui_motion");
         cfg_patch_bool(d, "skip_assets", "skip_assets");
+        /* 以前被静默丢弃：EziApp 的主题开关、Java 页「设为默认」、离线皮肤 */
+        cfg_patch_bool(d, "ui_dark", "ui_dark");
+        cfg_patch_str(d, "default_java", "default_java");
+        cfg_patch_str(d, "offline_skin", "offline_skin");
         config_save();
         return cJSON_CreateTrue();
     }

@@ -37,6 +37,22 @@ cJSON *account_offline(const char *username) {
     return o;
 }
 
+/* 离线皮肤靠 UUID 奇偶生效：Steve/Alex 必须用固定 UUID，
+ * 与 Python AccountManager.offline_account 一致。"default"/空 = 按名字哈希。 */
+void account_apply_offline_skin(cJSON *acc, const char *skin) {
+    if (!acc || !skin || !skin[0] || pymcl_ieq(skin, "default")) return;
+    if (cJSON_GetObjectItem(acc, "skin"))
+        cJSON_ReplaceItemInObject(acc, "skin", cJSON_CreateString(skin));
+    else
+        cJSON_AddStringToObject(acc, "skin", skin);
+    if (pymcl_ieq(skin, "steve"))
+        cJSON_ReplaceItemInObject(acc, "uuid",
+            cJSON_CreateString("8667ba71-b85a-4004-af54-457a9734eed7"));
+    else if (pymcl_ieq(skin, "alex"))
+        cJSON_ReplaceItemInObject(acc, "uuid",
+            cJSON_CreateString("ec561538-f3fd-461d-a7c9-7aa354f5bba9"));
+}
+
 cJSON *account_launch_props(cJSON *acc) {
     cJSON *o = cJSON_CreateObject();
     const char *type = cJSON_GetStringValue(cJSON_GetObjectItem(acc, "type"));
