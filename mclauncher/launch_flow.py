@@ -10,11 +10,47 @@ from .argsplit import split_args
 from .config import CONFIG
 
 
+def auto_memory_mb(total_mb=0, avail_mb=0) -> int:
+    """按物理内存自动分配 Xmx（对标 PCL2「自动设置内存」）。
+
+    取可用内存的 60%，下限 1024 MB，上限 min(总内存一半, 12288 MB)，
+    向下 256 对齐。读不到内存信息时回落 4096。
+    """
+    try:
+        total = int(total_mb or 0)
+        avail = int(avail_mb or 0)
+    except (TypeError, ValueError):
+        return 4096
+    if total <= 0 or avail <= 0:
+        return 4096
+    cap = min(total // 2, 12288)
+    mem = min(int(avail * 0.6), cap)
+    mem = (mem // 256) * 256
+    return max(1024, mem)
+
+
+def resolve_memory(settings: dict, requested_mb=None) -> tuple[int, str]:
+    """内存优先级：版本设置 > 全局自动分配（auto_memory）> 手动值。
+
+    返回 (memory_mb, source)，source ∈ {"version", "auto", "manual"}。
+    """
+    if (settings or {}).get("memory_mb"):
+        return int(settings["memory_mb"]), "version"
+    if CONFIG.get("auto_memory"):
+        from .sysinfo import memory_info
+        try:
+            info = memory_info() or {}
+        except Exception:
+            info = {}
+        return auto_memory_mb(info.get("total_mb"), info.get("avail_mb")), "auto"
+    return int(requested_mb or 0), "manual"
+
+
 def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     settings = version_settings.load(instance, version_id)
     gdir = version_settings.apply_isolation(instance, version_id, settings)
     n = global_mods.apply(gdir / "mods")
-    mem = settings.get("memory_mb") or memory_mb
+    mem, mem_src = resolve_memory(settings, memory_mb)
     extras = [str(a) for a in (extra_game_args or []) if a not in (None, "")]
     extras += split_args(settings.get("game_args"))
     if settings.get("server") and "--server" not in extras:
@@ -30,6 +66,7 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "settings": settings,
         "game_dir": gdir,
         "memory_mb": mem,
+        "memory_source": mem_src,
         "extra_game_args": extras,
         "jvm_args": jvm,
         "priority": settings.get("process_priority") or CONFIG.get("default_priority") or "normal",

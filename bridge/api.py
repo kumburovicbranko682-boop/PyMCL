@@ -670,6 +670,7 @@ class BackendAPI:
             "share_assets": bool(CONFIG.get("shared_assets", False)),
             "download_threads": int(CONFIG.get("download_threads", 8)),
             "default_memory_mb": int(CONFIG.get("memory_mb", 4096)),
+            "auto_memory": bool(CONFIG.get("auto_memory", False)),
             "default_resolution": [int(CONFIG.get("width", 854)), int(CONFIG.get("height", 480))],
             "ms_client_id": CONFIG.get("microsoft_client_id") or "",
             "curseforge_api_key": CONFIG.get("curseforge_api_key") or "",
@@ -720,6 +721,8 @@ class BackendAPI:
             patch["download_threads"] = int(data.get("download_threads") or 8)
         if "default_memory_mb" in data:
             patch["memory_mb"] = int(data.get("default_memory_mb") or 4096)
+        if "auto_memory" in data:
+            patch["auto_memory"] = bool(data.get("auto_memory"))
         if "ms_client_id" in data:
             patch["microsoft_client_id"] = ((data.get("ms_client_id") or "").strip()
                                             or CONFIG.get("microsoft_client_id"))
@@ -1570,6 +1573,10 @@ class BackendAPI:
         from mclauncher import launch_flow
         prep = launch_flow.prepare(inst, version, extra_game_args=extra_game_args, memory_mb=memory_mb)
         memory_mb = prep["memory_mb"] or memory_mb
+        if prep.get("memory_source") == "auto":
+            log(f"自动分配内存: {memory_mb} MB（按当前可用物理内存计算）")
+        elif prep.get("memory_source") == "version":
+            log(f"版本设置内存: {memory_mb} MB")
         extra_game_args = prep["extra_game_args"]
         game_dir = prep["game_dir"]
         launch_flow.run_hook(

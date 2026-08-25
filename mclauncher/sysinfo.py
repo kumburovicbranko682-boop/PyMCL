@@ -295,6 +295,11 @@ def _memory_info() -> dict:
     }
 
 
+def memory_info() -> dict:
+    """物理内存快照：total_mb / avail_mb / load_percent（供自动内存分配等使用）。"""
+    return _memory_info()
+
+
 _VIRTUAL_GPU = (
     "virtual", "basic render", "basic display", "remote desktop",
     "mumu", "parsec", "spacedesk", "usb display",

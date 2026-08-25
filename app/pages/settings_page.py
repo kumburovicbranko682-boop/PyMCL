@@ -273,6 +273,10 @@ class SettingsPage(QWidget):
         self.memory_card, self.memory_spin = _spin_card(
             FIF.DEVELOPER_TOOLS, tr("默认内存 (MB)"), tr("新实例的默认 JVM 内存"),
             512, 32768, settings["default_memory_mb"])
+        self.auto_mem_card, self.auto_mem_sw = _switch_card(
+            FIF.ROBOT if hasattr(FIF, "ROBOT") else FIF.DEVELOPER_TOOLS, tr("自动分配内存"),
+            tr("和 PCL 一样：启动时按可用物理内存实时计算，低配不爆内存、高配吃得满。版本设置里的内存仍然优先"),
+            checked=bool(settings.get("auto_memory", False)))
         gc_map = {
             "auto": tr("G1（推荐）"),
             "g1": "G1",
@@ -309,6 +313,7 @@ class SettingsPage(QWidget):
         perf_group.addSettingCard(self.comm_card)
         perf_group.addSettingCard(self.proxy_card)
         perf_group.addSettingCard(self.memory_card)
+        perf_group.addSettingCard(self.auto_mem_card)
         perf_group.addSettingCard(self.gc_card)
         perf_group.addSettingCard(self.limit_card)
 
@@ -934,6 +939,7 @@ class SettingsPage(QWidget):
             "community_source": self._comm_keys.get(self.comm_box.currentText(), "auto"),
             "use_system_proxy": self.proxy_sw.isChecked(),
             "default_memory_mb": self.memory_spin.value(),
+            "auto_memory": self.auto_mem_sw.isChecked(),
             "default_resolution": [self.width_spin.value(), self.height_spin.value()],
             "ms_client_id": self.ms_client_edit.text().strip(),
             "curseforge_api_key": self.curse_key_edit.text().strip(),

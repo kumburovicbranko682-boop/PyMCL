@@ -19,6 +19,9 @@ DEFAULT_CONFIG = {
     "shared_assets": False,
     # 默认分配内存 (MB)
     "memory_mb": 4096,
+    # 自动分配内存（PCL 同款）：启动时按物理内存实时计算 Xmx。
+    # 版本设置里的内存仍然优先；开着时启动页滑条不生效。
+    "auto_memory": False,
     # 下载并发线程数
     "download_threads": 8,
     # 默认窗口分辨率
