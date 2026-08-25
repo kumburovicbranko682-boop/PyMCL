@@ -1441,27 +1441,36 @@ class BackendAPI:
         vid = extra.get("version_id")
         fid = extra.get("file_id")
         gv = extra.get("game_version") or extra.get("mc_version")
+        # extra["version"] 是安装目标版本（版本隔离时装进 versions/<id>/mods）。
+        # 对齐 app/backend.py：以前桥这边直接丢掉这个键，AI 工具/前端指了
+        # 目标也照样装进实例根 mods，隔离版本进游戏后模组不见了还报安装成功。
+        target = str(extra.get("version") or "").strip()
+        mods_dir = self._mods_folder(inst, target) if target else None
+        if target:
+            log(f"安装目标: {inst.name} / {target}")
         if extra.get("path") or extra.get("url"):
             source = extra.get("path") or extra.get("url")
             log(f"安装模组: {source}")
             mods_mod.install_mod_from_source(dm, str(source), inst, on_progress=on_progress,
-                                             version_id=vid)
+                                             version_id=vid, mods_dir=mods_dir)
         elif src_kind.startswith("curse") and extra.get("id"):
-            log(f"从 CurseForge 安装模组 id={extra.get('id')}")
+            log(f"从 CurseForge 安装模组 id={extra.get('id')}" + (f" file={fid}" if fid else ""))
             mods_mod.install_curseforge_mod(
-                dm, extra["id"], inst, mc_version=gv, on_progress=on_progress, file_id=fid)
+                dm, extra["id"], inst, mc_version=gv, on_progress=on_progress, file_id=fid,
+                mods_dir=mods_dir)
         else:
             hit = extra if extra.get("slug") else self._lookup_mod(str(name), extra.get("source") or "Modrinth")
             if hit.get("id") and str(hit.get("source") or src_kind).lower().startswith("curse"):
                 log(f"从 CurseForge 安装模组 id={hit.get('id')}")
                 mods_mod.install_curseforge_mod(
                     dm, hit["id"], inst, mc_version=gv, on_progress=on_progress,
-                    file_id=fid or extra.get("version_id"))
+                    file_id=fid or extra.get("version_id"), mods_dir=mods_dir)
             else:
                 slug = hit.get("slug") or name
-                log(f"从 Modrinth 安装模组 {slug}")
+                log(f"从 Modrinth 安装模组 {slug}" + (f" @{vid}" if vid else ""))
                 mods_mod.install_mod_from_source(
-                    dm, str(slug), inst, mc_version=gv, on_progress=on_progress, version_id=vid)
+                    dm, str(slug), inst, mc_version=gv, on_progress=on_progress,
+                    version_id=vid, mods_dir=mods_dir)
         log("模组安装完成")
 
     def _install_content_impl(self, progress, log, kind, name, instance, extra=None):
@@ -1477,7 +1486,16 @@ class BackendAPI:
         files = (result or {}).get("files") or []
         log(f"完成: {', '.join(files) or name}")
         if kind == "datapack":
-            log("数据包已放到实例 datapacks 目录，请复制到对应存档的 datapacks 文件夹后进入世界。")
+            # 对齐 app/backend.py：extra 里带 save/world 时直接装进对应存档，
+            # 以前桥这边把这两个键静默丢掉，只提示手动复制。
+            save_name = extra.get("save") or extra.get("world")
+            if save_name:
+                from mclauncher import saves as saves_mod
+                dest = saves_mod.install_datapack_into_save(
+                    inst, (files or [name])[0], save_name, extra.get("version") or "")
+                log(f"已放入存档: {dest}")
+            else:
+                log("数据包已放到实例 datapacks 目录。可在存档管理里选世界安装进去。")
 
     def _download_java_impl(self, progress, log, major):
         dm = self._dm(progress, log)
@@ -1763,6 +1781,18 @@ class BackendAPI:
         props = self.accounts.launch_props(acc)
         prep = launch_flow.prepare(inst, version, memory_mb=int(CONFIG.get("memory_mb") or 4096))
         java_exe = java_mod.resolve_launch_java(inst.version_json(version) or {}, on_note=log)
+        # 对齐 app/backend.py：版本绑定的认证服要进导出的 .bat，
+        # 且 javaagent 指向的 jar 得先确保存在，否则导出的脚本跑不起来。
+        auth_server = str(prep.get("auth_server") or "").strip()
+        if auth_server and not props.get("authlib_api"):
+            props = dict(props)
+            props["authlib_api"] = auth_server
+        if props.get("authlib_api"):
+            from mclauncher import authlib as authlib_mod
+            authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
+        if props.get("nide8_id"):
+            from mclauncher import nide8 as nide8_mod
+            nide8_mod.ensure_jar(self._dm(progress, log), on_note=log)
         cmd, _n, _v, gdir = build_launch_command(
             inst, version, props, java_exe,
             memory_mb=prep["memory_mb"] or 4096,
