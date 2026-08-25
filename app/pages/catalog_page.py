@@ -509,6 +509,11 @@ class PclCatalogPage(QWidget):
             "sort": self._sort_key(),
             "offset": self._offset,
         }
+        # 无关键词但选了版本/分类/排序或在翻页 → 浏览源站真实榜单
+        # （PCL2/HMCL 下载页同款）；全默认才显示本地热门推荐
+        browsing = bool(extra["game_version"] or extra["sort"]
+                        or self.type_box.currentIndex() > 0 or self._offset)
+        extra["browse"] = browsing and not query
         call_async = getattr(self.backend, "call_async", None)
 
         def _call():
@@ -523,11 +528,11 @@ class PclCatalogPage(QWidget):
                 self.list_layout.addStretch(1)
             call_async(
                 _call,
-                lambda rows, t=token, ap=append: self._on_search_ok(t, rows, ap),
+                lambda rows, t=token, ap=append, br=browsing: self._on_search_ok(t, rows, ap, br),
                 lambda err, t=token: self._on_search_err(t, err),
             )
             return
-        self._on_search_ok(token, _call(), append)
+        self._on_search_ok(token, _call(), append, browsing)
 
     def _load_more(self):
         self._offset += self._page_size
@@ -540,7 +545,7 @@ class PclCatalogPage(QWidget):
         self.list_layout.addWidget(EmptyState(self.spec["icon"], f"搜索失败: {err}"))
         self.list_layout.addStretch(1)
 
-    def _on_search_ok(self, token, results, append=False):
+    def _on_search_ok(self, token, results, append=False, browsing=False):
         if token != self._search_token:
             return
         results = list(results or [])
@@ -556,7 +561,7 @@ class PclCatalogPage(QWidget):
             self._results = results
         self._clear_list()
         query = self.name_edit.text().strip()
-        if not query:
+        if not query and not browsing:
             head = QLabel(tr("热门推荐"))
             head.setStyleSheet(
                 f"color: {Theme.title}; font-size: 13px; font-weight: 700;"
@@ -568,8 +573,8 @@ class PclCatalogPage(QWidget):
             return
         for row in self._results:
             self.list_layout.addWidget(PclResultRow(row, self._install, on_fav=self._toggle_fav))
-        # 本页拿满说明源站可能还有下一页（热门推荐是本地列表，不翻页）
-        if query and len(results) >= self._page_size:
+        # 本页拿满说明源站可能还有下一页（本地热门推荐列表不翻页）
+        if (query or browsing) and len(results) >= self._page_size:
             more = PushButton(tr("加载更多"))
             more.setFixedHeight(34)
             more.clicked.connect(self._load_more)

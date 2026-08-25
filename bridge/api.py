@@ -1406,7 +1406,10 @@ class BackendAPI:
         gv = extra.get("game_version") or extra.get("version") or ""
         if isinstance(gv, str) and gv.startswith("全部"):
             gv = ""
-        if not q:
+        sort = str(extra.get("sort") or "")
+        offset = int(extra.get("offset") or 0)
+        browse = bool(extra.get("browse") or sort or gv or cats or offset)
+        if not q and not browse:
             rows = []
             seen = set()
             for title, pack_src, key, slug in POPULAR_MODPACKS:
@@ -1435,11 +1438,9 @@ class BackendAPI:
             return rows
         dm = DownloadManager(threads=2)
         key = CONFIG.get("curseforge_api_key")
-        sort = str(extra.get("sort") or "")
-        offset = int(extra.get("offset") or 0)
         hits = []
-        # 中文别名目录只有一页结果，翻页时直接走源站搜索
-        if not offset:
+        # 中文别名目录只有一页结果，翻页/无词浏览时直接走源站搜索
+        if q and not offset:
             try:
                 hits = modpack_mod.search_modpacks_chinese(
                     dm, q, limit=25, api_key=key, game_version=gv or None,
@@ -1474,7 +1475,17 @@ class BackendAPI:
     def search_mods(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
         src = "curseforge" if (source or "").lower().startswith("curse") else "modrinth"
         q = (query or "").strip()
-        if not q:
+        extra = extra or {}
+        gv = extra.get("game_version") or extra.get("version") or ""
+        if isinstance(gv, str) and gv.startswith("全部"):
+            gv = ""
+        from mclauncher.catalog_files import category_facets
+        cats = category_facets(extra.get("category") or extra.get("type") or "")
+        sort = str(extra.get("sort") or "")
+        offset = int(extra.get("offset") or 0)
+        # 无关键词且没带任何筛选/排序/翻页：本地热门推荐；带了走源站真实榜单
+        browse = bool(extra.get("browse") or sort or gv or cats or offset)
+        if not q and not browse:
             rows = []
             for title, mod_src, key, *_rest in POPULAR_MODS:
                 if mod_src != src:
@@ -1490,14 +1501,6 @@ class BackendAPI:
             self._mod_cache = rows
             return rows
         dm = DownloadManager(threads=2)
-        extra = extra or {}
-        gv = extra.get("game_version") or extra.get("version") or ""
-        if isinstance(gv, str) and gv.startswith("全部"):
-            gv = ""
-        from mclauncher.catalog_files import category_facets
-        cats = category_facets(extra.get("category") or extra.get("type") or "")
-        sort = str(extra.get("sort") or "")
-        offset = int(extra.get("offset") or 0)
         try:
             if src == "curseforge":
                 hits = mods_mod.search_curseforge(

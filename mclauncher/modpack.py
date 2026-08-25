@@ -617,7 +617,8 @@ def modrinth_search(dm: DownloadManager, query, limit=25,
         "query": query,
         "facets": facets,
         "limit": limit,
-        "index": mr_sort_index(sort, query) if sort else "relevance",
+        # 有词按相关度、无词浏览按下载量（真实榜单），显式排序优先
+        "index": mr_sort_index(sort, query),
     }
     if offset:
         params["offset"] = int(offset)

@@ -165,7 +165,8 @@ def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categor
     if rec:
         query = rec.get("subname") or rec.get("curseforge") or rec.get("name") or query
     params = {
-        "query": query or " ",
+        # 注意不能用 " " 占位：Modrinth 会把空格当字面词搜出 0 条
+        "query": query or "",
         "facets": _mr_facets("mod", game_version, categories),
         "limit": limit,
         "index": mr_sort_index(sort, query),
@@ -1113,7 +1114,8 @@ def search_modrinth_projects(dm: DownloadManager, query, project_type, limit=30,
                              game_version=None, categories=None, sort="", offset=0):
     """按 project_type 搜 Modrinth（shader / resourcepack / datapack / mod）。"""
     params = {
-        "query": query or " ",
+        # 注意不能用 " " 占位：Modrinth 会把空格当字面词搜出 0 条
+        "query": query or "",
         "facets": _mr_facets(project_type, game_version, categories),
         "limit": limit,
         "index": mr_sort_index(sort, query),

@@ -366,7 +366,7 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
     if want_mr:
         try:
             if kind == "mod":
-                hits = mods_mod.search_mods(dm, q or " ", limit=30, game_version=gv,
+                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv,
                                             categories=cats, sort=sort, offset=offset)
             else:
                 hits = mods_mod.search_modrinth_projects(

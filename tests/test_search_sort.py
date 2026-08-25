@@ -172,6 +172,70 @@ class FacadePassthroughTests(unittest.TestCase):
         # 翻页时跳过中文别名目录（它只有一页）
         self.assertEqual(alias_called, [])
 
+    def test_qt_empty_query_defaults_to_local_popular(self):
+        api = self._qt()
+
+        def boom(*a, **k):
+            raise AssertionError("全默认时不该发网络请求")
+
+        with patch("mclauncher.mods.search_mods", boom), \
+             patch("mclauncher.mods.search_curseforge", boom):
+            rows = api.search_mods("", "Modrinth", {})
+        self.assertTrue(rows)
+        self.assertTrue(all(r.get("source") for r in rows))
+
+    def test_qt_empty_query_browse_hits_remote(self):
+        api = self._qt()
+        captured = {}
+
+        def fake(dm, q, limit=30, game_version=None, categories=None, sort="", offset=0):
+            captured.update(q=q, sort=sort)
+            return []
+
+        with patch("mclauncher.mods.search_mods", fake):
+            api.search_mods("", "Modrinth", {"browse": True})
+        self.assertEqual(captured, {"q": "", "sort": ""})
+
+    def test_qt_empty_query_sort_triggers_browse(self):
+        api = self._qt()
+        called = []
+        with patch("mclauncher.mods.search_mods",
+                   lambda *a, **k: called.append(k) or []):
+            api.search_mods("", "Modrinth", {"sort": "downloads"})
+        self.assertEqual(len(called), 1)
+        self.assertEqual(called[0].get("sort"), "downloads")
+
+    def test_bridge_empty_query_browse_parity(self):
+        api = self._bridge()
+        called = []
+        with patch("mclauncher.mods.search_mods",
+                   lambda *a, **k: called.append(k) or []):
+            api.search_mods("", "Modrinth", {"browse": True})
+        self.assertEqual(len(called), 1)
+
+        def boom(*a, **k):
+            raise AssertionError("全默认时不该发网络请求")
+
+        with patch("mclauncher.mods.search_mods", boom):
+            rows = api.search_mods("", "Modrinth", {})
+        self.assertTrue(rows)
+
+    def test_qt_modpacks_browse_skips_alias(self):
+        api = self._qt()
+        captured = {}
+        alias_called = []
+
+        def fake_mr(dm, q, limit=25, game_version=None, categories=None, sort="", offset=0):
+            captured.update(q=q, sort=sort)
+            return []
+
+        with patch("mclauncher.modpack.modrinth_search", fake_mr), \
+             patch("mclauncher.modpack.search_modpacks_chinese",
+                   lambda *a, **k: alias_called.append(1) or []):
+            api.search_modpacks("", "Modrinth", {"browse": True, "sort": "downloads"})
+        self.assertEqual(captured, {"q": "", "sort": "downloads"})
+        self.assertEqual(alias_called, [])
+
     def test_facade_search_signatures_match(self):
         import inspect
         from app.backend import BackendAPI as QtBackend
