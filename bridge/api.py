@@ -1904,8 +1904,9 @@ class BackendAPI:
             wrapper=prep.get("wrapper"),
         )
         if not dest:
-            dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.bat")
-        path = vops.export_launch_bat(Path(dest), cmd, gdir)
+            ext = "bat" if os.name == "nt" else "sh"
+            dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.{ext}")
+        path = vops.export_launch_script(Path(dest), cmd, gdir)
         log(f"已写出 {path}")
         return path
 

@@ -141,3 +141,32 @@ def export_launch_bat(dest: Path, cmd: list, cwd) -> str:
     lines.append("pause")
     dest.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
     return str(dest)
+
+
+def export_launch_sh(dest: Path, cmd: list, cwd) -> str:
+    """POSIX 启动脚本：shlex 引号 + exec，写完加可执行位。"""
+    import os
+    import shlex
+    dest = Path(dest)
+    if dest.suffix.lower() == ".bat":
+        dest = dest.with_suffix(".sh")
+    utils.ensure_dir(dest.parent)
+    lines = [
+        "#!/bin/sh",
+        f"cd {shlex.quote(str(cwd))} || exit 1",
+        "exec " + " ".join(shlex.quote(str(a)) for a in cmd),
+    ]
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        os.chmod(dest, 0o755)
+    except OSError:
+        pass
+    return str(dest)
+
+
+def export_launch_script(dest: Path, cmd: list, cwd) -> str:
+    """按当前系统导出启动脚本：Windows 写 .bat，其他系统写 .sh（HMCL 同款行为）。"""
+    import os
+    if os.name == "nt":
+        return export_launch_bat(dest, cmd, cwd)
+    return export_launch_sh(dest, cmd, cwd)
