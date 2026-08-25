@@ -714,6 +714,8 @@ class BackendAPI:
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
+            "ui_fly_animation": bool(CONFIG.get("ui_fly_animation", True)),
+            "ui_fly_duration_ms": int(CONFIG.get("ui_fly_duration_ms", 620)),
         }
 
     def save_settings(self, data: dict):
@@ -780,6 +782,11 @@ class BackendAPI:
             patch["skip_assets"] = bool(data.get("skip_assets"))
         if "ui_dark" in data:
             patch["ui_dark"] = bool(data.get("ui_dark"))
+        if "ui_fly_animation" in data:
+            patch["ui_fly_animation"] = bool(data.get("ui_fly_animation"))
+        if "ui_fly_duration_ms" in data:
+            patch["ui_fly_duration_ms"] = int(data.get("ui_fly_duration_ms")
+                                              or CONFIG.get("ui_fly_duration_ms") or 620)
         CONFIG.update(patch)
         CONFIG.save()
 
