@@ -1023,5 +1023,16 @@
   "包裹 Java 的前置命令，如 optirun、mangohud": "Command prefixed before Java, e.g. optirun, mangohud",
   "每行一个 KEY=VALUE，注入游戏进程": "One KEY=VALUE per line, injected into the game process",
   "包裹命令: {c}": "Wrapper command: {c}",
-  "环境变量: {v}": "Environment variables: {v}"
+  "环境变量: {v}": "Environment variables: {v}",
+  "导出整合包": "Export modpack",
+  "导出整合包…": "Export modpack…",
+  "打包为 Modrinth 整合包（.mrpack）。能在 Modrinth 反查到的模组只记下载地址，其余模组和 config 等进 overrides。": "Packs the version as a Modrinth modpack (.mrpack). Mods found on Modrinth are stored as download links; everything else (and config etc.) goes into overrides.",
+  "整合包名称": "Modpack name",
+  "整合包版本号": "Modpack version",
+  "包含资源包": "Include resource packs",
+  "包含光影包": "Include shader packs",
+  "已开始导出": "Export started",
+  "完成后文件在 exports 目录，进度见下载任务。": "The file will appear in the exports folder; see the download tasks for progress.",
+  "反查模组下载地址": "Resolving mod download links",
+  "整合包已导出: {p}（{m}/{n} 个模组反查到下载地址）": "Modpack exported: {p} ({m}/{n} mods resolved to download links)"
 }

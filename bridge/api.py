@@ -378,6 +378,34 @@ class BackendAPI:
     def export_launch_script(self, instance: str, version: str, dest: str = "") -> str:
         return self.start_task(f"导出启动脚本 {version}", self._export_bat_impl, instance, version, dest)
 
+    def export_modpack(self, instance: str, version: str, dest: str = "",
+                       name: str = "", pack_version: str = "1.0.0",
+                       summary: str = "", include_resourcepacks: bool = False,
+                       include_shaderpacks: bool = False) -> str:
+        """把版本导出为 Modrinth 整合包（.mrpack）。返回任务 ID。"""
+        return self.start_task(
+            f"导出整合包 {version}", self._export_modpack_impl,
+            instance, version, dest, name, pack_version, summary,
+            include_resourcepacks, include_shaderpacks)
+
+    def _export_modpack_impl(self, progress, log, instance, version, dest, name,
+                             pack_version, summary, inc_rp, inc_sp):
+        from mclauncher import modpack_export as mpx
+        inst = self._instance(instance)
+        include = []
+        if inc_rp:
+            include.append("resourcepacks")
+        if inc_sp:
+            include.append("shaderpacks")
+        progress(1, 3, "反查模组下载地址")
+        result = mpx.export_mrpack(
+            inst, version, dest or None, name=name,
+            pack_version=pack_version or "1.0.0", summary=summary,
+            include=include, dm=self._dm(progress, log), on_note=log)
+        progress(3, 3, "完成")
+        log(f"整合包已导出: {result['path']}（{result['matched']}/{result['mods']} 个模组反查到下载地址）")
+        return result["path"]
+
     def create_desktop_shortcut(self, instance: str, version: str, username: str = "",
                                 account: str = "", name: str = "") -> str:
         from mclauncher import shortcut

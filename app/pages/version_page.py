@@ -5,7 +5,8 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action, BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
-    MessageBox, Pivot, PushButton, CheckBox, RoundMenu, ScrollArea, SearchLineEdit,
+    LineEdit, MessageBox, MessageBoxBase, Pivot, PushButton, CheckBox, RoundMenu,
+    ScrollArea, SearchLineEdit,
     SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentToolButton,
 )
 
@@ -40,6 +41,32 @@ class VersionCard(SimpleCardWidget):
         install_btn.clicked.connect(lambda: on_install(info, self))
         row.addWidget(install_btn)
         layout.addLayout(row)
+
+
+class ExportPackDialog(MessageBoxBase):
+    """导出整合包（.mrpack）：名称 / 版本号 / 可选目录。"""
+
+    def __init__(self, version: str, parent=None):
+        super().__init__(parent)
+        self.viewLayout.addWidget(SubtitleLabel(tr("导出整合包"), self))
+        hint = BodyLabel(tr("打包为 Modrinth 整合包（.mrpack）。能在 Modrinth 反查到的模组只记下载地址，其余模组和 config 等进 overrides。"), self)
+        hint.setWordWrap(True)
+        self.viewLayout.addWidget(hint)
+        self.name = LineEdit(self)
+        self.name.setPlaceholderText(tr("整合包名称"))
+        self.name.setText(version)
+        self.viewLayout.addWidget(self.name)
+        self.ver = LineEdit(self)
+        self.ver.setPlaceholderText(tr("整合包版本号"))
+        self.ver.setText("1.0.0")
+        self.viewLayout.addWidget(self.ver)
+        self.rp = CheckBox(tr("包含资源包"), self)
+        self.sp = CheckBox(tr("包含光影包"), self)
+        self.viewLayout.addWidget(self.rp)
+        self.viewLayout.addWidget(self.sp)
+        self.yesButton.setText(tr("导出"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(420)
 
 
 class VersionPage(QWidget):
@@ -312,7 +339,27 @@ class VersionPage(QWidget):
         add(tr("隐藏 / 取消隐藏"), lambda: self._hide(instance, version))
         add(tr("创建桌面快捷方式"), lambda: self._shortcut(instance, version))
         add(tr("导出启动脚本"), lambda: self.backend.export_launch_script(instance, version))
+        add(tr("导出整合包…"), lambda: self._export_pack(instance, version))
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _export_pack(self, instance, version):
+        dlg = ExportPackDialog(version, self.window())
+        if not dlg.exec():
+            return
+        try:
+            self.backend.export_modpack(
+                instance, version,
+                name=dlg.name.text().strip() or version,
+                pack_version=dlg.ver.text().strip() or "1.0.0",
+                include_resourcepacks=dlg.rp.isChecked(),
+                include_shaderpacks=dlg.sp.isChecked(),
+            )
+        except Exception as e:
+            MessageBox(tr("导出失败"), str(e), self).exec()
+            return
+        InfoBar.success(
+            tr("已开始导出"), tr("完成后文件在 exports 目录，进度见下载任务。"),
+            parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def _shortcut(self, instance, version):
         try:
