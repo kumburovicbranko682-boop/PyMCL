@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from qfluentwidgets import (
     CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
     LineEdit, MessageBox, MessageBoxBase, PushButton, SubtitleLabel, SwitchButton,
-    TransparentPushButton, TransparentToolButton,
+    TransparentPushButton, TransparentTogglePushButton, TransparentToolButton,
 )
 
 from mclauncher.config import CONFIG
@@ -62,6 +62,12 @@ class _ModRow(QFrame):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 8, 12, 8)
         lay.setSpacing(12)
+        # 批量管理模式（PCL2 同款）：行首出勾选框
+        if getattr(page, "_batch_mode", False):
+            cb = CheckBox()
+            cb.setChecked(filename in page._selected)
+            cb.toggled.connect(lambda on, n=filename: page._on_row_check(n, on))
+            lay.addWidget(cb)
         lay.addWidget(self._icon(entry.get("icon"), display))
 
         info = QVBoxLayout()
@@ -427,11 +433,37 @@ class ModManagerPage(QWidget):
         self.export_btn = TransparentPushButton(
             getattr(FIF, "SAVE_AS", FIF.SAVE), tr("导出清单"))
         self.export_btn.setToolTip(tr("把模组列表导出成 Markdown 文件，方便分享"))
+        self.batch_btn = TransparentTogglePushButton(
+            getattr(FIF, "CHECKBOX", FIF.EDIT), tr("批量管理"))
+        self.batch_btn.setToolTip(tr("勾选多个模组批量启用/禁用/删除"))
         for b in (self.folder_btn, self.import_btn, self.update_btn, self.conflict_btn,
-                  self.export_btn):
+                  self.export_btn, self.batch_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
         cv.addLayout(bar)
+
+        # 批量操作条（PCL2 同款）：默认隐藏，点「批量管理」出现
+        self._batch_mode = False
+        self._selected: set[str] = set()
+        self.batch_bar = QWidget()
+        bb = QHBoxLayout(self.batch_bar)
+        bb.setContentsMargins(0, 0, 0, 0)
+        bb.setSpacing(10)
+        self.sel_label = CaptionLabel(tr("已选 {n} 个").format(n=0))
+        self.sel_label.setStyleSheet(f"color: {Theme.muted}; background: transparent;")
+        bb.addWidget(self.sel_label)
+        self.sel_all_btn = TransparentPushButton(tr("全选"))
+        self.sel_all_btn.setToolTip(tr("选中当前筛选出的全部模组；已全选时再点一次取消"))
+        self.enable_sel_btn = TransparentPushButton(tr("启用所选"))
+        self.disable_sel_btn = TransparentPushButton(tr("禁用所选"))
+        self.delete_sel_btn = TransparentPushButton(FIF.DELETE, tr("删除所选"))
+        for b in (self.sel_all_btn, self.enable_sel_btn, self.disable_sel_btn,
+                  self.delete_sel_btn):
+            b.setFixedHeight(30)
+            bb.addWidget(b)
+        bb.addStretch(1)
+        self.batch_bar.hide()
+        cv.addWidget(self.batch_bar)
 
         tip = CaptionLabel(
             tr("提示：在版本设置里开启「隔离 Mod」后，各版本会拥有独立 mods 目录，可在此切换查看。"))
@@ -462,6 +494,11 @@ class ModManagerPage(QWidget):
         self.update_btn.clicked.connect(self._check_updates)
         self.conflict_btn.clicked.connect(self._scan_conflicts)
         self.export_btn.clicked.connect(self._export_list)
+        self.batch_btn.toggled.connect(self._toggle_batch)
+        self.sel_all_btn.clicked.connect(self._select_all_visible)
+        self.enable_sel_btn.clicked.connect(lambda: self._batch_apply("enable"))
+        self.disable_sel_btn.clicked.connect(lambda: self._batch_apply("disable"))
+        self.delete_sel_btn.clicked.connect(lambda: self._batch_apply("delete"))
         self.setAcceptDrops(True)
 
         # 目录监视（PCL2 同款）：在文件管理器里往 mods 文件夹放/删文件，
@@ -579,15 +616,23 @@ class ModManagerPage(QWidget):
             f"{tr('启用')} {on} · {tr('禁用')} {off} · {_fmt_size(size)} · "
             f"{self._current_instance()}{(' / ' + ver_label) if (ver_label := self._current_version()) else ''}")
 
-    def _refill(self, *_):
+    def _visible_rows(self) -> list[dict]:
         text = (self.search.text() or "").strip().lower()
+        return [r for r in self._entries
+                if not text or text in str(r.get("filename") or "").lower()
+                or text in str(r.get("name") or "").lower()]
+
+    def _refill(self, *_):
+        if self._batch_mode:
+            valid = {str(r.get("filename") or "") for r in self._entries}
+            if not self._selected <= valid:
+                self._selected &= valid
+                self._update_batch_label()
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        rows = [r for r in self._entries
-                if not text or text in str(r.get("filename") or "").lower()
-                or text in str(r.get("name") or "").lower()]
+        rows = self._visible_rows()
         if not rows:
             if self._entries:
                 self.list_layout.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的模组")))
@@ -599,6 +644,83 @@ class ModManagerPage(QWidget):
         for row in rows:
             self.list_layout.addWidget(_ModRow(row, self))
         self.list_layout.addStretch(1)
+
+    # ---------------------------------------------------------- 批量管理
+    def _toggle_batch(self, on: bool):
+        self._batch_mode = bool(on)
+        self._selected.clear()
+        self.batch_bar.setVisible(self._batch_mode)
+        self._update_batch_label()
+        self._refill()
+
+    def _on_row_check(self, filename: str, checked: bool):
+        if checked:
+            self._selected.add(filename)
+        else:
+            self._selected.discard(filename)
+        self._update_batch_label()
+
+    def _select_all_visible(self):
+        """全选当前筛选出的行；已经全选时再点一次取消这些行。"""
+        vis = {str(r.get("filename") or "") for r in self._visible_rows()} - {""}
+        if vis and vis <= self._selected:
+            self._selected -= vis
+        else:
+            self._selected |= vis
+        self._update_batch_label()
+        self._refill()
+
+    def _update_batch_label(self):
+        n = len(self._selected)
+        self.sel_label.setText(tr("已选 {n} 个").format(n=n))
+        for b in (self.enable_sel_btn, self.disable_sel_btn, self.delete_sel_btn):
+            b.setEnabled(n > 0)
+
+    def _batch_apply(self, action: str):
+        """批量启用/禁用/删除（PCL2 同款）。
+
+        启用/禁用会改文件名（加/去 .disabled），用后端返回的新名字
+        更新选中集合，操作完保持选中状态；失败的行留在选中集里。
+        """
+        files = [str(r.get("filename") or "") for r in self._entries
+                 if str(r.get("filename") or "") in self._selected]
+        if not files:
+            return
+        inst = self._current_instance()
+        ver = self._current_version()
+        if action == "delete":
+            box = MessageBox(
+                tr("删除确认"),
+                tr("将删除所选 {n} 个模组文件（会尽量移入系统回收站，可找回）。").format(n=len(files)),
+                self)
+            box.yesButton.setText(tr("删除"))
+            box.cancelButton.setText(tr("取消"))
+            if not box.exec():
+                return
+        fails = []
+        kept: set[str] = set()
+        for fn in files:
+            try:
+                if action == "enable":
+                    kept.add(str(self.backend.enable_mod(inst, fn, ver) or fn))
+                elif action == "disable":
+                    kept.add(str(self.backend.disable_mod(inst, fn, ver) or fn))
+                else:
+                    self.backend.delete_mod(inst, fn, ver)
+            except Exception as e:  # noqa: BLE001
+                fails.append(f"{fn}: {e}")
+                kept.add(fn)
+        self._selected = kept
+        if fails:
+            InfoBar.error(tr("部分操作失败"), "；".join(fails)[:400], parent=self,
+                          position=InfoBarPosition.TOP, duration=6000)
+        else:
+            labels = {"enable": tr("已启用 {n} 个模组"),
+                      "disable": tr("已禁用 {n} 个模组"),
+                      "delete": tr("已删除 {n} 个模组")}
+            InfoBar.success(tr("批量操作完成"), labels[action].format(n=len(files)),
+                            parent=self, position=InfoBarPosition.TOP, duration=4000)
+        self.reload_list()
 
     # ------------------------------------------------------------------
     def _toggle(self, filename: str, enabled: bool, row=None):
