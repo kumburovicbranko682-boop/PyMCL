@@ -511,6 +511,33 @@ class BackendAPI(QObject):
         return self.start_task(f"安装世界 {Path(str(name)).name}", self._install_world_impl,
                                name, instance, extra or {})
 
+    def classify_import(self, path: str) -> dict:
+        """识别本地文件类型（整合包/模组/世界/资源包/光影/数据包），供拖拽导入用。"""
+        from mclauncher import import_files
+        return import_files.classify_file(path)
+
+    def import_local_file(self, path: str, instance: str = "", kind: str = "") -> str:
+        """把本地文件按识别结果分发到既有安装通道，返回任务 id。"""
+        from mclauncher import import_files
+        p = Path(path)
+        kind = kind or import_files.classify_file(p).get("kind") or ""
+        name = p.name
+        if kind == "modpack":
+            return self.install_modpack(name, source=tr("本地文件"),
+                                        extra={"path": str(p), "instance": instance})
+        if kind == "mod":
+            return self.install_mod(name, instance, extra={"path": str(p)})
+        if kind == "world":
+            return self.install_world(name, instance, extra={"path": str(p)})
+        if kind == "resourcepack":
+            return self.install_resourcepack(name, instance, extra={"path": str(p)})
+        if kind == "shaderpack":
+            return self.install_shader(name, instance, extra={"path": str(p)})
+        if kind == "datapack":
+            return self.install_datapack(name, instance, extra={"path": str(p)})
+        raise ValueError(tr("无法识别的文件：{name}（支持整合包 / 模组 / 世界 / 资源包 / 光影包 / 数据包）")
+                         .format(name=name))
+
     def list_catalog_files(self, extra: dict | None = None) -> list[dict]:
         from mclauncher.catalog_files import list_project_files
         return list_project_files(DownloadManager(threads=2), extra or {})
