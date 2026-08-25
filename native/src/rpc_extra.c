@@ -456,9 +456,72 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         return cJSON_CreateTrue();
     }
     if (strcmp(method, "update_server") == 0) {
-        cJSON *r = py_rpc_call(method, params);
-        if (r) return r;
-        return cJSON_CreateTrue();
+        /* add/delete 早就是原生实现，唯独 update 走 py_rpc，而且 Python 不可用时
+         * 返回 True 假成功——EziApp 编辑服务器点保存，报「已保存」，改动全丢。
+         * 语义与 mclauncher/servers.py 的 update_server 一致：按键局部更新。 */
+        const char *inst = pstr(params, "instance", "default");
+        int idx = cJSON_IsNumber(cJSON_GetObjectItem(params, "index"))
+                      ? (int)cJSON_GetObjectItem(params, "index")->valuedouble : -1;
+        char path[PYMCL_PATH];
+        servers_path(inst, path, sizeof(path));
+        cJSON *arr = pymcl_read_json(path);
+        if (!cJSON_IsArray(arr) || idx < 0 || idx >= cJSON_GetArraySize(arr)) {
+            cJSON_Delete(arr);
+            pymcl_set_error("服务器索引 %d 不存在", idx);
+            return NULL;
+        }
+        cJSON *entry = cJSON_GetArrayItem(arr, idx);
+        if (!cJSON_IsObject(entry)) {
+            cJSON_Delete(arr);
+            pymcl_set_error("服务器数据损坏: %d", idx);
+            return NULL;
+        }
+        cJSON *v;
+        if ((v = cJSON_GetObjectItem(params, "ip")) != NULL) {
+            const char *ip = cJSON_GetStringValue(v);
+            if (!ip || !ip[0]) {
+                cJSON_Delete(arr);
+                pymcl_set_error("服务器地址不能为空");
+                return NULL;
+            }
+            cJSON_ReplaceItemInObject(entry, "ip", cJSON_CreateString(ip));
+        }
+        if ((v = cJSON_GetObjectItem(params, "port")) != NULL && cJSON_IsNumber(v)) {
+            int port = (int)v->valuedouble;
+            if (port < 1 || port > 65535) {
+                cJSON_Delete(arr);
+                pymcl_set_error("端口号必须在 1-65535 之间");
+                return NULL;
+            }
+            if (cJSON_GetObjectItem(entry, "port"))
+                cJSON_ReplaceItemInObject(entry, "port", cJSON_CreateNumber(port));
+            else
+                cJSON_AddNumberToObject(entry, "port", port);
+        }
+        const char *skeys[] = { "name", "description", "icon" };
+        for (size_t i = 0; i < sizeof(skeys) / sizeof(skeys[0]); i++) {
+            v = cJSON_GetObjectItem(params, skeys[i]);
+            if (v && cJSON_IsString(v)) {
+                if (cJSON_GetObjectItem(entry, skeys[i]))
+                    cJSON_ReplaceItemInObject(entry, skeys[i], cJSON_CreateString(v->valuestring));
+                else
+                    cJSON_AddStringToObject(entry, skeys[i], v->valuestring);
+            }
+        }
+        if ((v = cJSON_GetObjectItem(params, "hidden")) != NULL && cJSON_IsBool(v)) {
+            if (cJSON_GetObjectItem(entry, "hidden"))
+                cJSON_ReplaceItemInObject(entry, "hidden", cJSON_CreateBool(cJSON_IsTrue(v)));
+            else
+                cJSON_AddBoolToObject(entry, "hidden", cJSON_IsTrue(v));
+        }
+        pymcl_write_json(path, arr);
+        cJSON *ret = cJSON_Duplicate(entry, 1);
+        cJSON_AddNumberToObject(ret, "index", idx);
+        if (!cJSON_GetObjectItem(ret, "port")) cJSON_AddNumberToObject(ret, "port", 25565);
+        if (!cJSON_GetObjectItem(ret, "hidden")) cJSON_AddBoolToObject(ret, "hidden", 0);
+        cJSON_Delete(arr);
+        if (emit) emit("ui_changed", cJSON_CreateObject());
+        return ret;
     }
 
     /* ---- playtime ---- */
