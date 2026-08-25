@@ -559,6 +559,13 @@ class SettingsPage(QWidget):
         fb_group.addSettingCard(self.fb_consent_card)
         fb_group.addSettingCard(self.fb_url_card)
         fb_group.addSettingCard(self.fb_hb_card)
+        self.log_card = SettingCard(
+            FIF.DOCUMENT, tr("启动器日志"),
+            tr("每次运行一个文件，保留最近 5 次；崩溃日志也在这里"))
+        self.open_log_btn = PushButton(tr("打开日志文件夹"))
+        self.log_card.hBoxLayout.addWidget(self.open_log_btn, 0, Qt.AlignRight)
+        self.log_card.hBoxLayout.addSpacing(16)
+        fb_group.addSettingCard(self.log_card)
         root.addWidget(fb_group)
 
         row = QHBoxLayout()
@@ -591,6 +598,7 @@ class SettingsPage(QWidget):
         # 代理：切模式即时显隐地址/认证卡；测试按钮先落盘再试连
         self.proxy_box.currentTextChanged.connect(self._sync_proxy_mode)
         self.proxy_test_btn.clicked.connect(self._test_proxy)
+        self.open_log_btn.clicked.connect(self._open_launcher_logs)
 
     def refresh_from_config(self):
         """把磁盘上的最新设置推回控件。
@@ -610,6 +618,13 @@ class SettingsPage(QWidget):
         self.font_box.setCurrentText(cur_font or self._font_default_label)
         self.font_box.blockSignals(False)
         self.multi_sw.setChecked(bool(settings.get("allow_multi_instance", False)))
+
+    def _open_launcher_logs(self):
+        try:
+            self.backend.open_launcher_logs()
+        except Exception as e:
+            InfoBar.error(tr("无法打开"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
 
     def _sync_proxy_mode(self, _text=""):
         mode = self._proxy_keys.get(self.proxy_box.currentText(), "system")

@@ -569,6 +569,7 @@ def gui_main():
 
 def main(argv=None):
     install_guard()
+    utils.setup_file_logging()
     args = build_parser().parse_args(argv)
     if not args.command:
         try:

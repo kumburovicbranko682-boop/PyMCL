@@ -450,3 +450,81 @@ if not log.handlers:
     log.addHandler(_handler)
     log.setLevel(logging.INFO)
     log.propagate = False
+
+# 启动器运行日志文件（PCL2 Log1~5.txt / HMCL latest.log 同款）。
+# stderr 打印一份归开发，文件一份归用户：崩了、下载挂了才有东西可翻可反馈。
+LAUNCHER_LOG_NAME = "launcher.log"
+_LOG_KEEP = 5  # 除当前外保留最近 5 次运行
+_file_log_path: Path | None = None
+
+
+def launcher_log_dir() -> Path:
+    return ROOT / "logs"
+
+
+def launcher_log_path() -> Path | None:
+    """当前运行日志文件；setup_file_logging 未调用或失败时为 None。"""
+    return _file_log_path
+
+
+def _rotate_launcher_logs(current: Path):
+    """启动时轮转：launcher.log → launcher-1.log → … → launcher-5.log。"""
+    if not current.exists():
+        return
+    try:
+        current.with_name(f"launcher-{_LOG_KEEP}.log").unlink(missing_ok=True)
+    except OSError:
+        pass
+    for i in range(_LOG_KEEP - 1, 0, -1):
+        src = current.with_name(f"launcher-{i}.log")
+        if src.exists():
+            try:
+                src.rename(current.with_name(f"launcher-{i + 1}.log"))
+            except OSError:
+                pass
+    try:
+        current.rename(current.with_name("launcher-1.log"))
+    except OSError:
+        # 多开时被别的进程占着：本次直接续写同一文件
+        pass
+
+
+def setup_file_logging() -> Path | None:
+    """给启动器日志加文件输出，每次运行一个新文件（幂等）。
+
+    在入口（GUI / CLI / bridge server）尽早调用；库方式 import 不落文件。
+    返回日志文件路径；目录不可写时返回 None，不影响 stderr 输出。
+    """
+    global _file_log_path
+    if _file_log_path is not None:
+        return _file_log_path
+    folder = launcher_log_dir()
+    current = folder / LAUNCHER_LOG_NAME
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        _rotate_launcher_logs(current)
+        # mode="a" 不用 "w"：轮转失败（多开）时别把另一个进程的日志抹掉
+        handler = logging.FileHandler(current, mode="a", encoding="utf-8",
+                                      errors="replace")
+    except OSError as e:
+        log.warning("启动器日志文件不可用: %s", e)
+        return None
+    handler.setFormatter(logging.Formatter(
+        "[%(asctime)s] %(levelname)s %(name)s: %(message)s"))
+    log.addHandler(handler)
+    _file_log_path = current
+    log.info("%s %s · Python %s · %s", APP_NAME, APP_VERSION,
+             platform.python_version(), platform.platform())
+    log.info("启动器主目录: %s", ROOT)
+    return current
+
+
+def launcher_log_tail(max_chars: int = 8000) -> str:
+    """当前运行日志的末尾片段（反馈 / 诊断附带用）。"""
+    path = _file_log_path or (launcher_log_dir() / LAUNCHER_LOG_NAME)
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    max_chars = max(0, int(max_chars))
+    return text[-max_chars:] if max_chars else ""

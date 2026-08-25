@@ -1218,5 +1218,8 @@
   "添加子标签": "Add child tag",
   "添加元素": "Add element",
   "添加元素（{kind}）": "Add element ({kind})",
-  "编辑值": "Edit value"
+  "编辑值": "Edit value",
+  "启动器日志": "Launcher logs",
+  "每次运行一个文件，保留最近 5 次；崩溃日志也在这里": "One file per run, last 5 kept; crash logs live here too",
+  "打开日志文件夹": "Open logs folder"
 }

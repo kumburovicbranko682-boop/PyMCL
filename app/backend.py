@@ -711,6 +711,20 @@ class BackendAPI(QObject):
             raise LaunchError(f"无法打开: {folder}")
         return str(folder)
 
+    def open_launcher_logs(self) -> str:
+        """打开启动器日志文件夹（launcher.log 轮转 + guard 崩溃日志所在处）。"""
+        from mclauncher import utils as utils_mod
+        folder = utils_mod.launcher_log_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        if not open_path(folder):
+            raise LaunchError(f"无法打开: {folder}")
+        return str(folder)
+
+    def launcher_log_tail(self, max_chars: int = 8000) -> str:
+        """当前运行日志末尾片段（反馈 / 诊断附带用）。"""
+        from mclauncher import utils as utils_mod
+        return utils_mod.launcher_log_tail(max_chars)
+
     def delete_modpack(self, instance: str, filename: str = ""):
         inst = self._instance(instance)
         meta = inst.meta() or {}
