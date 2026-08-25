@@ -100,6 +100,8 @@ int pymcl_zip_has(const char *zip_path, const char *inner);
 char *pymcl_zip_read(const char *zip_path, const char *inner, size_t *len);
 int pymcl_zip_extract_one(const char *zip_path, const char *inner, const char *dest);
 int pymcl_open_folder(const char *path);
+int pymcl_split_args(const char *text, char ***out);
+void pymcl_free_args(char **argv, int n);
 int pymcl_run_process(const char **argv, int argc, const char *cwd,
                       void (*on_line)(void *, const char *), void *ud, int timeout_sec);
 HANDLE pymcl_spawn_process(const char **argv, int argc, const char *cwd, HANDLE *out_read);
@@ -223,7 +225,9 @@ int install_loader(const char *instance, const char *loader, const char *ver, co
 /* ---------- launcher ---------- */
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,
                          const char *java_exe, int memory_mb, int width, int height,
+                         const char *extra_jvm, const char *game_dir,
                          char ***argv, int *argc, char *natives_out, size_t nn);
+void gc_preset_apply(const char *preset, const char *existing, char *out, size_t n);
 HANDLE game_spawn(const char **argv, int argc, const char *cwd, HANDLE *pipe);
 void game_kill(HANDLE proc);
 

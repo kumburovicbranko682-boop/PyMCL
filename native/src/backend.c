@@ -165,6 +165,114 @@ static int pint(cJSON *a, const char *k, int def) {
     return def;
 }
 
+/* ---- 版本设置（pymcl.json）：对齐 mclauncher/launch_flow.prepare ----
+ * 以前 WinUI「版本设置」对话框保存成功（get/save RPC 都在），但 C 桥启动
+ * 时一个键都不读——隔离/内存/JVM/GC/直连/全屏/前后命令全部是死设置。 */
+static cJSON *load_version_settings(const char *inst, const char *ver) {
+    char vd[PYMCL_PATH], sp[PYMCL_PATH];
+    instance_versions_dir(inst, vd, sizeof(vd));
+    pymcl_path_join3(sp, sizeof(sp), vd, ver, "pymcl.json");
+    cJSON *j = pymcl_read_json(sp);
+    if (!cJSON_IsObject(j)) {
+        cJSON_Delete(j);
+        j = cJSON_CreateObject();
+    }
+    return j;
+}
+
+/* 对齐 version_settings._junction：已有非空目录不动；空目录/旧链接先删再建。 */
+static void vs_junction(const char *link, const char *target) {
+    wchar_t *wl = pymcl_u8_to_wide(link);
+    DWORD attr = GetFileAttributesW(wl);
+    if (attr != INVALID_FILE_ATTRIBUTES) {
+        BOOL removed = (attr & FILE_ATTRIBUTE_DIRECTORY)
+            ? RemoveDirectoryW(wl)   /* 只有空目录/交接点删得掉，实目录保留 */
+            : DeleteFileW(wl);
+        if (!removed) { free(wl); return; }
+    }
+    free(wl);
+    pymcl_ensure_dir(target);
+    char parent[PYMCL_PATH];
+    pymcl_parent(link, parent, sizeof(parent));
+    pymcl_ensure_dir(parent);
+    const char *argv[] = { "cmd", "/c", "mklink", "/J", link, target };
+    pymcl_run_process(argv, 6, NULL, NULL, NULL, 30);
+}
+
+/* 对齐 version_settings.apply_isolation：返回游戏目录并铺好共享链接。 */
+static void vs_apply_isolation(const char *inst, const char *ver, const char *iso,
+                               char *gdir, size_t n) {
+    char ip[PYMCL_PATH];
+    instance_path(inst, ip, sizeof(ip));
+    if (!iso || (strcmp(iso, "saves") && strcmp(iso, "mods") && strcmp(iso, "all"))) {
+        snprintf(gdir, n, "%s", ip);
+        return;
+    }
+    char vd[PYMCL_PATH], link[PYMCL_PATH], tgt[PYMCL_PATH], sub[PYMCL_PATH];
+    instance_versions_dir(inst, vd, sizeof(vd));
+    pymcl_path_join(gdir, n, vd, ver);
+    pymcl_ensure_dir(gdir);
+    if (strcmp(iso, "saves") == 0) {
+        const char *names[] = { "mods", "config", "resourcepacks", "shaderpacks", "downloads" };
+        for (size_t i = 0; i < 5; i++) {
+            pymcl_path_join(link, sizeof(link), gdir, names[i]);
+            pymcl_path_join(tgt, sizeof(tgt), ip, names[i]);
+            vs_junction(link, tgt);
+        }
+        pymcl_path_join(sub, sizeof(sub), gdir, "saves");
+        pymcl_ensure_dir(sub);
+    } else if (strcmp(iso, "mods") == 0) {
+        const char *names[] = { "saves", "resourcepacks", "shaderpacks", "screenshots" };
+        for (size_t i = 0; i < 4; i++) {
+            pymcl_path_join(link, sizeof(link), gdir, names[i]);
+            pymcl_path_join(tgt, sizeof(tgt), ip, names[i]);
+            vs_junction(link, tgt);
+        }
+        const char *own[] = { "mods", "config" };
+        for (size_t i = 0; i < 2; i++) {
+            pymcl_path_join(sub, sizeof(sub), gdir, own[i]);
+            pymcl_ensure_dir(sub);
+        }
+    } else {
+        const char *own[] = { "mods", "config", "saves", "resourcepacks", "shaderpacks" };
+        for (size_t i = 0; i < 5; i++) {
+            pymcl_path_join(sub, sizeof(sub), gdir, own[i]);
+            pymcl_ensure_dir(sub);
+        }
+    }
+}
+
+/* 对齐 launch_flow.run_hook：启动前/退出后命令走 shell（cmd /c），输出进任务日志。 */
+static void hook_run(task_t *t, const char *command, const char *cwd, int wait) {
+    if (!command || !command[0]) return;
+    char lb[1200];
+    snprintf(lb, sizeof(lb), "运行启动脚本: %s", command);
+    ctx_log(t, lb);
+    const char *hargv[] = { "cmd", "/c", command };
+    if (!wait) {
+        HANDLE p = pymcl_spawn_process(hargv, 3, cwd, NULL);
+        if (p) CloseHandle(p);
+        return;
+    }
+    int rc = pymcl_run_process(hargv, 3, cwd, ctx_log, t, 0);
+    if (rc) {
+        snprintf(lb, sizeof(lb), "脚本退出码 %d", rc);
+        ctx_log(t, lb);
+    }
+}
+
+/* 对齐 mclauncher/launcher._set_priority。 */
+static void vs_apply_priority(HANDLE proc, cJSON *vset) {
+    const char *p = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "process_priority"));
+    if (!p || !p[0]) p = config_str("default_priority", "normal");
+    DWORD v = 0;
+    if (pymcl_ieq(p, "low")) v = IDLE_PRIORITY_CLASS;
+    else if (pymcl_ieq(p, "below")) v = BELOW_NORMAL_PRIORITY_CLASS;
+    else if (pymcl_ieq(p, "high")) v = HIGH_PRIORITY_CLASS;
+    else if (pymcl_ieq(p, "realtime")) v = REALTIME_PRIORITY_CLASS;
+    if (v) SetPriorityClass(proc, v);
+}
+
 /* 目录搜索是否带了「游戏版本 / 分类」筛选（"全部"/空串视作未筛选）。 */
 static int search_has_filters(cJSON *params) {
     cJSON *x = cJSON_GetObjectItem(params, "extra");
@@ -275,6 +383,31 @@ static void *task_run(void *p) {
         const char *java = pstr(t->args, "java", PYMCL_JAVA_AUTO);
         if (!ver[0]) { pymcl_set_error("请先选择版本"); }
         else {
+            cJSON *vset = load_version_settings(inst, ver);
+            const char *bound = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "login_account"));
+            if (bound && bound[0]) {
+                account = bound;
+                char lb[512];
+                snprintf(lb, sizeof(lb), "该版本绑定账号: %s", bound);
+                ctx_log(t, lb);
+            }
+            cJSON *vnum = cJSON_GetObjectItem(vset, "memory_mb");
+            if (cJSON_IsNumber(vnum) && vnum->valuedouble > 0) mem = (int)vnum->valuedouble;
+            vnum = cJSON_GetObjectItem(vset, "window_width");
+            if (cJSON_IsNumber(vnum) && vnum->valuedouble > 0) w = (int)vnum->valuedouble;
+            vnum = cJSON_GetObjectItem(vset, "window_height");
+            if (cJSON_IsNumber(vnum) && vnum->valuedouble > 0) h = (int)vnum->valuedouble;
+            const char *wmode = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "window_mode"));
+            if (!wmode || !wmode[0]) wmode = config_str("window_mode", "window");
+            int fullscreen = strcmp(wmode, "maximize") == 0 || strcmp(wmode, "fullscreen") == 0;
+            if (fullscreen) {
+                if (w < 1280) w = 1280;
+                if (h < 720) h = 720;
+            }
+            const char *n8 = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "nide8_id"));
+            const char *asrv = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "auth_server"));
+            if ((n8 && n8[0]) || (asrv && asrv[0]))
+                ctx_log(t, "该版本设置了统一通行证/皮肤站登录，C 后端暂不支持注入 javaagent，本次启动未生效");
             config_set_str("default_instance", inst);
             config_save();
             cJSON *acc = NULL;
@@ -301,44 +434,103 @@ static void *task_run(void *p) {
                 cJSON *props = account_launch_props(acc);
                 cJSON *vj = instance_resolved_version(inst, ver);
                 if (!vj) vj = instance_version_json(inst, ver);
+                /* Java 优先级对齐 bridge/api.py：版本设置 > 调用参数 >
+                 * 实例偏好 > 全局 default_java。 */
                 char jpbuf[PYMCL_PATH];
-                const char *prefer;
-                if (!java || pymcl_ieq(java, PYMCL_JAVA_AUTO)) {
+                const char *prefer = java;
+                const char *vjava = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "java"));
+                if (vjava && vjava[0] && !pymcl_ieq(vjava, PYMCL_JAVA_AUTO)) prefer = vjava;
+                if (!prefer || !prefer[0] || pymcl_ieq(prefer, PYMCL_JAVA_AUTO)) {
                     instance_java_pref(inst, jpbuf, sizeof(jpbuf));
                     prefer = jpbuf;
-                } else prefer = java;
+                }
+                if (!prefer[0] || pymcl_ieq(prefer, PYMCL_JAVA_AUTO)) {
+                    const char *dj = config_str("default_java", "");
+                    if (dj[0]) prefer = dj;
+                }
                 cJSON *jprobe = vj ? vj : cJSON_Parse("{}");
                 char *jexe = java_resolve_launch(jprobe, prefer, &ctx);
                 if (jprobe != vj) cJSON_Delete(jprobe);
                 if (vj) cJSON_Delete(vj);
                 char **argv = NULL; int argc = 0; char natives[PYMCL_PATH];
-                char ip[PYMCL_PATH];
-                instance_path(inst, ip, sizeof(ip));
-                if (jexe && build_launch_command(inst, ver, props, jexe, mem, w, h, &argv, &argc, natives, sizeof(natives)) == 0) {
-                    /* WinUI 的「服务器直连」走 extra_game_args（--server/--port 或
-                     * --quickPlayMultiplayer）；以前 C 桥直接丢弃，游戏照常启动
-                     * 但永远停在主菜单。 */
+                /* 版本隔离：游戏目录可能是 versions/<ver> 而非实例根。 */
+                char gdir[PYMCL_PATH];
+                const char *iso = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "isolation"));
+                if (!iso || !iso[0]) iso = config_str("default_isolation", "none");
+                vs_apply_isolation(inst, ver, iso, gdir, sizeof(gdir));
+                /* GC 预设 + 版本 JVM 参数（gc.apply 语义）。 */
+                const char *gck = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "gc"));
+                if (!gck || !gck[0]) gck = config_str("gc_preset", "auto");
+                char xjvm[8192];
+                gc_preset_apply(gck,
+                                cJSON_GetStringValue(cJSON_GetObjectItem(vset, "jvm_args")) ?: "",
+                                xjvm, sizeof(xjvm));
+                /* 启动前命令（pre_launch / pre_launch_wait）。 */
+                hook_run(t, cJSON_GetStringValue(cJSON_GetObjectItem(vset, "pre_launch")), gdir,
+                         !cJSON_IsFalse(cJSON_GetObjectItem(vset, "pre_launch_wait")));
+                if (jexe && build_launch_command(inst, ver, props, jexe, mem, w, h,
+                                                 xjvm, gdir, &argv, &argc, natives, sizeof(natives)) == 0) {
+                    /* 附加游戏参数 = 调用方 extra_game_args（WinUI 服务器直连）
+                     * + 版本设置 game_args + 直连 server/port + 全屏。
+                     * 对齐 launch_flow.prepare 的 extras 组装。 */
+                    char **extras = NULL; int nx = 0;
+                    int has_server = 0, has_fs = 0;
                     cJSON *xargs = cJSON_GetObjectItem(t->args, "extra_game_args");
-                    int xn = cJSON_IsArray(xargs) ? cJSON_GetArraySize(xargs) : 0;
-                    if (xn > 0) {
-                        char **bigger = (char **)realloc(argv, sizeof(char *) * (size_t)(argc + xn));
+                    cJSON *xa;
+                    if (cJSON_IsArray(xargs)) cJSON_ArrayForEach(xa, xargs) {
+                        const char *s = cJSON_GetStringValue(xa);
+                        if (!s || !s[0]) continue;
+                        if (strcmp(s, "--server") == 0) has_server = 1;
+                        if (strcmp(s, "--fullscreen") == 0) has_fs = 1;
+                        extras = (char **)realloc(extras, sizeof(char *) * (size_t)(nx + 1));
+                        extras[nx++] = pymcl_strdup(s);
+                    }
+                    char **ga = NULL;
+                    int nga = pymcl_split_args(
+                        cJSON_GetStringValue(cJSON_GetObjectItem(vset, "game_args")) ?: "", &ga);
+                    for (int i = 0; i < nga; i++) {
+                        if (strcmp(ga[i], "--server") == 0) has_server = 1;
+                        if (strcmp(ga[i], "--fullscreen") == 0) has_fs = 1;
+                        extras = (char **)realloc(extras, sizeof(char *) * (size_t)(nx + 1));
+                        extras[nx++] = ga[i];
+                    }
+                    free(ga);
+                    const char *srv = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "server"));
+                    if (srv && srv[0] && !has_server) {
+                        cJSON *pv = cJSON_GetObjectItem(vset, "port");
+                        int pnum = cJSON_IsNumber(pv) ? (int)pv->valuedouble
+                                   : (cJSON_IsString(pv) && pv->valuestring) ? atoi(pv->valuestring) : 0;
+                        char ports[32];
+                        snprintf(ports, sizeof(ports), "%d", pnum > 0 ? pnum : 25565);
+                        extras = (char **)realloc(extras, sizeof(char *) * (size_t)(nx + 4));
+                        extras[nx++] = pymcl_strdup("--server");
+                        extras[nx++] = pymcl_strdup(srv);
+                        extras[nx++] = pymcl_strdup("--port");
+                        extras[nx++] = pymcl_strdup(ports);
+                    }
+                    if (fullscreen && !has_fs) {
+                        extras = (char **)realloc(extras, sizeof(char *) * (size_t)(nx + 1));
+                        extras[nx++] = pymcl_strdup("--fullscreen");
+                    }
+                    if (nx > 0) {
+                        char **bigger = (char **)realloc(argv, sizeof(char *) * (size_t)(argc + nx));
                         if (bigger) {
                             argv = bigger;
-                            cJSON *xa;
-                            cJSON_ArrayForEach(xa, xargs) {
-                                const char *s = cJSON_GetStringValue(xa);
-                                if (s) argv[argc++] = pymcl_strdup(s);
-                            }
+                            for (int i = 0; i < nx; i++) argv[argc++] = extras[i];
+                        } else {
+                            for (int i = 0; i < nx; i++) free(extras[i]);
                         }
                     }
+                    free(extras);
                     ctx_log(t, "正在启动游戏进程…");
                     HANDLE rd = NULL;
-                    HANDLE proc = game_spawn((const char **)argv, argc, ip, &rd);
+                    HANDLE proc = game_spawn((const char **)argv, argc, gdir, &rd);
                     pthread_mutex_lock(&g_mu);
                     g_game = proc;
                     snprintf(g_launch_id, sizeof(g_launch_id), "%s", t->id);
                     pthread_mutex_unlock(&g_mu);
                     if (proc) {
+                        vs_apply_priority(proc, vset);
                         /* WinUI 主窗口靠 game_started/game_exited 做「启动后隐藏
                          * 启动器/退出后恢复」；Python 桥一直在发，C 桥以前不发，
                          * launcher_visibility 设置在 C 桥下整个是死的。 */
@@ -387,6 +579,10 @@ static void *task_run(void *p) {
                             emit("game_exited", o);
                             cJSON_Delete(o);
                         }
+                        /* 退出后命令（post_launch），取消时不跑。 */
+                        if (!t->cancelled)
+                            hook_run(t, cJSON_GetStringValue(cJSON_GetObjectItem(vset, "post_launch")),
+                                     gdir, 1);
                         if (t->cancelled) { ok = 1; snprintf(msg, sizeof(msg), "已停止游戏"); }
                         else {
                             cJSON *rep = analyze_game_crash(inst, ver, scode, tail, tn, ts, started);
@@ -423,6 +619,7 @@ static void *task_run(void *p) {
                 cJSON_Delete(props);
                 cJSON_Delete(acc);
             }
+            cJSON_Delete(vset);
         }
     } else if (strcmp(t->method, "start_microsoft_login") == 0) {
         cJSON *acc = NULL;

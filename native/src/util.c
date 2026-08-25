@@ -376,6 +376,40 @@ static char *join_cmdline(const char **argv, int argc) {
     }
     return s;
 }
+/* 对齐 mclauncher/argsplit.py：JVM/游戏附加参数按 POSIX 引号拆分。
+ * 返回 token 数，*out 为 malloc 的字符串数组（pymcl_free_args 释放）。 */
+int pymcl_split_args(const char *text, char ***out) {
+    *out = NULL;
+    if (!text) return 0;
+    int n = 0;
+    char tok[4096];
+    size_t tl = 0;
+    int in_tok = 0, dq = 0, sq = 0;
+    for (const char *p = text;; p++) {
+        char c = *p;
+        int end = c == 0;
+        if (!end && !dq && !sq && (c == ' ' || c == '\t' || c == '\r' || c == '\n')) end = -1;
+        if (end) {
+            if (in_tok && tl) {
+                tok[tl] = 0;
+                *out = (char **)realloc(*out, sizeof(char *) * (size_t)(n + 1));
+                (*out)[n++] = pymcl_strdup(tok);
+            }
+            in_tok = 0; tl = 0;
+            if (c == 0) break;
+            continue;
+        }
+        in_tok = 1;
+        if (c == '"' && !sq) { dq = !dq; continue; }
+        if (c == '\'' && !dq) { sq = !sq; continue; }
+        if (tl < sizeof(tok) - 1) tok[tl++] = c;
+    }
+    return n;
+}
+void pymcl_free_args(char **argv, int n) {
+    for (int i = 0; i < n; i++) free(argv[i]);
+    free(argv);
+}
 int pymcl_run_process(const char **argv, int argc, const char *cwd,
                       void (*on_line)(void *, const char *), void *ud, int timeout_sec) {
     HANDLE rd = NULL;
