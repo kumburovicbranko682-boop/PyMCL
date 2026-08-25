@@ -309,6 +309,144 @@ class ChineseSearchRouteTest(unittest.TestCase):
         self.assertEqual(out, [cf_hit])
 
 
+PACK_SAMPLE = """#
+# mcmod.cn
+gt-new-horizons;1;;格雷科技：新视野;GT: New Horizons;GTNH
+skyfactory-4;5;;天空工厂4;SkyFactory 4;SF4
+rlcraft;16;;超现实 x 虚拟生存;RLCraft;RLC
+all-the-mods-9;900;;All The Mods 9;;ATM9
+"""
+
+
+def _index_pack_sample():
+    mt._build_pack_index(mt.parse(PACK_SAMPLE))
+
+
+class PackDatasetTest(unittest.TestCase):
+    def setUp(self):
+        mt._reset_for_tests()
+        _index_pack_sample()
+
+    def tearDown(self):
+        mt._reset_for_tests()
+
+    def test_search_and_abbr(self):
+        out = mt.search_packs_chinese("天空工厂")
+        self.assertEqual(out[0]["slug"], "skyfactory-4")
+        out = mt.search_packs_chinese("gtnh")
+        self.assertEqual(out[0]["slug"], "gt-new-horizons")
+
+    def test_annotate_pack_rows_uses_modpack_url(self):
+        rows = [{"slug": "rlcraft", "title": "RLCraft"},
+                {"slug": "all-the-mods-9", "title": "All The Mods 9"}]
+        mt.annotate_pack_hits(rows)
+        self.assertEqual(rows[0]["name_cn"], "超现实 x 虚拟生存")
+        self.assertEqual(rows[0]["mcmod_url"], "https://www.mcmod.cn/modpack/16.html")
+        # 「译名」没有中文时不注 name_cn，百科链接照给
+        self.assertNotIn("name_cn", rows[1])
+        self.assertEqual(rows[1]["mcmod_url"], "https://www.mcmod.cn/modpack/900.html")
+
+    def test_pack_unloaded_triggers_warmup_only(self):
+        mt._reset_for_tests()
+        rows = [{"slug": "rlcraft", "title": "RLCraft"}]
+        with mock.patch.object(mt, "load_packs_async") as warm:
+            mt.annotate_pack_hits(rows)
+        warm.assert_called_once()
+        self.assertNotIn("name_cn", rows[0])
+
+    def test_mod_and_pack_datasets_independent(self):
+        # 只建了整合包索引：模组接口未加载、整合包接口可用
+        self.assertFalse(mt.loaded())
+        self.assertTrue(mt.packs_loaded())
+        self.assertEqual(mt.search_chinese("天空工厂"), [])
+
+
+class PackDatasetHitsTest(unittest.TestCase):
+    """modpack._pack_dataset_hits: 中文名 → Modrinth 批量 + CF slug 兜底 + 筛选。"""
+
+    def setUp(self):
+        mt._reset_for_tests()
+        _index_pack_sample()
+        from mclauncher import modpack
+        self.modpack = modpack
+
+    def tearDown(self):
+        mt._reset_for_tests()
+
+    def _dm(self, gvs=("1.20.1",)):
+        dm = mock.Mock()
+        dm.fetch_json.return_value = [
+            {"slug": "skyfactory-4", "title": "SkyFactory 4", "downloads": 7,
+             "description": "sky", "icon_url": "", "game_versions": list(gvs),
+             "categories": []},
+        ]
+        return dm
+
+    def test_bulk_then_cf_fallback(self):
+        cf_obj = {"id": 285109, "slug": "rlcraft", "name": "RLCraft",
+                  "authors": [{"name": "Shivaxi"}], "downloadCount": 9,
+                  "summary": "hard", "categories": [],
+                  "latestFilesIndexes": [{"gameVersion": "1.12.2"}]}
+        with mock.patch.object(mt, "load_packs", return_value=True), \
+                mock.patch("mclauncher.mods.cf_by_slug", return_value=cf_obj):
+            hits = self.modpack._pack_dataset_hits(self._dm(), "工厂")
+        # 「工厂」只包含命中 skyfactory-4（天空工厂4）
+        self.assertTrue(any(h["slug"] == "skyfactory-4" for h in hits))
+        sf = next(h for h in hits if h["slug"] == "skyfactory-4")
+        self.assertEqual(sf["name_cn"], "天空工厂4")
+        self.assertEqual(sf["mcmod_url"], "https://www.mcmod.cn/modpack/5.html")
+        self.assertTrue(sf["matched_alias"])
+        self.assertIn("MC 1.20.1", sf["description"])
+
+    def test_game_version_filter_drops_mismatch(self):
+        with mock.patch.object(mt, "load_packs", return_value=True):
+            hits = self.modpack._pack_dataset_hits(
+                self._dm(gvs=("1.20.1",)), "天空工厂", game_version="1.12.2")
+        self.assertEqual(hits, [])
+
+    def test_dataset_unavailable_returns_empty(self):
+        with mock.patch.object(mt, "load_packs", return_value=False):
+            self.assertEqual(self.modpack._pack_dataset_hits(self._dm(), "天空工厂"), [])
+
+
+class PackChineseSearchRouteTest(unittest.TestCase):
+    """search_modpacks_chinese: 别名 miss → 数据集 → 全文回退。"""
+
+    def setUp(self):
+        mt._reset_for_tests()
+        from mclauncher import modpack
+        self.modpack = modpack
+
+    def tearDown(self):
+        mt._reset_for_tests()
+
+    def test_dataset_step_used_after_alias_miss(self):
+        hit = {"source": "modrinth", "slug": "skyfactory-4", "title": "SkyFactory 4",
+               "name_cn": "天空工厂4", "matched_alias": True}
+        with mock.patch("mclauncher.catalog.lookup_modpack_alias",
+                        return_value=(None, None, None)), \
+                mock.patch.object(self.modpack, "_pack_dataset_hits",
+                                  return_value=[hit]) as ds, \
+                mock.patch.object(self.modpack, "modrinth_search") as full:
+            out = self.modpack.search_modpacks_chinese(mock.Mock(), "天空工厂")
+        ds.assert_called_once()
+        full.assert_not_called()
+        self.assertEqual(out, [hit])
+
+    def test_fulltext_fallback_when_dataset_empty(self):
+        with mock.patch("mclauncher.catalog.lookup_modpack_alias",
+                        return_value=(None, None, None)), \
+                mock.patch.object(self.modpack, "_pack_dataset_hits",
+                                  return_value=[]), \
+                mock.patch.object(self.modpack, "modrinth_search",
+                                  return_value=[]) as mr, \
+                mock.patch.object(self.modpack, "search_cf_modpacks",
+                                  return_value=[]) as cf:
+            self.modpack.search_modpacks_chinese(mock.Mock(), "冷门整合包")
+        mr.assert_called_once()
+        cf.assert_called_once()
+
+
 class BridgeRouteTest(unittest.TestCase):
     def test_cjk_query_routes_to_chinese_search(self):
         try:

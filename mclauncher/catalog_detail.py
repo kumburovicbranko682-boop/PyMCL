@@ -25,11 +25,16 @@ def project_detail(dm: DownloadManager, source_kind: str, ident,
 def _annotate_mod(detail: dict):
     """中文译名 + mcmod.cn 百科链接（对标 PCL2 详情页「百科」入口）。
 
-    译名数据集只收录 Mod，调用方需保证 detail 是 Mod 类项目；
+    模组与整合包各有一份数据集，调用方按项目类型分派；
     数据集未加载时只触发后台预热，不阻塞详情弹窗。
     """
     from . import mod_translations
     mod_translations.annotate_hits([detail])
+
+
+def _annotate_pack(detail: dict):
+    from . import mod_translations
+    mod_translations.annotate_pack_hits([detail])
 
 
 # ---------------------------------------------------------------- Modrinth
@@ -84,6 +89,8 @@ def _modrinth_detail(dm: DownloadManager, slug) -> dict:
     }
     if ptype == "mod":
         _annotate_mod(detail)
+    elif ptype == "modpack":
+        _annotate_pack(detail)
     return detail
 
 
@@ -164,8 +171,10 @@ def _curseforge_detail(dm: DownloadManager, mod_id, api_key: str = "") -> dict:
             "wiki": links.get("wikiUrl"),
         }),
     }
-    if data.get("classId") == 6:   # CF_CLASS_MOD：数据集只收录 Mod
+    if data.get("classId") == 6:        # CF_CLASS_MOD
         _annotate_mod(detail)
+    elif data.get("classId") == 4471:   # CF_CLASS_MODPACK
+        _annotate_pack(detail)
     return detail
 
 

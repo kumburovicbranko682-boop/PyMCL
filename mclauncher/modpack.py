@@ -71,6 +71,8 @@ def search_cf_modpacks(dm: DownloadManager, query, limit=25, api_key=None,
     for h in hits:
         h["description"] = h.pop("summary", "")
         h.pop("cf_categories", None)
+    from . import mod_translations
+    mod_translations.annotate_pack_hits(hits)
     return hits
 
 
@@ -366,9 +368,21 @@ def search_modpacks_chinese(dm: DownloadManager, query, limit=25, api_key=None,
         except Exception as e:
             utils.log.warning("整合包别名命中后 CurseForge 查询失败: %s", e)
     if hits:
+        from . import mod_translations
+        mod_translations.annotate_pack_hits(hits)
         return hits[:limit]
 
-    # 2) 回退到多源搜索
+    # 2) mcmod 整合包数据集（HMCL 同款 1400+ 条）：中文名 → CF slug → 双源解析
+    try:
+        hits = _pack_dataset_hits(dm, q, api_key=api_key,
+                                  game_version=game_version, cat_keys=cat_keys)
+    except Exception as e:
+        utils.log.warning("mcmod 整合包数据集搜索失败: %s", e)
+        hits = []
+    if hits:
+        return hits[:limit]
+
+    # 3) 回退到多源搜索
     try:
         hits.extend(modrinth_search(dm, q, limit=limit,
                                     game_version=game_version, categories=cat_keys))
@@ -380,6 +394,91 @@ def search_modpacks_chinese(dm: DownloadManager, query, limit=25, api_key=None,
     except Exception as e:
         utils.log.warning("中文搜索回退 CurseForge 整合包失败: %s", e)
     return hits[:limit]
+
+
+def _pack_dataset_hits(dm: DownloadManager, query, api_key=None,
+                       game_version=None, cat_keys=None,
+                       max_records=6, max_cf_lookups=3):
+    """用 mcmod 整合包数据集把中文名解析成真实项目（对标 PCL2 中文搜索）。
+
+    数据集按 CurseForge slug 收录；先用 Modrinth 批量接口一次解析全部
+    候选（不少大包双端同 slug），没命中的再按 slug 查 CurseForge
+    （最多 max_cf_lookups 次）。版本/分类筛选沿用别名命中的过滤器。
+    首次调用会下载并缓存数据文件（约 66KB）。
+    """
+    import json as _json
+    from . import mod_translations as mt
+    from .mods import cf_by_slug, _cf_norm, CF_CLASS_MODPACK
+
+    if not mt.load_packs(dm):
+        return []
+    # 同一 slug 多条目去重，保留排序更优的一条
+    recs, seen = [], set()
+    for r in mt.search_packs_chinese(query, limit=max_records * 2):
+        if r["slug"] and r["slug"] not in seen:
+            seen.add(r["slug"])
+            recs.append(r)
+        if len(recs) >= max_records:
+            break
+    if not recs:
+        return []
+
+    mr_found = {}
+    try:
+        arr = dm.fetch_json(f"{MODRINTH_API}/projects",
+                            params={"ids": _json.dumps([r["slug"] for r in recs])},
+                            timeout=(3, 8))
+        for p in arr or []:
+            if isinstance(p, dict) and p.get("slug"):
+                mr_found[p["slug"]] = p
+    except Exception as e:
+        utils.log.warning("Modrinth 批量解析整合包候选失败: %s", e)
+
+    hits = []
+    cf_used = 0
+    for rec in recs:
+        extra = {"matched_alias": True}
+        if mt.has_cjk(rec["name_cn"]):
+            extra["name_cn"] = rec["name_cn"]
+        url = mt.mcmod_pack_url(rec["mcmod_id"])
+        if url:
+            extra["mcmod_url"] = url
+        p = mr_found.get(rec["slug"])
+        if p is not None:
+            if not _match_filters_mr(p, game_version, cat_keys):
+                continue
+            gvs = p.get("game_versions") or []
+            desc = (p.get("description") or "")[:120]
+            if gvs:
+                desc = f"MC {', '.join(gvs[:3])} · {desc}"
+            hits.append({
+                "source": "modrinth",
+                "slug": p.get("slug"),
+                "title": p.get("title") or rec["name_en"] or rec["slug"],
+                "author": "?",
+                "downloads": p.get("downloads", 0),
+                "description": desc,
+                "icon_url": p.get("icon_url") or "",
+                **extra,
+            })
+            continue
+        if cf_used >= max_cf_lookups:
+            continue
+        cf_used += 1
+        try:
+            mod = cf_by_slug(dm, rec["slug"], class_id=CF_CLASS_MODPACK,
+                             api_key=api_key)
+        except Exception as e:
+            utils.log.warning("CurseForge 解析整合包候选 %s 失败: %s", rec["slug"], e)
+            continue
+        if not mod or not _match_filters_cf(mod, game_version, cat_keys):
+            continue
+        h = _cf_norm(mod)
+        h["description"] = h.pop("summary", "")
+        h.pop("cf_categories", None)
+        h.update(extra)
+        hits.append(h)
+    return hits
 
 
 def _match_filters_mr(project: dict, game_version=None, cat_keys=None) -> bool:
@@ -458,6 +557,8 @@ def modrinth_search(dm: DownloadManager, query, limit=25,
             "downloads": hit.get("downloads", 0),
             "game_versions": hit.get("versions") or [],
         })
+    from . import mod_translations
+    mod_translations.annotate_pack_hits(result)
     return result
 
 

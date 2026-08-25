@@ -125,26 +125,22 @@ static cJSON *row_from_cf(cJSON *m) {
     return row;
 }
 
-/* ============ 中文模组名数据集（HMCL mod_data.txt / mcmod.cn，对齐 Python mod_translations） ============ */
+/* ============ 中文模组/整合包名数据集（HMCL mod_data.txt / modpack_data.txt，mcmod.cn，
+               对齐 Python mod_translations） ============ */
 
-#define MOD_DATA_URL "https://raw.githubusercontent.com/HMCL-dev/HMCL/main/HMCL/src/main/resources/assets/mod_data.txt"
-#define MOD_DATA_MIN 100000                       /* 完整性下限，防代理半截响应 */
+#define HMCL_ASSETS "https://raw.githubusercontent.com/HMCL-dev/HMCL/main/HMCL/src/main/resources/assets/"
 #define MOD_DATA_TTL_100NS (7LL * 24 * 3600 * 10000000LL)  /* 7 天，FILETIME 100ns */
 
 static char *g_mod_data = NULL;                   /* 惰性加载，进程内驻留 */
 static int g_mod_data_failed = 0;
+static char *g_pack_data = NULL;
+static int g_pack_data_failed = 0;
 
 static int has_cjk(const char *s) {
     /* U+3000–U+9FFF 的 UTF-8 首字节是 0xE3..0xE9，够判定「查询里有中文」 */
     for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++)
         if (*p >= 0xE3 && *p <= 0xE9) return 1;
     return 0;
-}
-
-static void mod_data_path(char *out, size_t n) {
-    char cache[PYMCL_PATH];
-    pymcl_cache_dir(cache, sizeof(cache));
-    pymcl_path_join(out, n, cache, "mod_data.txt");
 }
 
 static int mod_data_fresh(const char *path) {
@@ -165,31 +161,43 @@ static int mod_data_fresh(const char *path) {
     return (long long)(b.QuadPart - a.QuadPart) < MOD_DATA_TTL_100NS;
 }
 
-static const char *mod_data_get(void) {
-    if (g_mod_data) return g_mod_data;
-    if (g_mod_data_failed) return NULL;
-    char path[PYMCL_PATH];
-    mod_data_path(path, sizeof(path));
+/* min_bytes 是完整性下限，防代理半截响应；下载失败退过期缓存，
+   全失败置 failed 本进程内不再重试 */
+static const char *dataset_get(const char *name, long long min_bytes,
+                               char **slot, int *failed) {
+    if (*slot) return *slot;
+    if (*failed) return NULL;
+    char cache[PYMCL_PATH], path[PYMCL_PATH], url[512];
+    pymcl_cache_dir(cache, sizeof(cache));
+    pymcl_path_join(path, sizeof(path), cache, name);
     size_t len = 0;
-    if (pymcl_file_size(path) > MOD_DATA_MIN && mod_data_fresh(path) &&
-        pymcl_read_file(path, &g_mod_data, &len) == 0 && g_mod_data)
-        return g_mod_data;
-    g_mod_data = NULL;
-    const char *urls[] = { MOD_DATA_URL };      /* expand_urls 自动套 GitHub 国内代理 */
+    if (pymcl_file_size(path) > min_bytes && mod_data_fresh(path) &&
+        pymcl_read_file(path, slot, &len) == 0 && *slot)
+        return *slot;
+    *slot = NULL;
+    snprintf(url, sizeof(url), HMCL_ASSETS "%s", name);
+    const char *urls[] = { url };               /* expand_urls 自动套 GitHub 国内代理 */
     char *text = fetch_text_mirrors(urls, 1, 60);
-    if (text && strlen(text) > MOD_DATA_MIN) {
+    if (text && (long long)strlen(text) > min_bytes) {
         pymcl_write_file(path, text, strlen(text));
-        g_mod_data = text;
-        return g_mod_data;
+        *slot = text;
+        return *slot;
     }
     free(text);
-    /* 下载失败：过期缓存好过没有 */
-    if (pymcl_file_size(path) > MOD_DATA_MIN &&
-        pymcl_read_file(path, &g_mod_data, &len) == 0 && g_mod_data)
-        return g_mod_data;
-    g_mod_data = NULL;
-    g_mod_data_failed = 1;                      /* 本进程内不再重试 */
+    if (pymcl_file_size(path) > min_bytes &&
+        pymcl_read_file(path, slot, &len) == 0 && *slot)
+        return *slot;
+    *slot = NULL;
+    *failed = 1;
     return NULL;
+}
+
+static const char *mod_data_get(void) {
+    return dataset_get("mod_data.txt", 100000, &g_mod_data, &g_mod_data_failed);
+}
+
+static const char *pack_data_get(void) {
+    return dataset_get("modpack_data.txt", 20000, &g_pack_data, &g_pack_data_failed);
 }
 
 typedef struct {
@@ -209,8 +217,7 @@ static int mod_data_split(char *line, char *f[6]) {
     return n;
 }
 
-static int mod_data_search(const char *q, mod_data_hit *out, int max) {
-    const char *data = mod_data_get();
+static int mod_data_search(const char *data, const char *q, mod_data_hit *out, int max) {
     if (!data || !q || !q[0] || max <= 0) return 0;
     size_t qlen = strlen(q);
     int n = 0;
@@ -282,7 +289,7 @@ static int mod_data_search(const char *q, mod_data_hit *out, int max) {
     return n;
 }
 
-static void mod_data_annotate(cJSON *row, const mod_data_hit *h) {
+static void mod_data_annotate(cJSON *row, const mod_data_hit *h, int is_pack) {
     if (has_cjk(h->name_cn))
         cJSON_AddStringToObject(row, "name_cn", h->name_cn);
     int digits = h->mcmod[0] != 0;
@@ -290,15 +297,17 @@ static void mod_data_annotate(cJSON *row, const mod_data_hit *h) {
         if (*p < '0' || *p > '9') { digits = 0; break; }
     if (digits) {
         char url[128];
-        snprintf(url, sizeof(url), "https://www.mcmod.cn/class/%s.html", h->mcmod);
+        snprintf(url, sizeof(url), "https://www.mcmod.cn/%s/%s.html",
+                 is_pack ? "modpack" : "class", h->mcmod);
         cJSON_AddStringToObject(row, "mcmod_url", url);
     }
 }
 
 /* 中文查询：数据集候选 → Modrinth 项目直查，miss 再按 slug 查 CurseForge（最多 3 次） */
-static void mod_data_chinese_hits(cJSON *out, const char *q, int want_mr, int want_cf) {
+static void mod_data_chinese_hits(cJSON *out, const char *q, int want_mr, int want_cf,
+                                  int is_pack) {
     mod_data_hit hits[6];
-    int hn = mod_data_search(q, hits, 6);
+    int hn = mod_data_search(is_pack ? pack_data_get() : mod_data_get(), q, hits, 6);
     int cf_used = 0;
     for (int i = 0; i < hn; i++) {
         int added = 0;
@@ -322,7 +331,7 @@ static void mod_data_chinese_hits(cJSON *out, const char *q, int want_mr, int wa
                     snprintf(d, sizeof(d), "%s", desc);
                     cJSON_AddStringToObject(row, "description", d);
                 }
-                mod_data_annotate(row, &hits[i]);
+                mod_data_annotate(row, &hits[i], is_pack);
                 cJSON_AddItemToArray(out, row);
                 added = 1;
             }
@@ -333,13 +342,13 @@ static void mod_data_chinese_hits(cJSON *out, const char *q, int want_mr, int wa
             char queryp[512];
             snprintf(queryp, sizeof(queryp),
                      "gameId=432&classId=%d&slug=%s&pageSize=1&index=0",
-                     CF_CLASS_MOD, hits[i].slug);
+                     is_pack ? CF_CLASS_MODPACK : CF_CLASS_MOD, hits[i].slug);
             cJSON *d = cf_get("/mods/search", queryp);
             cJSON *items = cf_items(d);
             cJSON *m = items ? cJSON_GetArrayItem(items, 0) : NULL;
             if (cJSON_IsObject(m)) {
                 cJSON *row = row_from_cf(m);
-                mod_data_annotate(row, &hits[i]);
+                mod_data_annotate(row, &hits[i], is_pack);
                 cJSON_AddItemToArray(out, row);
             }
             cJSON_Delete(d);
@@ -381,7 +390,7 @@ cJSON *search_mods(const char *query, const char *source) {
     if (cJSON_GetArraySize(out) > 0) return out;
     if (has_cjk(q)) {
         /* 中文查询：mcmod 数据集（对齐 Python 端 search_mods_chinese），全文接口对中文无结果 */
-        mod_data_chinese_hits(out, q, want_mr, want_cf);
+        mod_data_chinese_hits(out, q, want_mr, want_cf, 0);
         if (cJSON_GetArraySize(out) > 0) return out;
     }
     if (want_mr) {
@@ -434,6 +443,11 @@ cJSON *search_modpacks(const char *query, const char *source) {
         }
     }
     if (cJSON_GetArraySize(out) > 0) return out;
+    if (has_cjk(q)) {
+        /* 中文查询：mcmod 整合包数据集（对齐 Python 端 search_modpacks_chinese） */
+        mod_data_chinese_hits(out, q, want_mr, want_cf, 1);
+        if (cJSON_GetArraySize(out) > 0) return out;
+    }
     if (want_mr) {
         cJSON *j = mr_search(q, "modpack", 25);
         cJSON *hits = j ? cJSON_GetObjectItem(j, "hits") : NULL;

@@ -1336,7 +1336,7 @@ class BackendAPI:
 
     def _modpack_row(self, hit: dict, default_source: str = "") -> dict:
         src = (hit.get("source") or default_source or "").lower()
-        return {
+        row = {
             "name": hit.get("title") or hit.get("name") or "?",
             "author": hit.get("author") or "?",
             "downloads": int(hit.get("downloads") or 0),
@@ -1345,6 +1345,12 @@ class BackendAPI:
             "source": src or default_source,
             "description": hit.get("description") or "",
         }
+        # 中文译名 / mcmod.cn 百科（核心层注解，见 mod_translations）
+        if hit.get("name_cn"):
+            row["name_cn"] = hit["name_cn"]
+        if hit.get("mcmod_url"):
+            row["mcmod_url"] = hit["mcmod_url"]
+        return row
 
     @staticmethod
     def _search_offset(extra: dict | None) -> int:
