@@ -1009,6 +1009,7 @@ class BackendAPI(QObject):
             "custom_homepage": CONFIG.get("custom_homepage") or "",
             "homepage_mode": CONFIG.get("homepage_mode") or "news",
             "window_mode": CONFIG.get("window_mode") or "window",
+            "game_lang": CONFIG.get("game_lang") or "auto",
             "skip_assets": bool(CONFIG.get("skip_assets", False)),
             "allow_multi_instance": bool(CONFIG.get("allow_multi_instance", False)),
             "first_run": bool(CONFIG.get("first_run", True)),
@@ -1082,6 +1083,7 @@ class BackendAPI(QObject):
             "custom_homepage": data.get("custom_homepage") if "custom_homepage" in data else CONFIG.get("custom_homepage") or "",
             "homepage_mode": data.get("homepage_mode") or CONFIG.get("homepage_mode") or "news",
             "window_mode": data.get("window_mode") or CONFIG.get("window_mode") or "window",
+            "game_lang": data.get("game_lang") or CONFIG.get("game_lang") or "auto",
             "skip_assets": bool(data.get("skip_assets", CONFIG.get("skip_assets", False))),
             "allow_multi_instance": bool(
                 data.get("allow_multi_instance", CONFIG.get("allow_multi_instance", False))),
@@ -2281,6 +2283,8 @@ class BackendAPI(QObject):
             log(f"版本隔离: {prep['settings']['isolation']} → {game_dir}")
         if prep["global_mods"]:
             log(f"已应用 {prep['global_mods']} 个全局模组")
+        if prep.get("game_lang"):
+            log(tr("游戏语言: 首次启动预设为 {l}").format(l=prep["game_lang"]))
         launch_flow.run_hook(
             prep["settings"].get("pre_launch") or "", game_dir, log=log,
             wait=bool(prep.get("pre_launch_wait", True)))

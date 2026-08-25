@@ -1,19 +1,70 @@
 # -*- coding: utf-8 -*-
-"""启动前组装：隔离、全局 Mod、版本设置、启动脚本。"""
+"""启动前组装：隔离、全局 Mod、版本设置、游戏语言、启动脚本。"""
 from __future__ import annotations
 
 import os
+import re
 import subprocess
+from pathlib import Path
 
 from . import global_mods, utils, version_settings
 from .argsplit import split_args
 from .config import CONFIG
+
+_MC_VER = re.compile(r"(?<![\d.])1\.(\d{1,2})(?:\.\d{1,2})?(?![\d])")
+
+
+def _mc_minor(version_id: str) -> int | None:
+    """从版本 id 里解析 MC 次版本号（"1.8.9-forge…" -> 8），拿不到返回 None。"""
+    m = _MC_VER.search(str(version_id or ""))
+    return int(m.group(1)) if m else None
+
+
+def _lang_code_for(version_id: str, lang: str) -> str:
+    """1.10 及以前 options.txt 的语言代码带大写地区（zh_CN），1.11+ 全小写。"""
+    minor = _mc_minor(version_id)
+    if minor is not None and minor < 11:
+        head, _, region = lang.partition("_")
+        if region:
+            return f"{head}_{region.upper()}"
+    return lang
+
+
+def ensure_game_language(game_dir, version_id: str) -> str | None:
+    """首次启动写 options.txt 的 lang（对标 PCL2/HMCL：新版本第一次
+    进游戏就是启动器语言，而不是英文）。
+
+    只在 options.txt 不存在时写，绝不覆盖玩家在游戏里改过的设置。
+    config game_lang: auto=跟随启动器 / zh_cn / en_us / off=不写入。
+    返回写入的语言代码；没写返回 None。
+    """
+    pref = str(CONFIG.get("game_lang") or "auto").strip().lower()
+    if pref in ("off", "none"):
+        return None
+    lang = pref
+    if lang == "auto":
+        from .i18n import current_language
+        lang = "zh_cn" if str(current_language()).lower().startswith("zh") else ""
+    if not lang or lang == "en_us":
+        return None   # 原版默认就是英文，不需要写
+    path = Path(game_dir) / "options.txt"
+    if path.exists():
+        return None
+    lang = _lang_code_for(version_id, lang)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"lang:{lang}\n", encoding="utf-8")
+    except OSError as e:
+        utils.log.warning("写入游戏语言失败 %s: %s", path, e)
+        return None
+    return lang
 
 
 def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     settings = version_settings.load(instance, version_id)
     gdir = version_settings.apply_isolation(instance, version_id, settings)
     n = global_mods.apply(gdir / "mods")
+    game_lang = ensure_game_language(gdir, version_id)
     mem = settings.get("memory_mb") or memory_mb
     mem_auto = None
     if not mem or int(mem) <= 0:
@@ -38,6 +89,7 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     return {
         "settings": settings,
         "game_dir": gdir,
+        "game_lang": game_lang,
         "memory_mb": mem,
         "memory_auto": mem_auto,
         "extra_game_args": extras,

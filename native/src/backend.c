@@ -152,6 +152,44 @@ static void ctx_log(void *ud, const char *text) {
     emit("log", o);
     cJSON_Delete(o);
 }
+/* 首次启动写 options.txt 的 lang（对齐 Python launch_flow.ensure_game_language：
+   PCL2/HMCL 同款，新版本第一次进游戏就是中文；绝不覆盖玩家已有设置） */
+static void game_lang_preset(const char *game_dir, const char *ver, task_t *t) {
+    char pref[16];
+    snprintf(pref, sizeof(pref), "%s", config_str("game_lang", "auto"));
+    for (char *p = pref; *p; p++) if (*p >= 'A' && *p <= 'Z') *p = (char)(*p + 32);
+    if (strcmp(pref, "off") == 0 || strcmp(pref, "none") == 0) return;
+    const char *lang = pref;
+    if (strcmp(pref, "auto") == 0) lang = "zh_cn";   /* 原生 UI 面向中文用户 */
+    if (strcmp(lang, "en_us") == 0 || !lang[0]) return;   /* 原版默认英文 */
+    char path[PYMCL_PATH];
+    pymcl_path_join(path, sizeof(path), game_dir, "options.txt");
+    if (pymcl_file_exists(path)) return;
+    char code[16];
+    snprintf(code, sizeof(code), "%s", lang);
+    /* 1.10 及以前语言代码带大写地区（zh_CN），1.11+ 全小写 */
+    int minor = -1;
+    for (const char *p = ver ? ver : ""; *p; p++) {
+        if (p[0] == '1' && p[1] == '.' && p[2] >= '0' && p[2] <= '9' &&
+            (p == ver || !((p[-1] >= '0' && p[-1] <= '9') || p[-1] == '.'))) {
+            minor = atoi(p + 2);
+            break;
+        }
+    }
+    if (minor >= 0 && minor < 11) {
+        char *us = strchr(code, '_');
+        if (us) for (char *p = us + 1; *p; p++)
+            if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 32);
+    }
+    char line[32];
+    snprintf(line, sizeof(line), "lang:%s\n", code);
+    if (pymcl_write_file(path, line, strlen(line)) == 0) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "游戏语言: 首次启动预设为 %s", code);
+        ctx_log(t, msg);
+    }
+}
+
 static int ctx_cancel(void *ud) {
     task_t *t = (task_t *)ud;
     return t->cancelled;
@@ -301,6 +339,7 @@ static void *task_run(void *p) {
                 char **argv = NULL; int argc = 0; char natives[PYMCL_PATH];
                 char ip[PYMCL_PATH];
                 instance_path(inst, ip, sizeof(ip));
+                game_lang_preset(ip, ver, t);
                 if (jexe && build_launch_command(inst, ver, props, jexe, mem, w, h, &argv, &argc, natives, sizeof(natives)) == 0) {
                     ctx_log(t, "正在启动游戏进程…");
                     HANDLE rd = NULL;

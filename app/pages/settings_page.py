@@ -174,6 +174,19 @@ class SettingsPage(QWidget):
             tr("默认游戏窗口"), tr("可被版本设置覆盖"),
             list(win_map.values()),
             win_map.get(settings.get("window_mode") or "window", win_map["window"]))
+        # 游戏语言：首次启动写 options.txt 的 lang（对标 PCL2/HMCL）
+        glang_map = {
+            "auto": tr("跟随启动器"),
+            "zh_cn": tr("简体中文"),
+            "en_us": "English",
+            "off": tr("不设置"),
+        }
+        self._glang_keys = {v: k for k, v in glang_map.items()}
+        self.glang_card, self.glang_box = _combo_card(
+            FIF.LANGUAGE if hasattr(FIF, "LANGUAGE") else FIF.GLOBE,
+            tr("游戏语言"), tr("新版本首次启动时写入 options.txt，不覆盖游戏内改动"),
+            list(glang_map.values()),
+            glang_map.get(settings.get("game_lang") or "auto", glang_map["auto"]))
         ui_group.addSettingCard(self.dark_card)
         ui_group.addSettingCard(self.color_card)
         ui_group.addSettingCard(self.bg_card)
@@ -181,6 +194,7 @@ class SettingsPage(QWidget):
         ui_group.addSettingCard(self.home_card)
         ui_group.addSettingCard(self.hp_card)
         ui_group.addSettingCard(self.win_card)
+        ui_group.addSettingCard(self.glang_card)
         # 语言
         self.lang_card, self.lang_box = _combo_card(
             FIF.EDIT if hasattr(FIF, "EDIT") else FIF.SETTING,
@@ -961,6 +975,7 @@ class SettingsPage(QWidget):
             "homepage_mode": self._home_keys.get(self.home_box.currentText(), "news"),
             "custom_homepage": self.hp_edit.text().strip(),
             "window_mode": self._win_keys.get(self.win_box.currentText(), "window"),
+            "game_lang": self._glang_keys.get(self.glang_box.currentText(), "auto"),
             "allow_multi_instance": self.multi_sw.isChecked(),
             "language": lang,
         }
