@@ -772,16 +772,35 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_Delete(root);
         return out;
     }
-    if (strcmp(method, "search_mods") == 0)
-        return search_mods(pstr(params, "query", ""), pstr(params, "source", ""));
-    if (strcmp(method, "search_modpacks") == 0)
-        return search_modpacks(pstr(params, "query", ""), pstr(params, "source", ""));
-    if (strcmp(method, "search_shaders") == 0)
-        return search_content("shader", pstr(params, "query", ""), pstr(params, "source", ""));
-    if (strcmp(method, "search_resourcepacks") == 0)
-        return search_content("resourcepack", pstr(params, "query", ""), pstr(params, "source", ""));
-    if (strcmp(method, "search_datapacks") == 0)
-        return search_content("datapack", pstr(params, "query", ""), pstr(params, "source", ""));
+    if (strncmp(method, "search_", 7) == 0 &&
+        (strcmp(method, "search_mods") == 0 || strcmp(method, "search_modpacks") == 0
+         || strcmp(method, "search_shaders") == 0 || strcmp(method, "search_resourcepacks") == 0
+         || strcmp(method, "search_datapacks") == 0)) {
+        /* 下载页的筛选框都塞在 extra 里；以前整个 extra 被丢掉，
+         * 「游戏版本」和「分类」选了等于没选。 */
+        cJSON *extra = cJSON_GetObjectItem(params, "extra");
+        if (!cJSON_IsObject(extra)) extra = params;
+        const char *gv = pstr(extra, "game_version", "");
+        if (!gv[0]) gv = pstr(extra, "version", "");
+        if (strncmp(gv, "全部", strlen("全部")) == 0) gv = "";
+        const char *cat = pstr(extra, "category", "");
+        if (!cat[0]) cat = pstr(extra, "type", "");
+        if (strncmp(cat, "全部", strlen("全部")) == 0 || pymcl_ieq(cat, "all")) cat = "";
+        if (cat[0]) {
+            /* 分类→平台 facet 的映射表在 Python 侧（catalog_files.category_facets），
+             * C 里不复制一份：有分类过滤时把整个搜索交给 Python 桥做。
+             * Python 不可用再退回原生搜索（只按版本过滤，分类忽略）。 */
+            cJSON *r = py_rpc_call(method, params);
+            if (r) return r;
+        }
+        const char *q = pstr(params, "query", "");
+        const char *src = pstr(params, "source", "");
+        if (strcmp(method, "search_mods") == 0) return search_mods(q, src, gv);
+        if (strcmp(method, "search_modpacks") == 0) return search_modpacks(q, src, gv);
+        if (strcmp(method, "search_shaders") == 0) return search_content("shader", q, src, gv);
+        if (strcmp(method, "search_resourcepacks") == 0) return search_content("resourcepack", q, src, gv);
+        return search_content("datapack", q, src, gv);
+    }
     if (strcmp(method, "get_installed_mods") == 0)
         return list_instance_files(pstr(params, "instance", "default"), "mods");
     if (strcmp(method, "get_installed_shaders") == 0)
