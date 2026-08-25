@@ -188,8 +188,22 @@ static void *task_run(void *p) {
         const char *loader = pstr(t->args, "loader", "无");
         const char *lv = pstr(t->args, "loader_version", "");
         const char *inst = pstr(t->args, "instance", config_str("default_instance", "default"));
-        ctx_log(t, "安装到实例");
-        if (loader && loader[0] && strcmp(loader, "无") != 0) {
+        /* WinUI/EziApp 安装向导的 OptiFine / LiteLoader / 跳过 assets 勾选走
+         * extra；原生安装器不支持这些，以前直接忽略——勾了 OptiFine 也报
+         * 「安装完成」。带任一勾选就整体交给 Python 实现，装不了就明确报错。 */
+        cJSON *xtra = cJSON_GetObjectItem(t->args, "extra");
+        if (cJSON_IsTrue(cJSON_GetObjectItem(xtra, "optifine"))
+            || cJSON_IsTrue(cJSON_GetObjectItem(xtra, "liteloader"))
+            || cJSON_IsTrue(cJSON_GetObjectItem(xtra, "skip_assets"))) {
+            ctx_progress(t, "正在安装（Python 后端）…", 0, 0);
+            cJSON *r = py_rpc_call_t(t->method, t->args, 7200);
+            ok = r != NULL;
+            if (r) {
+                const char *s = cJSON_GetStringValue(r);
+                if (s && s[0]) snprintf(msg, sizeof(msg), "%s", s);
+                cJSON_Delete(r);
+            }
+        } else if (loader && loader[0] && strcmp(loader, "无") != 0) {
             char vid[256];
             ok = install_loader(inst, loader, lv[0] ? lv : NULL, ver, &ctx, vid, sizeof(vid)) == 0;
             if (ok) snprintf(msg, sizeof(msg), "加载器安装完成: %s", vid);
