@@ -56,27 +56,144 @@ static void mirror_mr(const char *url, char *out, size_t n) {
     snprintf(out, n, "%s", url);
 }
 
-static cJSON *mr_search(const char *query, const char *ptype, int limit) {
-    char q[1024];
-    char facets[128];
-    snprintf(facets, sizeof(facets), "[[\"project_type:%s\"]]", ptype);
-    /* curl-escape roughly */
-    char enc[512] = {0};
-    const char *s = query ? query : "";
+static void url_enc(const char *s, char *out, size_t n) {
     size_t o = 0;
-    for (; *s && o + 4 < sizeof(enc); s++) {
+    out[0] = 0;
+    for (; s && *s && o + 4 < n; s++) {
         unsigned char c = (unsigned char)*s;
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_')
-            enc[o++] = (char)c;
-        else { snprintf(enc + o, sizeof(enc) - o, "%%%02X", c); o = strlen(enc); }
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+            || c == '-' || c == '_' || c == '.' || c == '~')
+            out[o++] = (char)c;
+        else { snprintf(out + o, n - o, "%%%02X", c); o = strlen(out); }
     }
-    snprintf(q, sizeof(q), "query=%s&facets=%s&limit=%d&index=relevance", enc[0] ? enc : "%20", facets, limit);
-    /* encode facets brackets */
-    char url1[1024], url2[1024];
-    snprintf(url1, sizeof(url1), MODRINTH_API "/search?query=%s&limit=%d&index=relevance&facets=%%5B%%5B%%22project_type%%3A%s%%22%%5D%%5D",
-             enc[0] ? enc : "%20", limit, ptype);
-    snprintf(url2, sizeof(url2), MCIM_MIRROR "/modrinth/v2/search?query=%s&limit=%d&index=relevance&facets=%%5B%%5B%%22project_type%%3A%s%%22%%5D%%5D",
-             enc[0] ? enc : "%20", limit, ptype);
+    out[o] = 0;
+}
+
+/* ---- 搜索筛选：映射表与 mclauncher/catalog_files.py 保持一致，
+        改那边的表时这里要跟着改 ---- */
+
+static const char *filter_type_key(const char *label) {
+    static const struct { const char *alias; const char *key; } aliases[] = {
+        {"优化", "optimization"}, {"科技", "technology"}, {"魔法", "magic"},
+        {"冒险", "adventure"}, {"生存", "survival"}, {"装饰", "decoration"},
+        {"写实", "realistic"}, {"卡通", "cartoon"}, {"高性能", "performance"},
+        {"光追", "path-tracing"}, {"现代风", "modern"}, {"动态效果", "animated"},
+        {"空岛", "skyblock"}, {"创造", "creation"},
+    };
+    if (!label || !label[0]) return "";
+    if (pymcl_ieq(label, "全部") || pymcl_ieq(label, "all") || pymcl_ieq(label, "any"))
+        return "";
+    for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); i++)
+        if (strcmp(label, aliases[i].alias) == 0) return aliases[i].key;
+    return label; /* UI 也可能直接传 canonical key */
+}
+
+static int filter_mr_cats(const char *key, const char *cats[2]) {
+    static const struct { const char *key; const char *a; const char *b; } t[] = {
+        {"optimization", "optimization", NULL}, {"technology", "technology", NULL},
+        {"magic", "magic", NULL}, {"adventure", "adventure", NULL},
+        {"survival", "utility", "food"}, {"decoration", "decoration", NULL},
+        {"realistic", "realistic", NULL}, {"cartoon", "cartoon", NULL},
+        {"performance", "performance", NULL}, {"path-tracing", "path-tracing", "pbr"},
+        {"16x", "16x", NULL}, {"32x", "32x", NULL}, {"64x", "64x", NULL},
+        {"modern", "modern", NULL}, {"animated", "animated", NULL},
+        {"skyblock", "skyblock", NULL}, {"creation", "creation", NULL},
+    };
+    cats[0] = cats[1] = NULL;
+    if (!key || !key[0]) return 0;
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+        if (strcmp(key, t[i].key) == 0) {
+            cats[0] = t[i].a;
+            cats[1] = t[i].b;
+            return 1;
+        }
+    }
+    cats[0] = key; /* 未知 key 原样当分类用，与 Python 兜底一致 */
+    return 1;
+}
+
+static int filter_cf_tokens(const char *key, const char *toks[3]) {
+    static const struct { const char *key; const char *a; const char *b; const char *c; } t[] = {
+        {"optimization", "performance", "optimization", NULL},
+        {"technology", "technology", "tech", NULL},
+        {"magic", "magic", NULL, NULL}, {"adventure", "adventure", NULL, NULL},
+        {"survival", "survival", "util", "food"}, {"decoration", "decor", NULL, NULL},
+        {"realistic", "realistic", NULL, NULL}, {"cartoon", "cartoon", "animated", NULL},
+        {"performance", "performance", NULL, NULL},
+        {"path-tracing", "path tracing", "shader", NULL},
+        {"16x", "16x", NULL, NULL}, {"32x", "32x", NULL, NULL}, {"64x", "64x", NULL, NULL},
+        {"modern", "modern", NULL, NULL}, {"animated", "animated", NULL, NULL},
+        {"skyblock", "skyblock", NULL, NULL}, {"creation", "creation", NULL, NULL},
+    };
+    toks[0] = toks[1] = toks[2] = NULL;
+    if (!key || !key[0]) return 0;
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+        if (strcmp(key, t[i].key) == 0) {
+            toks[0] = t[i].a;
+            toks[1] = t[i].b;
+            toks[2] = t[i].c;
+            return 1;
+        }
+    }
+    toks[0] = key;
+    return 1;
+}
+
+/* CF 的 categoryFilter 不稳定（与 Python 端一致），拉回结果后按分类展示名过滤。 */
+static int cf_item_matches_cat(cJSON *m, const char *toks[3]) {
+    if (!toks[0]) return 1;
+    cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItem(m, "categories")) {
+        const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(c, "name"));
+        if (!nm) continue;
+        for (int i = 0; i < 3 && toks[i]; i++)
+            if (pymcl_icontains(nm, toks[i])) return 1;
+    }
+    return 0;
+}
+
+static const char *extra_str(cJSON *extra, const char *key, const char *def) {
+    const char *s = cJSON_GetStringValue(cJSON_GetObjectItem(extra, key));
+    return (s && s[0]) ? s : def;
+}
+
+static const char *extra_game_version(cJSON *extra) {
+    const char *gv = extra_str(extra, "game_version", extra_str(extra, "version", ""));
+    /* “全部版本”这类占位选项等于不过滤；带引号的怪值会破坏 facets JSON，同样丢弃 */
+    if (pymcl_startswith(gv, "全部") || strchr(gv, '"') || strchr(gv, '\\'))
+        return "";
+    return gv;
+}
+
+static const char *extra_type_key(cJSON *extra) {
+    return filter_type_key(extra_str(extra, "category", extra_str(extra, "type", "")));
+}
+
+static cJSON *mr_search(const char *query, const char *ptype, int limit,
+                        const char *gv, const char *catkey) {
+    char enc[512];
+    url_enc(query ? query : "", enc, sizeof(enc));
+    char facets[512];
+    size_t off = (size_t)snprintf(facets, sizeof(facets), "[[\"project_type:%s\"]", ptype);
+    if (gv && gv[0] && off < sizeof(facets))
+        off += (size_t)snprintf(facets + off, sizeof(facets) - off, ",[\"versions:%s\"]", gv);
+    const char *cats[2];
+    if (catkey && catkey[0] && filter_mr_cats(catkey, cats) && off < sizeof(facets)) {
+        off += (size_t)snprintf(facets + off, sizeof(facets) - off, ",[\"categories:%s\"", cats[0]);
+        if (cats[1] && off < sizeof(facets))
+            off += (size_t)snprintf(facets + off, sizeof(facets) - off, ",\"categories:%s\"", cats[1]);
+        if (off < sizeof(facets))
+            off += (size_t)snprintf(facets + off, sizeof(facets) - off, "]");
+    }
+    if (off < sizeof(facets))
+        snprintf(facets + off, sizeof(facets) - off, "]");
+    char fenc[1024];
+    url_enc(facets, fenc, sizeof(fenc));
+    char url1[2048], url2[2048];
+    snprintf(url1, sizeof(url1), MODRINTH_API "/search?query=%s&limit=%d&index=relevance&facets=%s",
+             enc[0] ? enc : "%20", limit, fenc);
+    snprintf(url2, sizeof(url2), MCIM_MIRROR "/modrinth/v2/search?query=%s&limit=%d&index=relevance&facets=%s",
+             enc[0] ? enc : "%20", limit, fenc);
     cJSON *j = http_get_json(url1, 45);
     if (!j) j = http_get_json(url2, 45);
     return j;
@@ -125,135 +242,158 @@ static cJSON *row_from_cf(cJSON *m) {
     return row;
 }
 
-cJSON *search_mods(const char *query, const char *source) {
+/* CF 搜索共用：带 gameVersion 参数与分类客户端过滤（对齐 mclauncher.mods.search_curseforge）。 */
+static void cf_search_into(cJSON *out, int class_id, const char *q, int limit,
+                           const char *gv, const char *toks[3]) {
+    char qenc[512], gvenc[128], queryp[1024];
+    url_enc(q ? q : "", qenc, sizeof(qenc));
+    url_enc(gv ? gv : "", gvenc, sizeof(gvenc));
+    int page = toks[0] ? limit * 2 : limit;
+    size_t off = (size_t)snprintf(queryp, sizeof(queryp),
+                                  "gameId=432&classId=%d&sortField=2&pageSize=%d&index=0",
+                                  class_id, page);
+    if (qenc[0] && off < sizeof(queryp))
+        off += (size_t)snprintf(queryp + off, sizeof(queryp) - off, "&searchFilter=%s", qenc);
+    if (gvenc[0] && off < sizeof(queryp))
+        snprintf(queryp + off, sizeof(queryp) - off, "&gameVersion=%s", gvenc);
+    cJSON *d = cf_get("/mods/search", queryp);
+    cJSON *items = cf_items(d);
+    cJSON *m;
+    int kept = 0;
+    cJSON_ArrayForEach(m, items) {
+        if (kept >= limit) break;
+        if (!cf_item_matches_cat(m, toks)) continue;
+        cJSON_AddItemToArray(out, row_from_cf(m));
+        kept++;
+    }
+    cJSON_Delete(d);
+}
+
+cJSON *search_mods(const char *query, const char *source, cJSON *extra) {
     const char *q = query ? query : "";
+    const char *gv = extra_game_version(extra);
+    const char *catkey = extra_type_key(extra);
+    const char *toks[3];
+    filter_cf_tokens(catkey, toks);
+    int has_filter = (gv[0] || catkey[0]);
     int want_cf = 0, want_mr = 1;
     if (source && (pymcl_ieq(source, "全部") || pymcl_ieq(source, "all") || !source[0])) { want_cf = 1; want_mr = 1; }
     else if (source && pymcl_startswith(source, "curse")) { want_cf = 1; want_mr = 0; }
     else { want_mr = 1; want_cf = 0; }
     if (!q[0]) return catalog_popular_mods(source);
     cJSON *out = cJSON_CreateArray();
-    char slug[128] = {0}; long long cf = 0; char title[128] = {0};
-    catalog_lookup_mod(q, slug, sizeof(slug), &cf, title, sizeof(title));
-    if (slug[0] && want_mr) {
-        char url[256]; snprintf(url, sizeof(url), MODRINTH_API "/project/%s", slug);
-        cJSON *p = http_get_json(url, 30);
-        if (p) {
-            cJSON *row = cJSON_CreateObject();
-            cJSON_AddStringToObject(row, "name", cJSON_GetStringValue(cJSON_GetObjectItem(p, "title")) ?: title);
-            cJSON_AddStringToObject(row, "author", "?");
-            cJSON_AddNumberToObject(row, "downloads", cJSON_GetNumberValue(cJSON_GetObjectItem(p, "downloads")));
-            cJSON_AddStringToObject(row, "slug", cJSON_GetStringValue(cJSON_GetObjectItem(p, "slug")) ?: slug);
-            cJSON_AddStringToObject(row, "source", "modrinth");
-            cJSON_AddItemToArray(out, row);
-            cJSON_Delete(p);
+    /* 别名直达只在没开筛选时用：直达命中无法应用版本/分类过滤，
+       用户点了筛选就得走真搜索，不然筛选框等于摆设。 */
+    if (!has_filter) {
+        char slug[128] = {0}; long long cf = 0; char title[128] = {0};
+        catalog_lookup_mod(q, slug, sizeof(slug), &cf, title, sizeof(title));
+        if (slug[0] && want_mr) {
+            char url[256]; snprintf(url, sizeof(url), MODRINTH_API "/project/%s", slug);
+            cJSON *p = http_get_json(url, 30);
+            if (p) {
+                cJSON *row = cJSON_CreateObject();
+                cJSON_AddStringToObject(row, "name", cJSON_GetStringValue(cJSON_GetObjectItem(p, "title")) ?: title);
+                cJSON_AddStringToObject(row, "author", "?");
+                cJSON_AddNumberToObject(row, "downloads", cJSON_GetNumberValue(cJSON_GetObjectItem(p, "downloads")));
+                cJSON_AddStringToObject(row, "slug", cJSON_GetStringValue(cJSON_GetObjectItem(p, "slug")) ?: slug);
+                cJSON_AddStringToObject(row, "source", "modrinth");
+                cJSON_AddItemToArray(out, row);
+                cJSON_Delete(p);
+            }
         }
+        if (cf && want_cf) {
+            char path[64]; snprintf(path, sizeof(path), "/mods/%lld", cf);
+            cJSON *d = cf_get(path, NULL);
+            cJSON *m = d ? cJSON_GetObjectItem(d, "data") : NULL;
+            if (cJSON_IsObject(m)) cJSON_AddItemToArray(out, row_from_cf(m));
+            cJSON_Delete(d);
+        }
+        if (cJSON_GetArraySize(out) > 0) return out;
     }
-    if (cf && want_cf) {
-        char path[64]; snprintf(path, sizeof(path), "/mods/%lld", cf);
-        cJSON *d = cf_get(path, NULL);
-        cJSON *m = d ? cJSON_GetObjectItem(d, "data") : NULL;
-        if (cJSON_IsObject(m)) cJSON_AddItemToArray(out, row_from_cf(m));
-        cJSON_Delete(d);
-    }
-    if (cJSON_GetArraySize(out) > 0) return out;
     if (want_mr) {
-        cJSON *j = mr_search(q, "mod", 30);
+        cJSON *j = mr_search(q, "mod", 30, gv, catkey);
         cJSON *hits = j ? cJSON_GetObjectItem(j, "hits") : NULL;
         cJSON *h;
         cJSON_ArrayForEach(h, hits) cJSON_AddItemToArray(out, row_from_mr_hit(h));
         cJSON_Delete(j);
     }
-    if (want_cf) {
-        char queryp[512];
-        snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=30&index=0&searchFilter=%s",
-                 CF_CLASS_MOD, q);
-        cJSON *d = cf_get("/mods/search", queryp);
-        cJSON *items = cf_items(d);
-        cJSON *m;
-        cJSON_ArrayForEach(m, items) cJSON_AddItemToArray(out, row_from_cf(m));
-        cJSON_Delete(d);
-    }
+    if (want_cf)
+        cf_search_into(out, CF_CLASS_MOD, q, 30, gv, toks);
     return out;
 }
 
-cJSON *search_modpacks(const char *query, const char *source) {
+cJSON *search_modpacks(const char *query, const char *source, cJSON *extra) {
     const char *q = query ? query : "";
+    const char *gv = extra_game_version(extra);
+    const char *catkey = extra_type_key(extra);
+    const char *toks[3];
+    filter_cf_tokens(catkey, toks);
+    int has_filter = (gv[0] || catkey[0]);
     if (!q[0]) return catalog_popular_packs(source);
     int want_cf = 1, want_mr = 1;
     if (source && pymcl_startswith(source, "curse")) want_mr = 0;
     if (source && pymcl_ieq(source, "modrinth")) want_cf = 0;
     cJSON *out = cJSON_CreateArray();
-    char slug[128] = {0}; long long cf = 0; char title[128] = {0};
-    catalog_lookup_pack(q, slug, sizeof(slug), &cf, title, sizeof(title));
-    if (cf && want_cf) {
-        char path[64]; snprintf(path, sizeof(path), "/mods/%lld", cf);
-        cJSON *d = cf_get(path, NULL);
-        cJSON *m = d ? cJSON_GetObjectItem(d, "data") : NULL;
-        if (cJSON_IsObject(m)) cJSON_AddItemToArray(out, row_from_cf(m));
-        cJSON_Delete(d);
-    }
-    if (slug[0] && want_mr) {
-        char url[256]; snprintf(url, sizeof(url), MODRINTH_API "/project/%s", slug);
-        cJSON *p = http_get_json(url, 30);
-        if (p) {
-            cJSON *row = cJSON_CreateObject();
-            cJSON_AddStringToObject(row, "name", cJSON_GetStringValue(cJSON_GetObjectItem(p, "title")) ?: title);
-            cJSON_AddStringToObject(row, "slug", slug);
-            cJSON_AddStringToObject(row, "source", "modrinth");
-            cJSON_AddNumberToObject(row, "downloads", cJSON_GetNumberValue(cJSON_GetObjectItem(p, "downloads")));
-            cJSON_AddItemToArray(out, row);
-            cJSON_Delete(p);
+    if (!has_filter) {
+        char slug[128] = {0}; long long cf = 0; char title[128] = {0};
+        catalog_lookup_pack(q, slug, sizeof(slug), &cf, title, sizeof(title));
+        if (cf && want_cf) {
+            char path[64]; snprintf(path, sizeof(path), "/mods/%lld", cf);
+            cJSON *d = cf_get(path, NULL);
+            cJSON *m = d ? cJSON_GetObjectItem(d, "data") : NULL;
+            if (cJSON_IsObject(m)) cJSON_AddItemToArray(out, row_from_cf(m));
+            cJSON_Delete(d);
         }
+        if (slug[0] && want_mr) {
+            char url[256]; snprintf(url, sizeof(url), MODRINTH_API "/project/%s", slug);
+            cJSON *p = http_get_json(url, 30);
+            if (p) {
+                cJSON *row = cJSON_CreateObject();
+                cJSON_AddStringToObject(row, "name", cJSON_GetStringValue(cJSON_GetObjectItem(p, "title")) ?: title);
+                cJSON_AddStringToObject(row, "slug", slug);
+                cJSON_AddStringToObject(row, "source", "modrinth");
+                cJSON_AddNumberToObject(row, "downloads", cJSON_GetNumberValue(cJSON_GetObjectItem(p, "downloads")));
+                cJSON_AddItemToArray(out, row);
+                cJSON_Delete(p);
+            }
+        }
+        if (cJSON_GetArraySize(out) > 0) return out;
     }
-    if (cJSON_GetArraySize(out) > 0) return out;
     if (want_mr) {
-        cJSON *j = mr_search(q, "modpack", 25);
+        cJSON *j = mr_search(q, "modpack", 25, gv, catkey);
         cJSON *hits = j ? cJSON_GetObjectItem(j, "hits") : NULL;
         cJSON *h;
         cJSON_ArrayForEach(h, hits) cJSON_AddItemToArray(out, row_from_mr_hit(h));
         cJSON_Delete(j);
     }
-    if (want_cf) {
-        char queryp[512];
-        snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=25&index=0&searchFilter=%s",
-                 CF_CLASS_MODPACK, q);
-        cJSON *d = cf_get("/mods/search", queryp);
-        cJSON *items = cf_items(d);
-        cJSON *m;
-        cJSON_ArrayForEach(m, items) cJSON_AddItemToArray(out, row_from_cf(m));
-        cJSON_Delete(d);
-    }
+    if (want_cf)
+        cf_search_into(out, CF_CLASS_MODPACK, q, 25, gv, toks);
     return out;
 }
 
-cJSON *search_content(const char *kind, const char *query, const char *source) {
+cJSON *search_content(const char *kind, const char *query, const char *source, cJSON *extra) {
     const char *mr = "mod";
     int cf = CF_CLASS_MOD;
     if (strcmp(kind, "shader") == 0) { mr = "shader"; cf = CF_CLASS_SHADER; }
     else if (strcmp(kind, "resourcepack") == 0) { mr = "resourcepack"; cf = CF_CLASS_RESOURCEPACK; }
     else if (strcmp(kind, "datapack") == 0) { mr = "datapack"; cf = CF_CLASS_DATAPACK; }
+    const char *gv = extra_game_version(extra);
+    const char *catkey = extra_type_key(extra);
+    const char *toks[3];
+    filter_cf_tokens(catkey, toks);
     int want_mr = 1, want_cf = 1;
     if (source && pymcl_startswith(source, "curse")) want_mr = 0;
     if (source && pymcl_ieq(source, "modrinth")) want_cf = 0;
     cJSON *out = cJSON_CreateArray();
     if (want_mr) {
-        cJSON *j = mr_search(query, mr, 30);
+        cJSON *j = mr_search(query, mr, 30, gv, catkey);
         cJSON *hits = j ? cJSON_GetObjectItem(j, "hits") : NULL;
         cJSON *h;
         cJSON_ArrayForEach(h, hits) cJSON_AddItemToArray(out, row_from_mr_hit(h));
         cJSON_Delete(j);
     }
-    if (want_cf) {
-        char queryp[512];
-        snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=30&index=0%s%s",
-                 cf, (query && query[0]) ? "&searchFilter=" : "", query ? query : "");
-        cJSON *d = cf_get("/mods/search", queryp);
-        cJSON *items = cf_items(d);
-        cJSON *m;
-        cJSON_ArrayForEach(m, items) cJSON_AddItemToArray(out, row_from_cf(m));
-        cJSON_Delete(d);
-    }
+    if (want_cf)
+        cf_search_into(out, cf, query ? query : "", 30, gv, toks);
     return out;
 }
 

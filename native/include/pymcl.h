@@ -241,9 +241,10 @@ cJSON *catalog_popular_mods(const char *source);
 cJSON *catalog_popular_packs(const char *source);
 int catalog_lookup_mod(const char *q, char *slug, size_t ns, long long *cf, char *title, size_t nt);
 int catalog_lookup_pack(const char *q, char *slug, size_t ns, long long *cf, char *title, size_t nt);
-cJSON *search_mods(const char *query, const char *source);
-cJSON *search_modpacks(const char *query, const char *source);
-cJSON *search_content(const char *kind, const char *query, const char *source);
+/* extra 携带 game_version / category 筛选（与 bridge.api 的 extra 相同，可为 NULL）。 */
+cJSON *search_mods(const char *query, const char *source, cJSON *extra);
+cJSON *search_modpacks(const char *query, const char *source, cJSON *extra);
+cJSON *search_content(const char *kind, const char *query, const char *source, cJSON *extra);
 int install_mod(const char *instance, const char *name, cJSON *extra, pymcl_ctx *ctx);
 int install_content(const char *kind, const char *instance, const char *name, cJSON *extra, pymcl_ctx *ctx);
 int install_modpack(const char *name, const char *source, cJSON *extra, pymcl_ctx *ctx);

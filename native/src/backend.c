@@ -810,16 +810,22 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_Delete(root);
         return out;
     }
+    /* extra 里是版本/分类筛选；以前直接丢掉，WinUI/EziApp 的筛选框在原生桥上是摆设 */
     if (strcmp(method, "search_mods") == 0)
-        return search_mods(pstr(params, "query", ""), pstr(params, "source", ""));
+        return search_mods(pstr(params, "query", ""), pstr(params, "source", ""),
+                           cJSON_GetObjectItem(params, "extra"));
     if (strcmp(method, "search_modpacks") == 0)
-        return search_modpacks(pstr(params, "query", ""), pstr(params, "source", ""));
+        return search_modpacks(pstr(params, "query", ""), pstr(params, "source", ""),
+                               cJSON_GetObjectItem(params, "extra"));
     if (strcmp(method, "search_shaders") == 0)
-        return search_content("shader", pstr(params, "query", ""), pstr(params, "source", ""));
+        return search_content("shader", pstr(params, "query", ""), pstr(params, "source", ""),
+                              cJSON_GetObjectItem(params, "extra"));
     if (strcmp(method, "search_resourcepacks") == 0)
-        return search_content("resourcepack", pstr(params, "query", ""), pstr(params, "source", ""));
+        return search_content("resourcepack", pstr(params, "query", ""), pstr(params, "source", ""),
+                              cJSON_GetObjectItem(params, "extra"));
     if (strcmp(method, "search_datapacks") == 0)
-        return search_content("datapack", pstr(params, "query", ""), pstr(params, "source", ""));
+        return search_content("datapack", pstr(params, "query", ""), pstr(params, "source", ""),
+                              cJSON_GetObjectItem(params, "extra"));
     if (strcmp(method, "get_installed_mods") == 0)
         return list_instance_files(pstr(params, "instance", "default"), "mods");
     if (strcmp(method, "get_installed_shaders") == 0)
