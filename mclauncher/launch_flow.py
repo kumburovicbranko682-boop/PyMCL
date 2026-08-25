@@ -10,6 +10,60 @@ from .argsplit import split_args
 from .config import CONFIG
 
 
+def supports_quickplay_multiplayer(instance, version_id) -> bool:
+    """1.20+ 的版本 JSON 声明了 quickPlayMultiplayer；同时原版移除了 --server。"""
+    import json as _json
+    from . import manifest as manifest_mod
+    try:
+        vjson = instance.version_json(version_id)
+    except Exception:
+        return False
+    if not isinstance(vjson, dict):
+        return False
+    try:
+        resolved = manifest_mod.resolve_inherits(vjson, lambda pid: instance.version_json(pid))
+    except Exception:
+        resolved = vjson
+    game_args = (resolved.get("arguments") or {}).get("game") or []
+    return "quickPlayMultiplayer" in _json.dumps(game_args)
+
+
+def _extract_server(extras: list) -> tuple[str, str, list]:
+    """把 extras 里的 --server/--port 摘出来，返回 (host, port, 余下参数)。"""
+    host = port = ""
+    rest = []
+    i = 0
+    while i < len(extras):
+        arg = extras[i]
+        if arg == "--server" and i + 1 < len(extras):
+            host = str(extras[i + 1])
+            i += 2
+            continue
+        if arg == "--port" and i + 1 < len(extras):
+            port = str(extras[i + 1])
+            i += 2
+            continue
+        rest.append(arg)
+        i += 1
+    return host, port, rest
+
+
+def server_join_args(instance, version_id, host, port="") -> list:
+    """直连服务器参数：1.20+ 用 --quickPlayMultiplayer，旧版用 --server/--port。"""
+    host = str(host or "").strip()
+    if not host:
+        return []
+    port = str(port or "").strip()
+    if ":" in host and host.count(":") == 1:
+        left, _, tail = host.rpartition(":")
+        if tail.isdigit():
+            host, port = left, port or tail
+    if supports_quickplay_multiplayer(instance, version_id):
+        addr = f"{host}:{port}" if port else host
+        return ["--quickPlayMultiplayer", addr]
+    return ["--server", host, "--port", port or "25565"]
+
+
 def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     settings = version_settings.load(instance, version_id)
     gdir = version_settings.apply_isolation(instance, version_id, settings)
@@ -17,9 +71,12 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
     mem = settings.get("memory_mb") or memory_mb
     extras = [str(a) for a in (extra_game_args or []) if a not in (None, "")]
     extras += split_args(settings.get("game_args"))
-    if settings.get("server") and "--server" not in extras:
-        extras += ["--server", str(settings["server"])]
-        extras += ["--port", str(settings.get("port") or 25565)]
+    # 直连服务器：调用方传的 --server 优先，其次版本设置；按版本翻译成正确参数
+    host, port, extras = _extract_server(extras)
+    if not host and settings.get("server"):
+        host, port = str(settings["server"]), str(settings.get("port") or "")
+    if host and "--quickPlayMultiplayer" not in extras:
+        extras += server_join_args(instance, version_id, host, port)
     mode = settings.get("window_mode") or CONFIG.get("window_mode") or "window"
     if mode in version_settings.FULLSCREEN_MODES and "--fullscreen" not in extras:
         extras.append("--fullscreen")

@@ -1007,5 +1007,6 @@
   "{file} 是 {ml} 模组，当前目标是 {need}": "{file} is a {ml} mod, but the current target is {need}",
   "{id} 与 {other} 不兼容": "{id} is incompatible with {other}",
   "缺失的依赖可到「下载」页搜索安装": "Missing dependencies can be found and installed from the Download page",
-  "知道了": "Got it"
+  "知道了": "Got it",
+  "重置": "Reset"
 }
