@@ -12,6 +12,8 @@ DEFAULT_CONFIG = {
     "default_instance": "default",
     # Java 运行时目录名（所有实例共享）
     "java_dir": "java",
+    # 用户手动添加的 Java：[{"exe", "major", "name"}]，添加时探测一次 major
+    "custom_javas": [],
     # 版本隔离选项：False 时每个实例拥有独立的 libraries/assets；True 时共享以节省空间
     "shared_libraries": False,
     "shared_assets": False,

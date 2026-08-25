@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Java 页：环境卡片 + 发行版选择 + 版本下载磁贴。"""
+"""Java 页：环境卡片 + 手动添加 + 发行版选择 + 版本下载磁贴。"""
 
-from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
     PushButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
@@ -9,11 +9,12 @@ from qfluentwidgets import (
 )
 
 from ..widgets import EmptyState, IconTile, Pill
+from ..ui_alive import guard
 from mclauncher.i18n import tr
 
 
 class JavaCard(SimpleCardWidget):
-    def __init__(self, info: dict, parent=None):
+    def __init__(self, info: dict, on_remove=None, parent=None):
         super().__init__(parent)
         self.setFixedHeight(76)
         layout = QHBoxLayout(self)
@@ -26,10 +27,16 @@ class JavaCard(SimpleCardWidget):
         title_row = QHBoxLayout()
         title_row.addWidget(StrongBodyLabel(f'Java {info["major"]}'))
         title_row.addWidget(Pill(tr("可用"), "#2FA36B"))
+        if info.get("custom"):
+            title_row.addWidget(Pill(tr("手动添加"), "#7C5CD6"))
         title_row.addStretch(1)
         info_box.addLayout(title_row)
         info_box.addWidget(CaptionLabel(info.get("path") or info.get("name") or ""))
         layout.addLayout(info_box, 1)
+        if info.get("custom") and callable(on_remove):
+            rm = TransparentPushButton(FIF.DELETE, tr("移除"))
+            rm.clicked.connect(lambda: on_remove(info.get("path") or ""))
+            layout.addWidget(rm, 0)
 
 
 class JavaDownloadTile(SimpleCardWidget):
@@ -73,6 +80,8 @@ class JavaPage(QWidget):
         title_box.addWidget(SubtitleLabel("Java"))
         title_box.addWidget(CaptionLabel(tr("Minecraft 所需 Java 会在启动时自动匹配下载；也可在实例页为每个实例单独指定")))
         head.addLayout(title_box, 1)
+        self.add_btn = TransparentPushButton(FIF.ADD, tr("添加 Java"))
+        head.addWidget(self.add_btn, 0)
         self.refresh_btn = TransparentPushButton(FIF.SYNC, tr("重新检测"))
         head.addWidget(self.refresh_btn, 0)
         root.addLayout(head)
@@ -101,6 +110,7 @@ class JavaPage(QWidget):
         root.addLayout(tiles)
         root.addStretch(1)
 
+        self.add_btn.clicked.connect(self._add_java)
         self.refresh_btn.clicked.connect(lambda: self.reload(scan_system=True))
         self.reload(scan_system=False)
 
@@ -167,7 +177,47 @@ class JavaPage(QWidget):
             self.env_layout.addWidget(EmptyState(FIF.CODE, tr("未检测到 Java，请从下方下载")))
             return
         for j in javas:
-            self.env_layout.addWidget(JavaCard(j))
+            self.env_layout.addWidget(JavaCard(j, on_remove=self._remove_java))
+
+    def _add_java(self):
+        exe_filter = "Java (java.exe javaw.exe java javaw);;" + tr("全部文件 (*)")
+        path, _ = QFileDialog.getOpenFileName(self, tr("选择 Java 可执行文件"), "", exe_filter)
+        if not path:
+            return
+        adder = getattr(self.backend, "add_java_path", None)
+        if not callable(adder):
+            return
+
+        def _ok(entry):
+            InfoBar.success(tr("已添加"), (entry or {}).get("name") or path,
+                            parent=self, position=InfoBarPosition.TOP, duration=2500)
+            self.reload(scan_system=False)
+
+        def _err(err):
+            InfoBar.error(tr("添加失败"), str(err), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            # 探测 java -version 是子进程调用（最长数秒），不能卡 UI 线程
+            call_async(lambda p=path: adder(p), guard(self, _ok), guard(self, _err))
+        else:
+            try:
+                _ok(adder(path))
+            except Exception as exc:
+                _err(exc)
+
+    def _remove_java(self, path: str):
+        remover = getattr(self.backend, "remove_java_path", None)
+        if not callable(remover) or not path:
+            return
+        try:
+            remover(path)
+        except Exception as exc:
+            InfoBar.error(tr("移除失败"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+            return
+        self.reload(scan_system=False)
 
     def _download(self, major: str, source=None):
         win = self.window()

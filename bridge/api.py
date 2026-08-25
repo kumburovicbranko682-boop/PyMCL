@@ -1296,15 +1296,28 @@ class BackendAPI:
         return self._search_content("datapack", query, source, extra)
 
     def get_java_list(self, scan_system: bool = False) -> list[dict]:
-        javas = java_mod.all_javas() if scan_system else java_mod.list_installed_javas()
+        javas = java_mod.all_javas() if scan_system else (
+            java_mod.list_installed_javas() + java_mod.custom_javas())
         rows = []
         for j in javas:
             rows.append({
                 "name": j.get("name") or f"Java {j.get('major')}",
                 "major": str(j.get("major") or "?"),
                 "path": j.get("exe") or j.get("path") or "",
+                "custom": bool(j.get("custom")),
             })
         return rows
+
+    def add_java_path(self, path: str) -> dict:
+        entry = java_mod.add_custom_java(path)
+        self._emit("ui_changed", {})
+        return entry
+
+    def remove_java_path(self, path: str) -> bool:
+        out = java_mod.remove_custom_java(path)
+        if out:
+            self._emit("ui_changed", {})
+        return out
 
     def normalize_java_pref(self, java: str) -> str:
         if not java or java in (JAVA_AUTO, "auto", "default"):
