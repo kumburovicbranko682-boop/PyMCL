@@ -307,6 +307,7 @@ class VersionPage(QWidget):
         add(tr("打开 saves"), lambda: self._open_folder(instance, version, "saves"))
         add(tr("打开截图"), lambda: self._open_folder(instance, version, "screenshots"))
         add(tr("存档管理…"), lambda: self._saves(instance, version))
+        add(tr("原理图管理…"), lambda: self._schematics(instance, version))
         add(tr("重命名"), lambda: self._rename(instance, version))
         add(tr("复制"), lambda: self._copy(instance, version))
         add(tr("隐藏 / 取消隐藏"), lambda: self._hide(instance, version))
@@ -331,6 +332,10 @@ class VersionPage(QWidget):
     def _saves(self, instance, version):
         from .saves_dialog import SavesDialog
         SavesDialog(self.backend, instance, version, self).exec()
+
+    def _schematics(self, instance, version):
+        from .schematics_dialog import SchematicsDialog
+        SchematicsDialog(self.backend, instance, version, self).exec()
 
     def _rename(self, instance, version):
         from ..widgets import InputDialog

@@ -594,6 +594,27 @@ class BackendAPI(QObject):
         from mclauncher import saves as saves_mod
         return saves_mod.list_saves(self._instance(instance), version)
 
+    def list_schematics(self, instance: str, version: str = "") -> list:
+        """原理图列表（HMCL 同款）：Litematica / WorldEdit / 结构方块文件。"""
+        from mclauncher import schematics as sch
+        return sch.list_schematics(self._instance(instance), version)
+
+    def import_schematics(self, instance: str, paths: list, version: str = "") -> list:
+        from mclauncher import schematics as sch
+        added = sch.import_schematics(self._instance(instance), paths, version)
+        self._emit_ui_changed()
+        return added
+
+    def delete_schematic(self, instance: str, name: str, version: str = "") -> str:
+        from mclauncher import schematics as sch
+        out = sch.delete_schematic(self._instance(instance), name, version)
+        self._emit_ui_changed()
+        return out
+
+    def open_schematics_folder(self, instance: str, version: str = "") -> str:
+        from mclauncher import schematics as sch
+        return sch.open_folder(self._instance(instance), version)
+
     def delete_save(self, instance: str, name: str, version: str = ""):
         from mclauncher import saves as saves_mod
         saves_mod.delete_save(self._instance(instance), name, version)

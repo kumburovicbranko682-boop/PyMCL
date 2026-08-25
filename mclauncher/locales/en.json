@@ -1168,5 +1168,16 @@
   "排序": "Sort",
   "加载更多": "Load More",
   "版本名称": "Version Name",
-  "留空使用默认名（如 {mc}）": "Leave empty for the default name (e.g. {mc})"
+  "留空使用默认名（如 {mc}）": "Leave empty for the default name (e.g. {mc})",
+  "原理图管理": "Schematics",
+  "原理图管理…": "Schematics…",
+  "导入原理图": "Import Schematics",
+  "{target} · 共 {n} 个原理图": "{target} · {n} schematic(s)",
+  "schematics 文件夹还是空的，可点「导入原理图」添加": "The schematics folder is empty. Click \"Import Schematics\" to add some",
+  "{n} 个方块": "{n} blocks",
+  "删除（尽量移入回收站）": "Delete (moved to recycle bin when possible)",
+  "原理图 (*.litematic *.schem *.schematic *.nbt)": "Schematics (*.litematic *.schem *.schematic *.nbt)",
+  "选择原理图文件": "Select schematic files",
+  "将删除原理图「{name}」（会尽量移入系统回收站，可找回）。": "Schematic \"{name}\" will be deleted (moved to the recycle bin when possible).",
+  "读取失败：{err}": "Read failed: {err}"
 }
