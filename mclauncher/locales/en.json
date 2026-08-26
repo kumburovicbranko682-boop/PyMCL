@@ -669,6 +669,7 @@
   "游戏目录": "GameDirectory",
   "游戏目录无效": "Invalid game directory",
   "游戏窗口的默认宽高": "Default game window size",
+  "游戏运行中 — 点「停止」可强制结束": "Game running — press Stop to force quit",
   "游玩时长": "Playtime",
   "点击安装时，图标抛物线飞入侧栏「下载任务」": "On install, the icon flies into Download tasks in the sidebar",
   "点击管理 AI 权限": "Click to manage AI permissions",

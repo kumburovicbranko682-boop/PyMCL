@@ -71,6 +71,8 @@ class LaunchPage(QWidget):
         backend.crash.connect(self._on_crash)
         backend.login_code.connect(self._on_login_code)
         backend.login_status.connect(self._on_login_status)
+        # 游戏进程真正起来后，别让状态停在「游戏启动中 75%」骗人
+        backend.game_started.connect(self._on_game_started)
 
         # 扫盘（实例/账号/版本）延后到事件循环空转：首帧先出壳，
         # MainWindow._boot_reload 的合并刷新会覆盖这次 reload。
@@ -533,6 +535,12 @@ class LaunchPage(QWidget):
     def _on_login_status(self, text):
         if self._login_dlg:
             self._login_dlg.show_status(text)
+
+    def _on_game_started(self):
+        # 只在本页发起的启动还挂着时更新（launch_btn 禁用 = 启动进行中）
+        if self._task_id and not self.launch_btn.isEnabled():
+            self.progress.setValue(100)
+            self.status_label.setText(tr("游戏运行中 — 点「停止」可强制结束"))
 
     def _on_progress(self, task_id, current, total, message):
         if task_id != self._task_id:
