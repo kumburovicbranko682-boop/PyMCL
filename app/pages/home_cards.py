@@ -358,6 +358,12 @@ class PlaytimeBody(QWidget):
         root.addWidget(self.total)
         root.addWidget(self.detail)
         root.addStretch(1)
+        # 只在构造时刷一次的话，玩完一局回来卡片还是旧数字——
+        # 时长变化的时刻就是游戏退出，跟着这个信号走
+        page.backend.game_exited.connect(self._on_game_exited)
+        self.refresh()
+
+    def _on_game_exited(self, _code):
         self.refresh()
 
     def refresh(self):
