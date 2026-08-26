@@ -281,6 +281,11 @@ class AccountPage(QWidget):
             InfoBar.error(tr("缺少地址"), tr("请填写 Yggdrasil API"), parent=self,
                           position=InfoBarPosition.TOP, duration=3000)
             return
+        # 空凭据不必发给服务器换一句英文报错，本地就说清楚
+        if not self.user.text().strip() or not self.pw.text():
+            InfoBar.error(tr("缺少账号信息"), tr("请填写邮箱 / 用户名和密码"), parent=self,
+                          position=InfoBarPosition.TOP, duration=3000)
+            return
         self._set_auth_busy(True)
         self._login_task = self.backend.start_authlib_login(
             api, self.user.text().strip(), self.pw.text())
@@ -291,6 +296,10 @@ class AccountPage(QWidget):
         sid = self.nide8_id.text().strip()
         if not sid:
             InfoBar.error(tr("缺少服务器 ID"), tr("请填写统一通行证服务器 ID"), parent=self,
+                          position=InfoBarPosition.TOP, duration=3000)
+            return
+        if not self.nide8_user.text().strip() or not self.nide8_pw.text():
+            InfoBar.error(tr("缺少账号信息"), tr("请填写用户名和密码"), parent=self,
                           position=InfoBarPosition.TOP, duration=3000)
             return
         self._set_auth_busy(True)
