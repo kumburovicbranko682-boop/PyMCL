@@ -1026,5 +1026,12 @@
   "你的系统: {0} GB 内存 / {1} 核 CPU": "Your system: {0} GB RAM / {1} CPU cores",
   "推荐内存: {0} MB": "Recommended memory: {0} MB",
   "可以到「性能」设置区调整。": "You can adjust it in the Performance settings section.",
-  "内存已设为 {0} MB，保存设置后生效": "Memory set to {0} MB; takes effect after saving settings"
+  "内存已设为 {0} MB，保存设置后生效": "Memory set to {0} MB; takes effect after saving settings",
+  "服务器名称（可选）": "Server name (optional)",
+  "请填写服务器地址": "Enter the server address",
+  "服务器 {0} 已添加": "Server {0} added",
+  "服务器已更新": "Server updated",
+  "删除服务器 {0}？": "Delete server {0}?",
+  "已导入 {0} 个服务器": "Imported {0} servers",
+  "已保存到 {0}": "Saved to {0}"
 }
