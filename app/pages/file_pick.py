@@ -9,19 +9,8 @@ from qfluentwidgets import (
 
 from ..pcl_chrome import Theme, ghost_btn_qss, row_qss
 from ..ui_alive import guard
+from .catalog_page import fmt_downloads
 from mclauncher.i18n import tr
-
-
-def fmt_downloads(n) -> str:
-    try:
-        n = int(n or 0)
-    except (TypeError, ValueError):
-        return "—"
-    if n >= 100_000_000:
-        return f"{n / 100_000_000:.1f}亿".replace(".0", "")
-    if n >= 10_000:
-        return f"{n / 10_000:.0f}万"
-    return str(n) if n else "—"
 
 
 class FilePickDialog(MessageBoxBase):

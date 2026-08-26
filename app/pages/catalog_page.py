@@ -13,7 +13,7 @@ from qfluentwidgets import (
 
 from ..pcl_chrome import Theme, chip_qss, ghost_btn_qss, row_qss, _icon
 from ..widgets import EmptyState, IconTile, InputDialog, ThumbnailTile
-from mclauncher.i18n import tr
+from mclauncher.i18n import current_language, tr
 
 _HEART = getattr(FIF, "HEART", FIF.TAG)
 
@@ -27,16 +27,23 @@ except ImportError:
 
 
 def fmt_downloads(n) -> str:
+    """下载量单位跟随界面语言：中文用 万/亿，其它语言用 K/M/B。"""
     try:
         n = int(n or 0)
     except (TypeError, ValueError):
         return "—"
-    if n >= 100_000_000:
-        s = f" {n / 100_000_000:.1f}亿"
-        return s.replace(".0", "").strip()
-    if n >= 10_000:
-        return f"{n / 10_000:.0f}万"
-    return str(n) if n else "—"
+    if not n:
+        return "—"
+    if current_language() == "zh_CN":
+        if n >= 100_000_000:
+            return f"{n / 100_000_000:.1f}".rstrip("0").rstrip(".") + "亿"
+        if n >= 10_000:
+            return f"{n / 10_000:.0f}万"
+        return str(n)
+    for div, unit in ((1_000_000_000, "B"), (1_000_000, "M"), (1_000, "K")):
+        if n >= div:
+            return f"{n / div:.1f}".rstrip("0").rstrip(".") + unit
+    return str(n)
 
 
 class PclCard(QFrame):
