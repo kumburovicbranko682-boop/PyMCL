@@ -971,5 +971,11 @@
   "跳过（用默认设置）": "Skip (use defaults)",
   "无法打开输出": "Cannot open output",
   "暂无任务 —— 在「下载」区安装原版游戏 / 整合包 / 模组 / 光影包 / 资源包 / Java，进度都会显示在这里": "No tasks yet — install a vanilla game, modpack, mod, shader pack, resource pack or Java from the Download section and progress shows up here",
-  "去下载": "Go to Download"
+  "去下载": "Go to Download",
+  "下载任务（{0}）": "Download Tasks ({0})",
+  "{0} 个文件": "{0} files",
+  "{0} 个匹配 / 共 {1} 个文件": "{0} matched / {1} files total",
+  "加载更多（还有 {0}）": "Load more ({0} left)",
+  "实例 {0}": "Instance {0}",
+  "实例 {0} · 点击「启动游戏」进入世界": "Instance {0} · press “Launch Game” to play"
 }

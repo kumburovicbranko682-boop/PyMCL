@@ -385,10 +385,12 @@ class LaunchPage(QWidget):
                 pack_mc = row.get("mc_version") or ""
                 break
         if pack_name:
-            bits = [b for b in (pack_ver, f"Minecraft {pack_mc}" if pack_mc else "", f"实例 {instance}") if b]
+            bits = [b for b in (pack_ver, f"Minecraft {pack_mc}" if pack_mc else "",
+                                tr("实例 {0}").format(instance)) if b]
             self.banner.set_info(pack_name, " · ".join(bits) or version)
         else:
-            self.banner.set_info(version, f"实例 {instance} · 点击「启动游戏」进入世界")
+            self.banner.set_info(
+                version, tr("实例 {0} · 点击「启动游戏」进入世界").format(instance))
 
     def _on_launch(self):
         from qfluentwidgets import MessageBox

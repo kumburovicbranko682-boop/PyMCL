@@ -148,7 +148,7 @@ class FilePickDialog(MessageBoxBase):
         super().accept()
 
     def _on_err(self, err):
-        self.status.setText(f"加载失败: {err}")
+        self.status.setText(tr("加载失败") + f": {err}")
 
     def _on_ok(self, rows):
         self._rows = list(rows or [])
@@ -166,7 +166,7 @@ class FilePickDialog(MessageBoxBase):
         if want and want in gvs:
             self.gv.setCurrentText(want)
         self.gv.blockSignals(False)
-        self.status.setText(f"{len(self._rows)} 个文件")
+        self.status.setText(tr("{0} 个文件").format(len(self._rows)))
         self._limit = self.PAGE
         self._refill()
 
@@ -206,11 +206,12 @@ class FilePickDialog(MessageBoxBase):
             self.list_layout.addWidget(BodyLabel(tr("没有匹配的文件，试试放宽筛选。")))
         rest = len(matched) - len(shown)
         if rest > 0:
-            more = PushButton(f"加载更多（还有 {rest}）")
+            more = PushButton(tr("加载更多（还有 {0}）").format(rest))
             more.clicked.connect(self._more)
             self.list_layout.addWidget(more)
         self.list_layout.addStretch(1)
-        self.status.setText(f"{len(matched)} 个匹配 / 共 {len(self._rows)} 个文件")
+        self.status.setText(
+            tr("{0} 个匹配 / 共 {1} 个文件").format(len(matched), len(self._rows)))
 
     def _more(self):
         self._limit += self.PAGE

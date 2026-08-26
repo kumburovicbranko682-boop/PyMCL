@@ -226,7 +226,7 @@ class VersionPage(QWidget):
         for i, v in enumerate(shown):
             self.grid.addWidget(VersionCard(v, self._install), i // cols, i % cols)
         if len(rows) > self._limit:
-            more = PushButton(f"加载更多（还有 {len(rows) - self._limit}）")
+            more = PushButton(tr("加载更多（还有 {0}）").format(len(rows) - self._limit))
             more.clicked.connect(self._more)
             self.grid.addWidget(more, (len(shown) + cols - 1) // cols, 0, 1, cols)
 
