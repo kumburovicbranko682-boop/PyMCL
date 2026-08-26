@@ -137,8 +137,9 @@ class CrashDialog(QDialog):
         try:
             dest.write_text(tail, encoding="utf-8")
             open_path(dest)
-        except OSError:
-            pass
+        except OSError as exc:
+            InfoBar.error(tr("无法打开输出"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
 
     def _export(self):
         if not self.report:
@@ -146,8 +147,9 @@ class CrashDialog(QDialog):
         try:
             path = export_report(self.report)
             open_path(path)
-        except OSError:
-            pass
+        except OSError as exc:
+            InfoBar.error(tr("导出失败"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
 
     def _send(self):
         backend = self.backend or getattr(self.parent(), "backend", None)

@@ -968,5 +968,6 @@
   "请先到「下载 → 原版游戏」安装一个版本": "Install a version from Download → Vanilla Game first",
   "搜索失败": "Search failed",
   "正版 / 皮肤站账号使用账号自己的名字；用户名仅离线模式生效": "Microsoft / skin-server accounts use their own name; the username only applies in offline mode",
-  "跳过（用默认设置）": "Skip (use defaults)"
+  "跳过（用默认设置）": "Skip (use defaults)",
+  "无法打开输出": "Cannot open output"
 }
