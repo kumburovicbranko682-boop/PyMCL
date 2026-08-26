@@ -121,7 +121,7 @@ class LaunchPage(QWidget):
         inst = self.instance_box.currentText() or "default"
         ver = self.version_box.currentText()
         if not ver:
-            InfoBar.info(tr("未选择版本"), tr("请先安装并选择一个版本"), parent=self,
+            InfoBar.info(tr("未选择版本"), tr("请先到「下载 → 原版游戏」安装一个版本"), parent=self,
                          position=InfoBarPosition.TOP, duration=2500)
             return
         dlg = VersionSetupDialog(self.backend, inst, ver, self)

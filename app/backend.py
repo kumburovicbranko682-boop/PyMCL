@@ -723,7 +723,7 @@ class BackendAPI(QObject):
             return already_msg
         ids = inst.installed_ids()
         if not ids:
-            raise LaunchError(tr("请先到「启动」页安装一个版本。"))
+            raise LaunchError(tr("还没有安装任何版本。请先到「下载 → 原版游戏」安装一个版本。"))
         version = max(ids, key=lambda vid: (inst.versions_dir() / vid).stat().st_mtime)
         host, port = terracotta_mod.split_join_url(url)
         acc = self.accounts.get_active()
@@ -1842,7 +1842,7 @@ class BackendAPI(QObject):
                           username, memory_mb, width, height, java=tr("自动选择"),
                           extra_game_args=None):
         if not version:
-            raise LaunchError(tr("请先选择版本（到「版本」页安装）"))
+            raise LaunchError(tr("请先选择版本；还没有版本时，到「下载 → 原版游戏」安装"))
         # 多开检查
         allow_multi = bool(CONFIG.get("allow_multi_instance", False))
         if not allow_multi and self.is_game_running():

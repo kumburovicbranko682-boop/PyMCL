@@ -1056,7 +1056,7 @@ def _install_plain_zip(dm: DownloadManager, tmpdir: Path, instance: Instance, pa
 
     loader_vid = None
     if not mc_version:
-        _emit(on_progress, "包里没有可识别的版本信息，未安装游戏版本，稍后请在版本页选择")
+        _emit(on_progress, "包里没有可识别的版本信息，未安装游戏版本，稍后请到「下载 → 原版游戏」安装")
     else:
         resolved = _resolve_pack_minecraft(dm, mc_version, on_progress) or mc_version
         _emit(on_progress, f"安装 Minecraft {resolved}")
