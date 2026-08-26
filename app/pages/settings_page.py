@@ -501,9 +501,17 @@ class SettingsPage(QWidget):
         self._apply_theme_now()
 
     def _on_theme_color_committed(self):
+        from PySide6.QtGui import QColor
         color = (self.color_edit.text() or "").strip() or "#2E9B6B"
         if not color.startswith("#"):
             color = "#" + color
+        # 「red」「zzz」这类输入会变成非法色值被静默应用，主题色悄悄坏掉
+        if not QColor(color).isValid():
+            InfoBar.warning(tr("主题色无效"),
+                            tr("请输入十六进制颜色，例如 #2E9B6B"),
+                            parent=self, position=InfoBarPosition.TOP,
+                            duration=4000)
+            return
         self.backend.save_settings({"theme_color": color})
         self._apply_theme_now()
 

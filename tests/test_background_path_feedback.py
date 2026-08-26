@@ -93,6 +93,26 @@ class BackgroundPathFeedbackTests(unittest.TestCase):
         self.assertEqual(self.sp.backend.get_setting("ui_background") or "", "")
         self.assertIn(tr("已恢复纯色背景"), _bar_texts(self.sp))
 
+    def test_4_invalid_theme_color_warns_and_keeps_config(self):
+        before = self.sp.backend.get_setting("theme_color") or "#2E9B6B"
+        self.sp.color_edit.setText("red")   # 会被拼成非法的 #red
+        self.sp._on_theme_color_committed()
+        _app.processEvents()
+        self.assertIn(tr("主题色无效"), _bar_texts(self.sp),
+                      "非法色值必须提示，不能悄悄写坏主题")
+        self.assertEqual(self.sp.backend.get_setting("theme_color") or "#2E9B6B",
+                         before, "非法色值不许落盘")
+
+    def test_5_valid_theme_color_applies(self):
+        self.sp.color_edit.setText("#3355AA")
+        self.sp._on_theme_color_committed()
+        _app.processEvents()
+        self.assertEqual(self.sp.backend.get_setting("theme_color"), "#3355AA")
+        # 恢复默认，避免污染同进程后续测试的主题
+        self.sp.color_edit.setText("#2E9B6B")
+        self.sp._on_theme_color_committed()
+        _app.processEvents()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
