@@ -1985,7 +1985,22 @@ class BackendAPI:
         src_l = (source or "").lower()
         log("整合包安装引擎：按声明的 Forge/Fabric 版本直装（不依赖残缺的 Maven 列表）")
 
-        if src_l.startswith("本地") or Path(str(path)).is_file():
+        url = str(extra.get("url") or "").strip()
+        if not url and str(path).strip().lower().startswith(("http://", "https://")):
+            url = str(path).strip()
+        if url:
+            base = url.split("?", 1)[0].lower()
+            log(f"从链接安装整合包: {url}")
+            log(f"实例: {inst.name}  路径: {inst.path}")
+            if base.endswith("server-manifest.json"):
+                log("识别为 HMCL 服务器整合包更新源（server-manifest.json）")
+                meta = modpack_mod.install_server_pack_url(
+                    dm, url, inst, on_progress=on_progress, cancel=dm.cancel)
+            elif base.endswith(".mrpack"):
+                meta = modpack_mod.install_mrpack(dm, url, inst, on_progress=on_progress, cancel=dm.cancel)
+            else:
+                meta = modpack_mod.install_cf_zip(dm, url, inst, on_progress=on_progress, cancel=dm.cancel)
+        elif src_l.startswith("本地") or Path(str(path)).is_file():
             p = Path(path)
             log(f"从本地文件安装: {p}")
             log(f"实例: {inst.name}  路径: {inst.path}")

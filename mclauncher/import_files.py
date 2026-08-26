@@ -61,7 +61,7 @@ def _zip_kind(path: Path) -> str:
             for parts, _raw in entries:
                 if len(parts) <= 2 and parts[-1].lower() in (
                         "modrinth.index.json", "mmc-pack.json", "instance.cfg",
-                        "mcbbs.packmeta"):
+                        "mcbbs.packmeta", "server-manifest.json"):
                     return "modpack"
             for parts, raw in entries:
                 if len(parts) <= 2 and parts[-1].lower() == "manifest.json":

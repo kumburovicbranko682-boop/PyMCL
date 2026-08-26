@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """整合包支持：Modrinth（.mrpack，含在线搜索）、CurseForge（.zip）、
 MultiMC / Prism Launcher 导出的实例包（mmc-pack.json）、
-MCBBS 规范整合包（mcbbs.packmeta，HMCL / PCL2 同款格式）。"""
+MCBBS 规范整合包（mcbbs.packmeta，HMCL / PCL2 同款格式）、
+HMCL 服务器整合包（server-manifest.json，支持远程安装与增量更新）。"""
 import json
 import os
 import re
@@ -213,6 +214,23 @@ def check_modpack_update(dm: DownloadManager, instance: Instance, api_key=None) 
             "force": bool(remote.get("forceUpdate")),
         }
 
+    if source == "server":
+        file_api = str(meta.get("file_api") or "").strip().rstrip("/")
+        if not file_api:
+            raise ModpackError(
+                "该服务器整合包没有记录 fileApi 更新源（server-manifest.json 里未填写），"
+                "无法在线检查更新")
+        remote = fetch_server_manifest(dm, file_api)
+        latest = str(remote.get("version") or "?")
+        game = parse_mcbbs_addons(remote).get("mc")
+        return {
+            "source": "server", "name": str(remote.get("name") or name),
+            "current": current, "latest": latest,
+            "current_id": None, "latest_id": None,
+            "update": latest != current, "url": file_api,
+            "mc_versions": [game] if game else [],
+        }
+
     raise ModpackError(
         f"整合包来源「{source or '未知'}」不支持在线检查更新"
         "（本地 zip / MultiMC 实例包没有更新源）"
@@ -244,6 +262,8 @@ def update_modpack(dm: DownloadManager, instance: Instance, on_progress=None,
             origin={"slug": info.get("slug"), "version_id": info.get("latest_id")})
     elif info.get("source") == "mcbbs":
         meta = update_mcbbs_pack(dm, instance, on_progress=on_progress, cancel=cancel)
+    elif info.get("source") == "server":
+        meta = update_server_pack(dm, instance, on_progress=on_progress, cancel=cancel)
     else:
         meta = install_cf_modpack(
             dm, info.get("addon_id"), instance, api_key=api_key,
@@ -1528,6 +1548,333 @@ def _install_mcbbs_pack(dm: DownloadManager, root: Path, instance: Instance, pac
     return pack_meta
 
 
+# ================================================================ HMCL 服务器整合包（server-manifest.json）
+
+SERVER_MANIFEST = "server-manifest.json"
+SERVER_FILES_NAME = "modpack.server-files.json"
+
+
+def _server_root(tmpdir: Path):
+    """找服务器整合包根（server-manifest.json 所在目录，可能套一层文件夹）。"""
+    if (tmpdir / SERVER_MANIFEST).is_file():
+        return tmpdir
+    return _nested_marker_root(tmpdir, SERVER_MANIFEST)
+
+
+def parse_server_files(mf: dict) -> list[dict]:
+    """server-manifest.json 的 files -> [{path, hash, url}]。
+
+    path 相对游戏目录（mods/xxx.jar、config/… 等），穿越条目直接丢弃。
+    新版 HMCL 会给能在 Modrinth / CurseForge 匹配到的文件写 downloadURL
+    直链（省服务器带宽），下载时优先用它。
+    """
+    out = []
+    for f in (mf or {}).get("files") or []:
+        if not isinstance(f, dict):
+            continue
+        rel = str(f.get("path") or "").replace("\\", "/").strip("/")
+        if not rel or ".." in rel.split("/"):
+            continue
+        out.append({
+            "path": rel,
+            "hash": str(f.get("hash") or "").strip().lower(),
+            "url": str(f.get("downloadURL") or f.get("downloadUrl") or "").strip(),
+        })
+    return out
+
+
+def server_files_path(instance: Instance) -> Path:
+    return Path(instance.path) / SERVER_FILES_NAME
+
+
+def read_server_hashes(instance: Instance) -> dict:
+    """读取上次安装/更新记录的 {相对路径: sha1}，供增量更新逐文件比对。"""
+    data = utils.read_json(server_files_path(instance), None)
+    files = data.get("files") if isinstance(data, dict) else None
+    if not isinstance(files, dict):
+        return {}
+    return {str(k): str(v or "").lower() for k, v in files.items()}
+
+
+def write_server_hashes(instance: Instance, files: list[dict]):
+    utils.write_json(server_files_path(instance),
+                     {"files": {f["path"]: f.get("hash") or "" for f in files}})
+
+
+def fetch_server_manifest(dm: DownloadManager, file_api: str) -> dict:
+    """拉取更新源上的 server-manifest.json（地址可以是基址或清单直链）。"""
+    base = str(file_api or "").strip()
+    if base.split("?", 1)[0].lower().endswith(SERVER_MANIFEST):
+        url = base
+    else:
+        url = f"{base.rstrip('/')}/{SERVER_MANIFEST}"
+    try:
+        data = dm.fetch_json(url, timeout=60)
+    except Exception as e:
+        raise ModpackError(f"获取服务器整合包清单失败（{url}）: {e}")
+    if not isinstance(data, dict):
+        raise ModpackError("更新源返回的 server-manifest.json 不是有效的 JSON 对象")
+    return data
+
+
+def _derive_file_api(mf: dict, source_url: str = "") -> str:
+    """文件下载基址：优先清单声明的 fileApi，否则按清单地址推导。"""
+    file_api = str((mf or {}).get("fileApi") or "").strip().rstrip("/")
+    if file_api or not source_url:
+        return file_api
+    base = str(source_url).split("?", 1)[0]
+    if base.lower().endswith(SERVER_MANIFEST):
+        base = base[: -len(SERVER_MANIFEST)]
+    return base.rstrip("/")
+
+
+def _server_file_urls(file_api: str, f: dict) -> list:
+    from urllib.parse import quote
+    urls = []
+    if f.get("url"):
+        urls.append(f["url"])
+    if file_api:
+        urls.append(f"{file_api}/overrides/{quote(f['path'])}")
+    return urls
+
+
+def _install_server_addons(dm: DownloadManager, instance: Instance, mf: dict,
+                           on_progress=None, cancel=None, force=False, java=None):
+    """按 addons 装原版 + 加载器（含 OptiFine / LiteLoader 附加组件）。
+
+    server-manifest.json 的 addons 与 MCBBS 规范同构（HMCL 用同一套
+    组件 id），直接复用解析器。返回 (version_id, mc_version, loader,
+    loader_version)。
+    """
+    parsed = parse_mcbbs_addons(mf)
+    if not parsed["mc"]:
+        raise ModpackError("server-manifest.json 的 addons 里没有 game（Minecraft 版本）")
+    installer = Installer(instance, dm, on_progress=on_progress or dm.on_progress, cancel=cancel)
+    mc_version = _resolve_pack_minecraft(dm, parsed["mc"], on_progress) or parsed["mc"]
+    _emit(on_progress, f"安装 Minecraft {mc_version}")
+    installer.install_version(mc_version, force=force, java=java)
+
+    loader = parsed["loader"]
+    loader_version = parsed["loader_version"]
+    loader_vid = None
+    if loader:
+        _emit(on_progress, f"安装加载器 {loader} {loader_version} (Minecraft {mc_version})")
+        loader_vid = install_loader(installer, loader, loader_version, mc_version, force=force)
+        _emit(on_progress, f"加载器安装完成: {loader_vid}")
+    for aid, ver in parsed["extras"]:
+        extra_vid = _install_mcbbs_extra(installer, instance, aid, ver, mc_version,
+                                         loader, on_progress=on_progress, force=force)
+        loader_vid = extra_vid or loader_vid
+    return (loader_vid or mc_version), mc_version, loader, loader_version
+
+
+def _server_pack_meta(mf: dict, instance: Instance, mc_version, loader,
+                      loader_version, file_api) -> dict:
+    meta = {
+        "name": str(mf.get("name") or "?"),
+        "version": str(mf.get("version") or "?"),
+        "mc_version": mc_version,
+        "loader": (f"{loader}-{loader_version}" if loader else "vanilla"),
+        "source": "server",
+        "instance": instance.name,
+    }
+    if mf.get("author"):
+        meta["author"] = str(mf.get("author"))
+    if file_api:
+        meta["file_api"] = file_api
+    return meta
+
+
+def _install_server_pack(dm: DownloadManager, root: Path, instance: Instance, pack_path,
+                         on_progress=None, cancel=None, force=False, java=None):
+    """安装服务器整合包本地 zip（server-manifest.json + overrides/，HMCL 同款格式）。
+
+    addons -> 装原版 + 加载器；overrides/ 落进游戏目录；files 里声明了
+    但包里没带的条目（新 HMCL 导出会把有直链的 mod 从 overrides 省掉）
+    按清单补下。fileApi 记进实例元数据，供后续在线增量更新。
+    """
+    mf = utils.read_json(root / SERVER_MANIFEST, None)
+    if not isinstance(mf, dict):
+        raise ModpackError("server-manifest.json 不是有效的 JSON 对象")
+    name = str(mf.get("name") or Path(pack_path).stem)
+    _emit(on_progress, f"识别为服务器整合包（HMCL server-manifest 格式）「{name}」版本 {mf.get('version', '?')}")
+
+    if instance.path.is_dir():
+        instance.ensure_standard_dirs()
+    else:
+        instance.create()
+    _emit(on_progress, f"安装到实例 {instance.name} ({instance.path})")
+
+    version_id, mc_version, loader, loader_version = _install_server_addons(
+        dm, instance, mf, on_progress=on_progress, cancel=cancel, force=force, java=java)
+
+    files = parse_server_files(mf)
+    file_api = _derive_file_api(mf)
+
+    pack_paths = [f["path"] for f in files]
+    overrides = root / "overrides"
+    if overrides.is_dir():
+        _emit(on_progress, "拷贝 overrides/（mods、config、资源等）")
+        _copy_tree_over(overrides, instance.path)
+        pack_paths.extend(_tree_rel_paths(overrides))
+
+    missing = [f for f in files
+               if (f.get("url") or file_api) and not (Path(instance.path) / f["path"]).is_file()]
+    if missing:
+        _emit(on_progress, f"按清单补齐包内未附带的文件（{len(missing)} 个）")
+        dm.download_all(
+            [(_server_file_urls(file_api, f), Path(instance.path) / f["path"],
+              f.get("hash") or None, None) for f in missing],
+            message="下载整合包文件")
+
+    pack_meta = _server_pack_meta(mf, instance, mc_version, loader, loader_version, file_api)
+    pack_meta["name"] = name
+    instance.set_meta("modpack", pack_meta)
+    instance.set_meta("mc_version", version_id)
+    write_pack_files(instance, pack_paths)
+    write_server_hashes(instance, files)
+    _emit(on_progress, f"整合包 {name} 安装完成 -> 实例 {instance.name}")
+    return pack_meta
+
+
+def install_server_pack_url(dm: DownloadManager, url, instance: Instance,
+                            on_progress=None, cancel=None, force=False, java=None):
+    """从更新源地址安装服务器整合包（HMCL ServerModpackRemoteInstallTask 同款）。
+
+    url 可以是 server-manifest.json 直链或其所在目录基址。
+    """
+    mf = fetch_server_manifest(dm, url)
+    return install_server_pack_manifest(dm, mf, instance, source_url=str(url),
+                                        on_progress=on_progress, cancel=cancel,
+                                        force=force, java=java)
+
+
+def install_server_pack_manifest(dm: DownloadManager, mf: dict, instance: Instance,
+                                 source_url="", on_progress=None, cancel=None,
+                                 force=False, java=None):
+    """按已取得的 server-manifest.json 清单远程安装：文件全部从
+    {fileApi}/overrides/{path}（或清单声明的直链）下载。"""
+    from . import diskspace
+    diskspace.ensure_free(instance.path, what="安装整合包")
+    file_api = _derive_file_api(mf, source_url)
+    files = parse_server_files(mf)
+    if not file_api and not all(f.get("url") for f in files):
+        raise ModpackError(
+            "server-manifest.json 没有声明 fileApi（文件下载基址），无法远程安装。"
+            "请让服务器管理员补上 fileApi，或改用带 overrides/ 的整合包 zip 安装。")
+    name = str(mf.get("name") or "?")
+    _emit(on_progress, f"识别为服务器整合包（HMCL server-manifest 格式）「{name}」版本 {mf.get('version', '?')}")
+
+    if instance.path.is_dir():
+        instance.ensure_standard_dirs()
+    else:
+        instance.create()
+    _emit(on_progress, f"安装到实例 {instance.name} ({instance.path})")
+
+    version_id, mc_version, loader, loader_version = _install_server_addons(
+        dm, instance, mf, on_progress=on_progress, cancel=cancel, force=force, java=java)
+
+    tasks = [(_server_file_urls(file_api, f), Path(instance.path) / f["path"],
+              f.get("hash") or None, None) for f in files]
+    if tasks:
+        _emit(on_progress, f"下载整合包文件（{len(tasks)} 个，hash 一致的自动跳过）")
+        dm.download_all(tasks, message="下载整合包文件")
+
+    pack_meta = _server_pack_meta(mf, instance, mc_version, loader, loader_version, file_api)
+    instance.set_meta("modpack", pack_meta)
+    instance.set_meta("mc_version", version_id)
+    write_pack_files(instance, [f["path"] for f in files])
+    write_server_hashes(instance, files)
+    _emit(on_progress, f"整合包 {name} 安装完成 -> 实例 {instance.name}")
+    return pack_meta
+
+
+def update_server_pack(dm: DownloadManager, instance: Instance,
+                       on_progress=None, cancel=None, java=None) -> dict:
+    """按 fileApi 增量更新服务器整合包（HMCL ServerModpackCompletionTask 同款）。
+
+    与远端清单逐文件比对：hash 变了且本地没被用户改过才重下，用户改过
+    的保留；被禁用（.disabled / .old）的 mod 不动；远端清单删掉的文件
+    本地一并删除；addons 变化由补装游戏/加载器兜住。
+    """
+    meta = (instance.meta() or {}).get("modpack") or {}
+    file_api = str(meta.get("file_api") or "").strip().rstrip("/")
+    if not file_api:
+        raise ModpackError("该服务器整合包没有记录 fileApi 更新源，无法在线更新")
+    mf = fetch_server_manifest(dm, file_api)
+    name = str(mf.get("name") or meta.get("name") or "?")
+    _emit(on_progress, f"按更新源同步服务器整合包「{name}」版本 {mf.get('version', '?')}")
+
+    version_id, mc_version, loader, loader_version = _install_server_addons(
+        dm, instance, mf, on_progress=on_progress, cancel=cancel, java=java)
+
+    old_hashes = read_server_hashes(instance)
+    files = parse_server_files(mf)
+    root = Path(instance.path)
+    mods_dir = root / "mods"
+    tasks, kept = [], []
+    for f in files:
+        dest = root / f["path"]
+        # 用户禁用 / 更新前备份的 mod 不重下（HMCL 同款语义）
+        if dest.parent == mods_dir and (
+                dest.with_name(dest.name + ".disabled").exists()
+                or dest.with_name(dest.name + ".old").exists()):
+            continue
+        old = old_hashes.get(f["path"], "")
+        new = f.get("hash") or ""
+        if f["path"] not in old_hashes or not dest.is_file():
+            download = True   # 新增条目 / 文件丢失：下载
+        elif new and old and new == old:
+            download = False  # 远端没变：不动（用户改过也保留）
+        elif new and old:
+            # 远端变了：只有本地仍是旧版原样时才替换，用户改过的保留
+            download = utils.sha1_file(dest).lower() == old
+            if not download:
+                kept.append(f["path"])
+        else:
+            download = True   # 缺 hash 信息，交给下载器（带 hash 一致会自动跳过）
+        if download:
+            tasks.append((_server_file_urls(file_api, f), dest, f.get("hash") or None, None))
+    if tasks:
+        _emit(on_progress, f"同步整合包文件（{len(tasks)} 个）")
+        dm.download_all(tasks, message="同步整合包文件")
+    if kept:
+        head = "、".join(kept[:5]) + ("…" if len(kept) > 5 else "")
+        _emit(on_progress, f"{len(kept)} 个文件被你手动改过，保留本地版本：{head}")
+
+    # 远端清单不再包含的旧文件删除（HMCL 同款）
+    remote_paths = {f["path"] for f in files}
+    removed = []
+    root_resolved = root.resolve()
+    for rel in old_hashes:
+        if rel in remote_paths:
+            continue
+        try:
+            rp = (root / rel).resolve()
+        except OSError:
+            continue
+        if not str(rp).startswith(str(root_resolved) + os.sep):
+            continue
+        if rp.is_file():
+            try:
+                rp.unlink()
+                removed.append(rel)
+            except OSError:
+                pass
+    if removed:
+        _emit(on_progress, f"已删除远端清单不再包含的文件 {len(removed)} 个")
+
+    pack_meta = _server_pack_meta(mf, instance, mc_version, loader, loader_version, file_api)
+    if pack_meta["name"] == "?":
+        pack_meta["name"] = name
+    instance.set_meta("modpack", pack_meta)
+    instance.set_meta("mc_version", version_id)
+    write_pack_files(instance, [f["path"] for f in files])
+    write_server_hashes(instance, files)
+    _emit(on_progress, f"整合包 {name} 同步完成 -> 实例 {instance.name}")
+    return pack_meta
+
+
 # ================================================================ CurseForge
 
 def download_pack_mods_tolerant(dm: DownloadManager, tasks, raw_files, meta,
@@ -1646,7 +1993,21 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
         try:
             utils.safe_extract_zip(pack_path, tmpdir)
         except (zipfile.BadZipFile, ValueError) as e:
+            # 不是 zip：链接可能直接指向 server-manifest.json 清单（HMCL 服务器整合包）
+            mf = utils.read_json(pack_path, None)
+            if isinstance(mf, dict) and isinstance(mf.get("files"), list) and mf.get("addons"):
+                _emit(on_progress, "链接内容是 server-manifest.json 清单，按服务器整合包远程安装")
+                return install_server_pack_manifest(
+                    dm, mf, instance, source_url=(str(source) if downloaded else ""),
+                    on_progress=on_progress, cancel=cancel, force=force, java=java)
             raise ModpackError(f"不是有效的整合包 zip: {e}")
+
+        server_root = _server_root(tmpdir)
+        if server_root is not None:
+            # HMCL 服务器整合包（server-manifest.json + overrides/）
+            return _install_server_pack(dm, server_root, instance, pack_path,
+                                        on_progress=on_progress, cancel=cancel,
+                                        force=force, java=java)
 
         mcbbs_root = _mcbbs_root(tmpdir)
         if mcbbs_root is not None:
