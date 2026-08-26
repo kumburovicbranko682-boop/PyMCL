@@ -6,7 +6,9 @@ from qfluentwidgets import (
 from PySide6.QtWidgets import QFormLayout, QWidget
 
 from mclauncher.gc import LABELS as GC_LABELS
-from mclauncher.version_settings import FULLSCREEN_MODES, ISOLATION_HINTS, ISOLATION_LABELS
+from mclauncher.version_settings import (
+    FULLSCREEN_MODES, ISOLATION_HINTS, ISOLATION_LABELS, PRIORITY_LABELS,
+)
 from mclauncher.i18n import tr
 from ..pcl_chrome import form_label, paint_theme_surfaces
 
@@ -131,9 +133,11 @@ class VersionSetupDialog(MessageBoxBase):
         self.post.setPlaceholderText(tr("退出后命令"))
         self.post.setText(data.get("post_launch") or "")
 
+        # 整个对话框都是人话，唯独这里曾直接摆出内部 token（low/normal/high）
         self.priority = ComboBox()
-        self.priority.addItems(["low", "normal", "high"])
-        self.priority.setCurrentText(data.get("process_priority") or "normal")
+        self.priority.addItems([tr(v) for v in PRIORITY_LABELS.values()])
+        cur_pri = data.get("process_priority") or "normal"
+        self.priority.setCurrentText(tr(PRIORITY_LABELS.get(cur_pri, PRIORITY_LABELS["normal"])))
 
         form.addRow(form_label(tr("隔离")), self.iso)
         form.addRow("", self.iso_hint)
@@ -207,7 +211,8 @@ class VersionSetupDialog(MessageBoxBase):
             "pre_launch": self.pre.text().strip(),
             "post_launch": self.post.text().strip(),
             "pre_launch_wait": self.wait.isChecked(),
-            "process_priority": self.priority.currentText(),
+            "process_priority": {tr(v): k for k, v in PRIORITY_LABELS.items()}.get(
+                self.priority.currentText(), "normal"),
             "login_account": login,
             "nide8_id": self.nide8.text().strip(),
             "auth_server": self.auth_server.text().strip(),

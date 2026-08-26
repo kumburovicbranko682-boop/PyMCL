@@ -31,6 +31,14 @@ ISOLATION_HINTS = {
 SHARED_LINKS = ("mods", "config", "resourcepacks", "shaderpacks", "downloads")
 SAVES_LINKS = ("saves",)
 
+# 进程优先级的界面叫法：存的是内部 token（low/normal/high），
+# 不能把 token 直接摆给用户看。
+PRIORITY_LABELS = {
+    "low": "低（给其他程序让路）",
+    "normal": "正常",
+    "high": "高（游戏优先占用 CPU）",
+}
+
 DEFAULTS = {
     "isolation": ISOLATION_NONE,
     "memory_mb": None,
