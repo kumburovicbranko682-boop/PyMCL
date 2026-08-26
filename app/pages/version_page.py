@@ -173,8 +173,13 @@ class VersionPage(QWidget):
                 item = self.grid.takeAt(0)
                 if item.widget():
                     item.widget().deleteLater()
+            # InfoBar 4 秒就带着原因消失了；空状态要留住原因，并给一条
+            # 出路——以前这里只有一句死话，用户只能自己摸索着换页再回来。
             self.grid.addWidget(
-                EmptyState(FIF.INFO, tr("版本列表加载失败")), 0, 0)
+                EmptyState(FIF.INFO,
+                           tr("版本列表加载失败") + "\n" + msg[:100],
+                           action_text=tr("重试"), on_action=self.reload),
+                0, 0)
             self._cols = 1
 
     def reload_installed_only(self):
