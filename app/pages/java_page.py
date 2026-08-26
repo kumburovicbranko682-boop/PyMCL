@@ -64,6 +64,7 @@ class JavaPage(QWidget):
         self.setObjectName("javaPage")
         self.backend = backend
         self._vendors = []
+        self._auto_scanned = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 20, 28, 20)
@@ -133,9 +134,18 @@ class JavaPage(QWidget):
 
     def reload(self, scan_system: bool = False):
         local = self.backend.get_java_list(scan_system=False)
-        self._fill(local)
-        if not scan_system:
+        if not local and not scan_system and not self._auto_scanned:
+            # 启动器自己还没装过 Java 时别急着宣布「未检测到」——
+            # 本机可能装着系统 Java，先在后台扫一遍再下结论。
+            self._auto_scanned = True
+            self._show_scanning()
+            self._scan_async()
             return
+        self._fill(local)
+        if scan_system:
+            self._scan_async()
+
+    def _scan_async(self):
         call_async = getattr(self.backend, "call_async", None)
         if callable(call_async):
             call_async(
@@ -150,6 +160,8 @@ class JavaPage(QWidget):
             self._on_scan_err(exc)
 
     def _on_scan_err(self, err):
+        # 扫描挂了不能让「正在扫描…」一直挂着，落到诚实的空状态
+        self._fill([])
         InfoBar.error(
             tr("扫描 Java 失败"),
             str(err or tr("未知错误")),
@@ -158,14 +170,24 @@ class JavaPage(QWidget):
             duration=4000,
         )
 
-    def _fill(self, javas):
+    def _clear_env(self):
         while self.env_layout.count():
             item = self.env_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+
+    def _show_scanning(self):
+        self._clear_env()
+        self.env_layout.addWidget(EmptyState(FIF.SEARCH, tr("正在扫描本机 Java…")))
+
+    def _fill(self, javas):
+        self._clear_env()
         javas = list(javas or [])
         if not javas:
-            self.env_layout.addWidget(EmptyState(FIF.CODE, tr("未检测到 Java，请从下方下载")))
+            self.env_layout.addWidget(EmptyState(
+                FIF.CODE, tr("本机没有找到 Java——从下方选一个版本下载即可"),
+                action_text=tr("重新检测"),
+                on_action=lambda: self.reload(scan_system=True)))
             return
         for j in javas:
             self.env_layout.addWidget(JavaCard(j))
