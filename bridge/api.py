@@ -1411,10 +1411,21 @@ class BackendAPI:
 
         return {"ok": False, "message": f"未知动作: {aid}"}
 
-    def export_modpack(self, instance: str, dest: str = "", fmt: str = "mrpack") -> str:
-        """导出整合包。fmt: "mrpack"（Modrinth）或 "curseforge"（manifest.json zip）。"""
+    def export_modpack(self, instance: str, dest: str = "", fmt: str = "mrpack",
+                       include=None, meta=None) -> str:
+        """导出整合包。fmt: mrpack / curseforge / multimc。
+
+        include 为勾选的顶层条目列表（None = 默认集合）；meta 可覆盖
+        名称 / 版本 / 作者（HMCL 导出向导同款）。"""
         return self.start_task(
-            f"导出整合包 {instance}", self._export_pack_impl, instance, dest, fmt)
+            f"导出整合包 {instance}", self._export_pack_impl, instance, dest, fmt,
+            include, meta)
+
+    def export_pack_info(self, instance: str) -> dict:
+        """导出向导数据：{meta: 预填名称/版本/作者, items: 可勾选文件清单}。"""
+        from mclauncher.export_pack import _pack_meta, list_export_candidates
+        inst = self._instance(instance)
+        return {"meta": _pack_meta(inst), "items": list_export_candidates(inst)}
 
     def check_modpack_update(self, instance: str) -> dict:
         """检查实例整合包是否有新版本（Modrinth / CurseForge）。"""
@@ -2279,22 +2290,27 @@ class BackendAPI:
         installer = Installer(inst, dm, on_progress=dm.on_progress, cancel=dm.cancel)
         return repair(installer, version)
 
-    def _export_pack_impl(self, progress, log, instance, dest, fmt="mrpack"):
+    def _export_pack_impl(self, progress, log, instance, dest, fmt="mrpack",
+                          include=None, meta=None):
         from mclauncher.export_pack import export_cf_zip, export_mmc_zip, export_mrpack
         inst = self._instance(instance)
         dm = self._dm(progress, log)
         kind = str(fmt or "mrpack").lower()
+        note = lambda m, a, b: progress(a, b, m)
         if kind in ("curseforge", "cf", "zip"):
             if not dest:
                 dest = str(utils.ROOT / "exports" / f"{inst.name}-curseforge.zip")
-            return export_cf_zip(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))
+            return export_cf_zip(inst, dest, dm=dm, on_note=note,
+                                 include=include, meta_override=meta)
         if kind in ("multimc", "mmc", "prism"):
             if not dest:
                 dest = str(utils.ROOT / "exports" / f"{inst.name}-multimc.zip")
-            return export_mmc_zip(inst, dest, on_note=lambda m, a, b: progress(a, b, m))
+            return export_mmc_zip(inst, dest, on_note=note,
+                                  include=include, meta_override=meta)
         if not dest:
             dest = str(utils.ROOT / "exports" / f"{inst.name}.mrpack")
-        return export_mrpack(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))
+        return export_mrpack(inst, dest, dm=dm, on_note=note,
+                             include=include, meta_override=meta)
 
     def _mod_update_impl(self, progress, log, instance):
         from mclauncher.mod_update import apply_update, check_updates

@@ -259,18 +259,27 @@ class InstancePage(QWidget):
             failed(e)
 
     def export_pack(self, name: str):
-        items = [tr("Modrinth 整合包 (.mrpack)"), tr("CurseForge 整合包 (.zip)"),
-                 tr("MultiMC / Prism 实例 (.zip)")]
-        dlg = ComboDialog(tr("导出整合包"), tr("选择导出格式"), items=items,
-                          current=items[0], parent=self.window())
-        if not dlg.exec():
+        from .export_dialog import ExportPackDialog
+
+        def open_dlg(info):
+            dlg = ExportPackDialog(info, parent=self.window())
+            if not dlg.exec():
+                return
+            p = dlg.payload()
+            self.backend.export_modpack(name, fmt=p["fmt"],
+                                        include=p["include"], meta=p["meta"])
+
+        def failed(msg):
+            MessageBox(tr("导出整合包"), str(msg or tr("未知错误")), self.window()).exec()
+
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(lambda: self.backend.export_pack_info(name), open_dlg, failed)
             return
-        fmt = "mrpack"
-        if dlg.value() == items[1]:
-            fmt = "curseforge"
-        elif dlg.value() == items[2]:
-            fmt = "multimc"
-        self.backend.export_modpack(name, fmt=fmt)
+        try:
+            open_dlg(self.backend.export_pack_info(name))
+        except Exception as e:
+            failed(e)
 
     def pick_java(self, name: str):
         if self._picking_java:
