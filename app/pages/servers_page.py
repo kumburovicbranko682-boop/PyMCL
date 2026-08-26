@@ -160,18 +160,18 @@ class ServerPage(QWidget):
             self.table.setCellWidget(i, 4, btn_w)
 
     def _on_add(self):
-        dlg = InputDialog(tr("添加服务器"), tr("服务器名称"), placeholder=tr("可选"))
+        # 一个对话框收齐三项，别让人连过三个模态框才能加一台服务器。
+        dlg = InputDialog(tr("添加服务器"), parent=self, fields=[
+            {"label": tr("服务器地址"), "placeholder": tr("example.com 或 IP")},
+            {"label": tr("服务器名称"), "placeholder": tr("可选，留空就用地址")},
+            {"label": tr("端口"), "text": "25565", "placeholder": tr("默认 25565")},
+        ])
         if not dlg.exec():
             return
-        name = dlg.value()
-        ip_dlg = InputDialog(tr("添加服务器"), tr("服务器地址"), placeholder=tr("example.com 或 IP"))
-        if not ip_dlg.exec():
+        ip, name, port_text = dlg.values()
+        if not ip:
+            InfoBar.error(tr("缺少地址"), tr("服务器地址不能为空"), duration=3000, parent=self)
             return
-        ip = ip_dlg.value()
-        port_dlg = InputDialog(tr("添加服务器"), tr("端口"), text="25565", placeholder=tr("默认 25565"))
-        if not port_dlg.exec():
-            return
-        port_text = port_dlg.value()
         port = int(port_text) if _PORT_RE.match(port_text) else 25565
         try:
             self.backend.add_server(self._instance, name, ip, port)
@@ -182,14 +182,16 @@ class ServerPage(QWidget):
 
     def _on_edit(self, index: int):
         s = self._servers[index]
-        dlg = InputDialog(tr("编辑服务器"), tr("服务器名称"), text=s.get("name", ""))
+        dlg = InputDialog(tr("编辑服务器"), parent=self, fields=[
+            {"label": tr("服务器地址"), "text": s.get("ip", "")},
+            {"label": tr("服务器名称"), "text": s.get("name", "")},
+        ])
         if not dlg.exec():
             return
-        name = dlg.value()
-        ip_dlg = InputDialog(tr("编辑服务器"), tr("服务器地址"), text=s.get("ip", ""))
-        if not ip_dlg.exec():
+        ip, name = dlg.values()
+        if not ip:
+            InfoBar.error(tr("缺少地址"), tr("服务器地址不能为空"), duration=3000, parent=self)
             return
-        ip = ip_dlg.value()
         try:
             self.backend.update_server(self._instance, index, name=name, ip=ip,
                                        port=s.get("port", 25565))

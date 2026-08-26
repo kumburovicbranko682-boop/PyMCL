@@ -15,19 +15,25 @@ from mclauncher.i18n import tr
 
 
 class InputDialog(MessageBoxBase):
-    """Fluent 风格的单行输入对话框。"""
+    """Fluent 风格的输入对话框。默认单行；传 fields 可一框收齐多项，
+    免得像旧版「添加服务器」那样把名称/地址/端口拆成三连弹窗。"""
 
     def __init__(self, title: str, label: str = "", text: str = "",
-                 placeholder: str = "", parent=None):
+                 placeholder: str = "", parent=None, fields=None):
         super().__init__(parent)
         self.viewLayout.addWidget(SubtitleLabel(title, self))
-        if label:
-            self.viewLayout.addWidget(BodyLabel(label, self))
-        self.edit = LineEdit(self)
-        self.edit.setText(text)
-        if placeholder:
-            self.edit.setPlaceholderText(placeholder)
-        self.viewLayout.addWidget(self.edit)
+        self.edits = []
+        for spec in (fields or [{"label": label, "text": text,
+                                 "placeholder": placeholder}]):
+            if spec.get("label"):
+                self.viewLayout.addWidget(BodyLabel(spec["label"], self))
+            edit = LineEdit(self)
+            edit.setText(spec.get("text", ""))
+            if spec.get("placeholder"):
+                edit.setPlaceholderText(spec["placeholder"])
+            self.viewLayout.addWidget(edit)
+            self.edits.append(edit)
+        self.edit = self.edits[0]
         self.yesButton.setText(tr("确定"))
         self.cancelButton.setText(tr("取消"))
         self.widget.setMinimumWidth(380)
@@ -35,6 +41,9 @@ class InputDialog(MessageBoxBase):
 
     def value(self) -> str:
         return self.edit.text().strip()
+
+    def values(self) -> list[str]:
+        return [e.text().strip() for e in self.edits]
 
 
 def prompt_feedback_consent(parent) -> bool:
