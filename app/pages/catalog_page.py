@@ -130,7 +130,9 @@ class PclResultRow(QFrame):
         layout.addLayout(info, 1)
 
         btn = PushButton(tr("选择版本"))
-        btn.setFixedSize(88, 30)
+        # 定高不定宽：英文 “Select Version” 在 88px 里两头被裁成 “elect Versio”
+        btn.setFixedHeight(30)
+        btn.setMinimumWidth(88)
         btn.setStyleSheet(ghost_btn_qss())
         btn.clicked.connect(lambda: on_install(item, btn))
         layout.addWidget(btn)
@@ -348,11 +350,14 @@ class PclCatalogPage(QWidget):
 
         btns = QHBoxLayout()
         btns.addStretch(1)
+        # 同「选择版本」：定高不定宽，否则英文 “Reset conditions” 被裁成 “et conditi”
         self.search_btn = PushButton(tr("搜索"))
-        self.search_btn.setFixedSize(88, 32)
+        self.search_btn.setFixedHeight(32)
+        self.search_btn.setMinimumWidth(88)
         self.search_btn.setStyleSheet(ghost_btn_qss())
         self.reset_btn = PushButton(tr("重置条件"))
-        self.reset_btn.setFixedSize(88, 32)
+        self.reset_btn.setFixedHeight(32)
+        self.reset_btn.setMinimumWidth(88)
         btns.addWidget(self.search_btn)
         btns.addSpacing(12)
         btns.addWidget(self.reset_btn)
@@ -418,7 +423,8 @@ class PclCatalogPage(QWidget):
         lab = QLabel(text)
         lab.setStyleSheet(f"color: {Theme.muted}; font-size: 12px; background: transparent;")
         lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        lab.setFixedWidth(40)
+        # 最小宽保持两列表单对齐；定宽会把英文 “Version” 裁成 “ersion”
+        lab.setMinimumWidth(40)
         return lab
 
     def _current_instance(self) -> str:
