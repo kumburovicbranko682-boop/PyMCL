@@ -4,10 +4,14 @@
 侧栏里没有「版本」页，启动页也装不了版本——正确路标只有一个：
 「下载 → 原版游戏」。本测试静态扫描 Qt 产品线源码，防止错误路标回潮，
 并保证统一后的新句子进了英文目录。
+
+另外钉住：内部文件名（config.json 这类实现细节）不得出现在
+用户可见文案里——文件选择框的扩展名过滤器除外。
 """
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -61,6 +65,21 @@ class WayfindingCopyTests(unittest.TestCase):
         for key in EN_REQUIRED:
             self.assertIn(key, data)
             self.assertTrue(str(data[key]).strip())
+
+    def test_no_internal_filenames_in_visible_copy(self):
+        """tr("…config.json…") 是把实现细节亮给用户，禁止。"""
+        pattern = re.compile(r'tr\("[^"]*config\.json[^"]*"\)')
+        bad = []
+        for f in (ROOT / "app").rglob("*.py"):
+            for m in pattern.finditer(f.read_text("utf-8", errors="replace")):
+                bad.append(f"{f.relative_to(ROOT)}: {m.group(0)}")
+        self.assertEqual(bad, [], "用户可见文案里出现了内部文件名")
+
+    def test_settings_saved_copy_states_effect(self):
+        data = json.loads((ROOT / "mclauncher" / "locales" / "en.json")
+                          .read_text("utf-8"))
+        self.assertIn("设置已生效", data)
+        self.assertTrue(str(data["设置已生效"]).strip())
 
 
 if __name__ == "__main__":

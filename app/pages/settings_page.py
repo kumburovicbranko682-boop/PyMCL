@@ -660,7 +660,9 @@ class SettingsPage(QWidget):
         # 界面文本在各页构造时就已取好，切语言不会自动重排，得让用户重开
         lang_changed = lang != i18n.current_language()
         i18n.set_language(lang)
-        InfoBar.success(tr("已保存"), tr("设置已写入 config.json"), parent=self,
+        # 「写入 config.json」是内部实现细节，用户关心的是设置立刻生效
+        # （下方紧接 apply_theme + 启动页 reload，说「已生效」是真话）。
+        InfoBar.success(tr("已保存"), tr("设置已生效"), parent=self,
                         position=InfoBarPosition.TOP, duration=2500)
         if lang_changed:
             self._offer_language_restart()

@@ -978,5 +978,6 @@
   "加载更多（还有 {0}）": "Load more ({0} left)",
   "实例 {0}": "Instance {0}",
   "实例 {0} · 点击「启动游戏」进入世界": "Instance {0} · press “Launch Game” to play",
-  "未检测到 Java：可重新检测本机，或从下方下载": "No Java found: rescan this machine, or download one below"
+  "未检测到 Java：可重新检测本机，或从下方下载": "No Java found: rescan this machine, or download one below",
+  "设置已生效": "Settings applied"
 }
