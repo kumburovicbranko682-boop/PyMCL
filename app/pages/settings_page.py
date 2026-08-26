@@ -99,6 +99,9 @@ class SettingsPage(QWidget):
             tr("安装新版本时写入该版本的隔离模式，可稍后在版本设置改"),
             list(iso_map.values()),
             iso_map.get(settings.get("default_isolation") or "none", iso_map["none"]))
+        # 档位名是行话：说明文字跟着当前选择实时解释会发生什么
+        self.iso_box.currentTextChanged.connect(self._update_iso_desc)
+        self._update_iso_desc()
         iso_group.addSettingCard(self.iso_card)
         game_card = SettingCard(FIF.FOLDER, tr("游戏目录"), tr("实例与版本所在文件夹"))
         self.game_dir = LineEdit(game_card)
@@ -693,6 +696,12 @@ class SettingsPage(QWidget):
                           position=InfoBarPosition.TOP, duration=5000)
             return
         QApplication.instance().quit()
+
+    def _update_iso_desc(self, *_):
+        from mclauncher.version_settings import ISOLATION_HINTS
+        mode = self._iso_keys.get(self.iso_box.currentText(), "none")
+        hint = tr(ISOLATION_HINTS.get(mode, ""))
+        self.iso_card.setContent(hint + tr("；安装新版本时写入，可稍后在版本设置改"))
 
     def _browse_game(self):
         path = QFileDialog.getExistingDirectory(self, tr("选择游戏目录"), self.game_dir.text())

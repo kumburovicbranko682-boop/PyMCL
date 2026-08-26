@@ -20,6 +20,14 @@ ISOLATION_LABELS = {
     ISOLATION_MODS: "隔离 Mod 与配置",
     ISOLATION_ALL: "隔离全部",
 }
+# 每档隔离实际发生什么（和 apply_isolation 的行为一一对应），
+# UI 在档位旁边展示，用户不用猜「隔离」是什么意思。
+ISOLATION_HINTS = {
+    ISOLATION_NONE: "存档 / Mod / 配置与实例内其它版本共用",
+    ISOLATION_SAVES: "存档独立；Mod / 配置 / 资源包仍与实例共用",
+    ISOLATION_MODS: "Mod 与配置独立；存档 / 资源包 / 截图仍与实例共用",
+    ISOLATION_ALL: "存档 / Mod / 配置 / 资源包全部独立",
+}
 SHARED_LINKS = ("mods", "config", "resourcepacks", "shaderpacks", "downloads")
 SAVES_LINKS = ("saves",)
 
