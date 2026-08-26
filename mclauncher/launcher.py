@@ -11,6 +11,7 @@ from . import manifest, utils
 from .argsplit import split_args
 from .config import CONFIG
 from .downloader import DownloadError
+from .i18n import _ as tr
 from .installer import extract_natives, natives_present, select_native_classifier
 
 
@@ -87,9 +88,8 @@ def _coerce_java_exe(resolved, java_exe):
             return str(cand)
     got = java_mod.get_java_major(java_exe) if java_exe else None
     raise LaunchError(
-        f"Java {got or '?'} 无法启动此版本（需要 Java {need}+）。"
-        "Forge 1.17+ 会向 JVM 传入 --module-path，Java 8 会报 Unrecognized option: -p。"
-        f"请到「下载 → Java」安装 Java {need}，启动页 Java 选「自动选择」。"
+        tr("Java {0} 无法启动此版本（需要 Java {1} 或更高）。"
+           "请到「下载 → Java」安装 Java {1}，并在启动页把 Java 设为「自动选择」。").format(got or "?", need)
     )
 
 
@@ -243,12 +243,12 @@ def build_launch_command(instance, version_id, account_props, java_exe,
     """
     vjson = instance.version_json(version_id)
     if not vjson:
-        raise LaunchError(f"版本 {version_id} 未安装，请先安装。")
+        raise LaunchError(tr("版本 {0} 未安装：请到「下载 → 原版游戏」安装。").format(version_id))
 
     def load_parent(pid):
         p = instance.version_json(pid)
         if not p:
-            raise LaunchError(f"缺少被继承的父版本 {pid}，请重新安装 {version_id}。")
+            raise LaunchError(tr("缺少被继承的父版本 {0}：请到「下载 → 原版游戏」重新安装 {1}。").format(pid, version_id))
         return p
 
     try:
@@ -261,7 +261,7 @@ def build_launch_command(instance, version_id, account_props, java_exe,
     vdir = instance.versions_dir() / version_id
     jar = _client_jar_path(instance, version_id, vjson, resolved)
     if not jar.is_file():
-        raise LaunchError(f"客户端 jar 缺失: {jar}\n请重新安装版本 {version_id}。")
+        raise LaunchError(tr("客户端 jar 缺失: {0}\n请到「下载 → 原版游戏」的「已安装版本」选中 {1} 后点修复。").format(jar, version_id))
 
     assets_idx = resolved.get("assetIndex") or {}
     assets_id = assets_idx.get("id", "legacy")
@@ -275,7 +275,7 @@ def build_launch_command(instance, version_id, account_props, java_exe,
     )
     if needs_natives and not natives_present(natives_dir):
         raise LaunchError(
-            "缺少 LWJGL 本地库（natives）。请重新安装该 Minecraft 版本后再启动。"
+            tr("缺少 LWJGL 本地库（natives）。请到「下载 → 原版游戏」的「已安装版本」选中该版本后点修复。")
         )
 
     # ---- classpath（同名库保留后出现的路径，位置仍在第一次出现处）
@@ -402,7 +402,8 @@ def build_launch_command(instance, version_id, account_props, java_exe,
     major = java_mod.get_java_major(java_exe)
     if major is not None and major < 9 and any(a in ("-p", "--module-path", "--add-modules") for a in cmd):
         raise LaunchError(
-            f"拒绝用 Java {major} 启动：命令含模块参数。请改用 Java 17。"
+            tr("Java {0} 太旧，无法启动此版本。请到「下载 → Java」安装 Java 17，"
+               "并在启动页把 Java 设为「自动选择」。").format(major)
         )
     return cmd, natives_dir, vdir, game_directory or instance.path
 

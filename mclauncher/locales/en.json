@@ -1153,5 +1153,11 @@
   "可能缺少模组依赖": "Possibly missing mod dependencies",
   "（若实际由其它 jar 提供可忽略）": "(ignore if another jar actually provides it)",
   "{0} 需要 Fabric API": "{0} needs Fabric API",
-  "{0} 缺少 {1}": "{0} is missing {1}"
+  "{0} 缺少 {1}": "{0} is missing {1}",
+  "Java {0} 无法启动此版本（需要 Java {1} 或更高）。请到「下载 → Java」安装 Java {1}，并在启动页把 Java 设为「自动选择」。": "Java {0} cannot launch this version (Java {1} or newer required). Install Java {1} under Download → Java, then set Java to \"Auto select\" on the Launch page.",
+  "版本 {0} 未安装：请到「下载 → 原版游戏」安装。": "Version {0} is not installed. Install it under Download → Vanilla.",
+  "缺少被继承的父版本 {0}：请到「下载 → 原版游戏」重新安装 {1}。": "Missing inherited parent version {0}. Reinstall {1} under Download → Vanilla.",
+  "客户端 jar 缺失: {0}\n请到「下载 → 原版游戏」的「已安装版本」选中 {1} 后点修复。": "Client jar missing: {0}\nOpen Download → Vanilla → Installed versions, select {1} and click Repair.",
+  "缺少 LWJGL 本地库（natives）。请到「下载 → 原版游戏」的「已安装版本」选中该版本后点修复。": "LWJGL native libraries are missing. Open Download → Vanilla → Installed versions, select this version and click Repair.",
+  "Java {0} 太旧，无法启动此版本。请到「下载 → Java」安装 Java 17，并在启动页把 Java 设为「自动选择」。": "Java {0} is too old to launch this version. Install Java 17 under Download → Java, then set Java to \"Auto select\" on the Launch page."
 }
