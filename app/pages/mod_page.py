@@ -126,7 +126,8 @@ class ModManagerPage(QWidget):
         bar.addStretch(1)
         self.folder_btn = TransparentPushButton(FIF.FOLDER, tr("打开 mods 文件夹"))
         self.import_btn = TransparentPushButton(FIF.ADD, tr("导入 jar"))
-        self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
+        # 后端任务会把查到的更新直接装上（_mod_update_impl），按钮名要说实话
+        self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查并更新"))
         for b in (self.folder_btn, self.import_btn, self.update_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
@@ -313,6 +314,15 @@ class ModManagerPage(QWidget):
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+            return
+        win = self.window()
+        if hasattr(win, "fly_to_tasks"):
+            win.fly_to_tasks(self.update_btn, tr("更新"))
+        InfoBar.success(
+            tr("已开始检查并更新"),
+            tr("进度见「下载任务」；查到的更新会直接装进 mods 文件夹"),
+            parent=self, position=InfoBarPosition.TOP, duration=4000,
+        )
 
     # ------------------------------------------------------------------
     def dragEnterEvent(self, event):
