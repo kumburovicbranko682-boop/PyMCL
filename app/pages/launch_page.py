@@ -345,6 +345,11 @@ class LaunchPage(QWidget):
         self.version_box.addItems(ids)
         if cur in ids:
             self.version_box.setCurrentText(cur)
+        else:
+            # 重开启动器：恢复上次启动的版本，而不是落在字母序第一个
+            last = str(CONFIG.get("last_version") or "")
+            if last in ids:
+                self.version_box.setCurrentText(last)
         self.version_box.blockSignals(False)
         self._sync_banner()
 

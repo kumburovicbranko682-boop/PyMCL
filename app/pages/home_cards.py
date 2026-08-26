@@ -147,7 +147,8 @@ class ConfigBody(QWidget):
         page.java_box = ComboBox()
         page.username_edit = LineEdit()
         page.username_edit.setPlaceholderText(tr("离线用户名"))
-        page.username_edit.setText("Player")
+        # 恢复上次启动用的名字：离线玩家不该每次开启动器都重打一遍
+        page.username_edit.setText(str(CONFIG.get("offline_username") or "").strip() or "Player")
 
         page.memory_slider = Slider(Qt.Horizontal)
         page.memory_slider.setRange(512, 32768)

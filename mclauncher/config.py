@@ -10,6 +10,9 @@ DEFAULT_CONFIG = {
     # 实例目录名（相对于启动器主目录）。与 PCL/HMCL 一样用 .minecraft
     "instances_dir": ".minecraft",
     "default_instance": "default",
+    # 上次启动选中的版本 / 离线用户名：重开启动器时原样恢复，不让人重选
+    "last_version": "",
+    "offline_username": "",
     # Java 运行时目录名（所有实例共享）
     "java_dir": "java",
     # 版本隔离选项：False 时每个实例拥有独立的 libraries/assets；True 时共享以节省空间

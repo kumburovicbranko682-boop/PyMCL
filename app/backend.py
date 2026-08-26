@@ -744,6 +744,16 @@ class BackendAPI(QObject):
             extra_game_args=["--server", host, "--port", str(port)],
         )
 
+    def remember_launch_choices(self, instance: str, version: str, username: str = ""):
+        """记住这次启动的实例/版本/离线用户名，下次开启动器直接恢复。"""
+        CONFIG.set("default_instance", instance)
+        if version:
+            CONFIG.set("last_version", version)
+        name = (username or "").strip()
+        if name:
+            CONFIG.set("offline_username", name)
+        CONFIG.save()
+
     def launch_game(self, instance: str, version: str, account: str,
                     username: str, memory_mb: int, width: int, height: int,
                     java: str = tr("自动选择"), extra_game_args=None) -> str:
@@ -1873,8 +1883,7 @@ class BackendAPI(QObject):
         inst = self._instance(instance)
         log(f"实例: {inst.name} | 版本: {version}")
         log(f"实例 Java 设置: {inst.java_pref()}")
-        CONFIG.set("default_instance", inst.name)
-        CONFIG.save()
+        self.remember_launch_choices(inst.name, version, username)
         from mclauncher import launch_flow, version_settings as vs
         bound = vs.load(inst, version).get("login_account") or ""
         if bound:
