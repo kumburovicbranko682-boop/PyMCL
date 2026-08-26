@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 
+from mclauncher.i18n import tr
+
 from .client import AIClientError, chat_once, chat_stream
 from .defaults import DANGEROUS_TOOLS, LONG_TOOLS, MAX_HISTORY, MAX_TOOL_ROUNDS
 from .prompt import system_prompt
@@ -198,7 +200,7 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
                         "装游戏 → install_game（纯原版 loader=无）。不要结束对话。"
                     )
                     if on_status:
-                        on_status("tool_done", {"name": tname, "label": "已选择", "result": str(result)[:400]})
+                        on_status("tool_done", {"name": tname, "label": tr("已选择"), "result": str(result)[:400]})
             elif tname in SEARCH_TOOLS:
                 qkey = (tname, str(args.get("query") or "").strip().lower())
                 if qkey in search_done:
@@ -208,7 +210,7 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
                         "禁止再搜同一词。立刻 ask_user 让用户选，或说明没找到。"
                     )
                     if on_status:
-                        on_status("tool_skip", {"name": tname, "label": "拦截重复搜索"})
+                        on_status("tool_skip", {"name": tname, "label": tr("拦截重复搜索")})
                     need_pick = True
                 else:
                     if on_status:

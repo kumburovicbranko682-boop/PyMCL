@@ -385,25 +385,29 @@ def _search_modpacks(backend, query, source):
 
 
 def confirm_label(name: str, args: dict) -> str:
-    inst = args.get("instance") or "默认实例"
+    """确认卡片 / 工具状态行上给用户看的文案，必须跟随界面语言。"""
+    from mclauncher.i18n import tr
+    inst = args.get("instance") or tr("默认实例")
     mapping = {
-        "install_game": f"安装游戏 {args.get('version')} {args.get('loader') or ''} → {inst}",
-        "install_mod": f"安装模组 {args.get('name')} → {inst}",
-        "install_modpack": f"安装整合包 {args.get('name')} → {inst}",
-        "install_shader": f"安装光影 {args.get('name')} → {inst}",
-        "install_resourcepack": f"安装资源包 {args.get('name')} → {inst}",
-        "install_datapack": f"安装数据包 {args.get('name')} → {inst}",
-        "download_java": f"下载 Java {args.get('major')}",
-        "launch_game": f"启动 {args.get('version') or '当前版本'} @ {inst}",
-        "create_instance": f"新建实例 {args.get('name')}",
-        "delete_instance": f"删除实例 {args.get('name')}（不可恢复）",
-        "delete_mod": f"删除模组 {args.get('filename')} @ {inst}",
-        "disable_mod": f"禁用模组 {args.get('filename')} @ {inst}",
-        "enable_mod": f"启用模组 {args.get('filename')} @ {inst}",
-        "write_mod_config": f"改配置 {args.get('path')} @ {inst}",
-        "ask_user": (args.get("prompt") or args.get("title") or "请选择"),
+        "install_game": tr("安装游戏 {0} {1} → {2}").format(
+            args.get("version"), args.get("loader") or "", inst),
+        "install_mod": tr("安装模组 {0} → {1}").format(args.get("name"), inst),
+        "install_modpack": tr("安装整合包 {0} → {1}").format(args.get("name"), inst),
+        "install_shader": tr("安装光影 {0} → {1}").format(args.get("name"), inst),
+        "install_resourcepack": tr("安装资源包 {0} → {1}").format(args.get("name"), inst),
+        "install_datapack": tr("安装数据包 {0} → {1}").format(args.get("name"), inst),
+        "download_java": tr("下载 Java {0}").format(args.get("major")),
+        "launch_game": tr("启动 {0} @ {1}").format(
+            args.get("version") or tr("当前版本"), inst),
+        "create_instance": tr("新建实例 {0}").format(args.get("name")),
+        "delete_instance": tr("删除实例 {0}（不可恢复）").format(args.get("name")),
+        "delete_mod": tr("删除模组 {0} @ {1}").format(args.get("filename"), inst),
+        "disable_mod": tr("禁用模组 {0} @ {1}").format(args.get("filename"), inst),
+        "enable_mod": tr("启用模组 {0} @ {1}").format(args.get("filename"), inst),
+        "write_mod_config": tr("改配置 {0} @ {1}").format(args.get("path"), inst),
+        "ask_user": (args.get("prompt") or args.get("title") or tr("请选择")),
     }
-    return mapping.get(name, f"执行 {name}")
+    return mapping.get(name, tr("执行 {0}").format(name))
 
 
 def execute_tool(backend, name: str, args: dict, wait=True, cancelled=None):
