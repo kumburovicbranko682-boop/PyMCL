@@ -1195,6 +1195,18 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         return rows;
     }
 
+    if (strcmp(method, "list_loader_versions") == 0) {
+        /* fabric/quilt/forge/neoforge 原生列出（对齐 loader_meta.py）。
+         * 以前整条转 py_rpc、失败回空数组：纯 C 桥下 EziApp/WinUI 的
+         * 「加载器版本」下拉框永远只有「自动选择」。 */
+        cJSON *rows = list_loader_versions_native(pstr(params, "mc_version", ""),
+                                                  pstr(params, "loader", ""));
+        if (rows) return rows;
+        /* optifine / liteloader 等仍走 py_rpc；没有 Python 时回空数组 */
+        cJSON *r = py_rpc_call(method, params);
+        return r ? r : cJSON_CreateArray();
+    }
+
     /* ---- feedback / help / news / update / cleaner / AI / terracotta ---- */
     if (strcmp(method, "submit_feedback") == 0 || strcmp(method, "help_articles") == 0
         || strcmp(method, "help_article") == 0 || strcmp(method, "cached_news") == 0
@@ -1208,7 +1220,7 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         || strcmp(method, "terracotta_allow_firewall") == 0
         || strcmp(method, "terracotta_open_firewall_settings") == 0
         || strcmp(method, "terracotta_shutdown") == 0 || strcmp(method, "lan_hint") == 0
-        || strcmp(method, "list_loader_versions") == 0 || strcmp(method, "list_catalog_files") == 0
+        || strcmp(method, "list_catalog_files") == 0
         || strcmp(method, "search_worlds") == 0) {
         /* 任务型方法（install_world / repair_version / export_modpack / start_* /
          * terracotta_prepare）不再走这里的一次性调用：backend.c 已把它们包进
@@ -1226,7 +1238,7 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         }
         /* graceful empty fallbacks so UI stays usable without Python */
         if (strcmp(method, "help_articles") == 0 || strcmp(method, "cached_news") == 0
-            || strcmp(method, "fetch_news") == 0 || strcmp(method, "list_loader_versions") == 0
+            || strcmp(method, "fetch_news") == 0
             || strcmp(method, "list_catalog_files") == 0 || strcmp(method, "search_worlds") == 0)
             return cJSON_CreateArray();
         if (strcmp(method, "terracotta_snapshot") == 0) {

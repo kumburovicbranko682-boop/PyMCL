@@ -233,6 +233,7 @@ int extract_natives(const char *instance, cJSON *resolved, const char *vid, char
 int natives_present(const char *dir);
 char *select_native_classifier(cJSON *lib);
 int install_loader(const char *instance, const char *loader, const char *ver, const char *mc, pymcl_ctx *ctx, char *vid_out, size_t n);
+cJSON *list_loader_versions_native(const char *mc_version, const char *loader);
 
 /* ---------- launcher ---------- */
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,

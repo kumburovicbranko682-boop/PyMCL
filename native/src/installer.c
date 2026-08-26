@@ -910,6 +910,29 @@ char *install_forge(const char *instance, const char *mc, const char *forge, pym
     return vid;
 }
 
+/* 前缀推导对齐 mclauncher/neoforge_meta.neoforge_version_prefix：
+ * 1.20.1 -> "47.1."（历史特例）；1.20.2–1.21.x -> 去掉开头 "1."
+ * （1.21 -> "21.0."）；年式 26.x -> 核心段原样（"26.1."）。
+ * 旧逻辑对年式版本算成 "%minor.%patch."——26.1 变成 "1.0."，
+ * 在纯 C 桥上 NeoForge + 26.x 一律报「没有支持的版本」。 */
+static void neoforge_prefix(const char *mc, char *out, size_t n) {
+    int a, b, c;
+    out[0] = 0;
+    if (strcmp(mc, "1.20.1") == 0)
+        snprintf(out, n, "47.1.");
+    else if (mc_version_tuple(mc, &a, &b, &c) == 0) {
+        if (a == 1 && (b > 20 || (b == 20 && c >= 2)))
+            snprintf(out, n, "%d.%d.", b, c);
+        else if (a >= 20) {
+            char core[48];
+            snprintf(core, sizeof(core), "%s", mc);
+            char *cut = strpbrk(core, "-+");
+            if (cut) *cut = 0;
+            snprintf(out, n, "%s.", core);
+        }
+    }
+}
+
 char *install_neoforge(const char *instance, const char *mc, const char *ver, pymcl_ctx *ctx) {
     char *xml = NULL;
     const char *u[] = { NEOFORGE_MAVEN "/maven-metadata.xml" };
@@ -922,26 +945,8 @@ char *install_neoforge(const char *instance, const char *mc, const char *ver, py
         for (int i = 0; i < nv; i++) if (strcmp(vers[i], ver) == 0) snprintf(full, sizeof(full), "%s", ver);
     }
     if (!full[0]) {
-        /* 前缀推导对齐 mclauncher/neoforge_meta.neoforge_version_prefix：
-         * 1.20.1 -> "47.1."（历史特例）；1.20.2–1.21.x -> 去掉开头 "1."
-         * （1.21 -> "21.0."）；年式 26.x -> 核心段原样（"26.1."）。
-         * 旧逻辑对年式版本算成 "%minor.%patch."——26.1 变成 "1.0."，
-         * 在纯 C 桥上 NeoForge + 26.x 一律报「没有支持的版本」。 */
-        int a, b, c;
-        char prefix[64] = {0};
-        if (strcmp(mc, "1.20.1") == 0)
-            snprintf(prefix, sizeof(prefix), "47.1.");
-        else if (mc_version_tuple(mc, &a, &b, &c) == 0) {
-            if (a == 1 && (b > 20 || (b == 20 && c >= 2)))
-                snprintf(prefix, sizeof(prefix), "%d.%d.", b, c);
-            else if (a >= 20) {
-                char core[48];
-                snprintf(core, sizeof(core), "%s", mc);
-                char *cut = strpbrk(core, "-+");
-                if (cut) *cut = 0;
-                snprintf(prefix, sizeof(prefix), "%s.", core);
-            }
-        }
+        char prefix[64];
+        neoforge_prefix(mc, prefix, sizeof(prefix));
         if (prefix[0])
             for (int i = 0; i < nv; i++)
                 if (pymcl_startswith(vers[i], prefix)) snprintf(full, sizeof(full), "%s", vers[i]);
@@ -998,4 +1003,107 @@ int install_loader(const char *instance, const char *loader, const char *ver, co
     if (vid_out) snprintf(vid_out, n, "%s", id);
     free(id);
     return 0;
+}
+
+static void add_loader_row(cJSON *rows, const char *id, int stable) {
+    cJSON *row = cJSON_CreateObject();
+    cJSON_AddStringToObject(row, "id", id);
+    cJSON_AddStringToObject(row, "label", id);
+    cJSON_AddBoolToObject(row, "stable", stable);
+    cJSON_AddItemToArray(rows, row);
+}
+
+/* 加载器版本列表，对齐 mclauncher/loader_meta.list_loader_versions 的
+ * fabric/quilt/forge/neoforge 分支。以前该 RPC 在纯 C 桥下只会回空数组：
+ * EziApp/WinUI 的「加载器版本」下拉框永远只剩「自动选择」。
+ * optifine/liteloader 等返回 NULL，由调用方交给 py_rpc。 */
+cJSON *list_loader_versions_native(const char *mc_version, const char *loader) {
+    const char *mc = mc_version ? mc_version : "";
+    const char *kind = loader ? loader : "";
+    if (!mc[0] || !kind[0]) return NULL;
+    if (pymcl_ieq(kind, "fabric") || pymcl_ieq(kind, "quilt")) {
+        int is_fabric = pymcl_ieq(kind, "fabric");
+        char url[512];
+        const char *urls1[] = { url };
+        snprintf(url, sizeof(url), "%s/versions/loader/%s",
+                 is_fabric ? FABRIC_META : QUILT_META, mc);
+        cJSON *data = fetch_json_mirrors(urls1, 1, 30);
+        cJSON *rows = cJSON_CreateArray();
+        cJSON *d;
+        cJSON_ArrayForEach(d, data) {
+            cJSON *ld = cJSON_GetObjectItem(d, "loader");
+            const char *v = cJSON_GetStringValue(cJSON_GetObjectItem(ld, "version"));
+            if (!v) continue;
+            add_loader_row(rows, v,
+                           is_fabric ? cJSON_IsTrue(cJSON_GetObjectItem(ld, "stable")) : 1);
+        }
+        cJSON_Delete(data);
+        return rows;
+    }
+    if (pymcl_ieq(kind, "forge")) {
+        cJSON *rows = cJSON_CreateArray();
+        /* BMCLAPI 专有列表（升序，倒序输出=新的在前）；仅官方模式跳过 */
+        if (!file_official_only()) {
+            char url[256];
+            snprintf(url, sizeof(url), BMCLAPI "/forge/minecraft/%s", mc);
+            cJSON *list = http_get_json(url, 30);
+            int nl = cJSON_IsArray(list) ? cJSON_GetArraySize(list) : 0;
+            for (int i = nl - 1; i >= 0; i--) {
+                cJSON *it = cJSON_GetArrayItem(list, i);
+                const char *ver = cJSON_GetStringValue(cJSON_GetObjectItem(it, "version"));
+                const char *imc = cJSON_GetStringValue(cJSON_GetObjectItem(it, "mcversion")) ?: mc;
+                const char *br = cJSON_GetStringValue(cJSON_GetObjectItem(it, "branch"));
+                if (!ver || !ver[0]) continue;
+                char art[160];
+                char pref[80]; snprintf(pref, sizeof(pref), "%s-", imc);
+                if (strcmp(ver, imc) == 0 || pymcl_startswith(ver, pref))
+                    snprintf(art, sizeof(art), "%s", ver);
+                else if (br && br[0])
+                    snprintf(art, sizeof(art), "%s-%s-%s", imc, ver, br);
+                else
+                    snprintf(art, sizeof(art), "%s-%s", imc, ver);
+                add_loader_row(rows, art, !strstr(art, "-pre"));
+            }
+            cJSON_Delete(list);
+        }
+        if (cJSON_GetArraySize(rows) == 0) {
+            const char *xmlu[] = { FORGE_MAVEN "/maven-metadata.xml" };
+            char *xml = fetch_text_mirrors(xmlu, 1, 40);
+            char **vers = NULL; int nv = 0;
+            parse_maven_versions(xml, &vers, &nv);
+            free(xml);
+            char pref[80]; snprintf(pref, sizeof(pref), "%s-", mc);
+            for (int i = nv - 1; i >= 0; i--) {
+                if (strcmp(vers[i], mc) == 0 || pymcl_startswith(vers[i], pref))
+                    add_loader_row(rows, vers[i], !strstr(vers[i], "-pre"));
+            }
+            for (int i = 0; i < nv; i++) free(vers[i]);
+            free(vers);
+        }
+        return rows;
+    }
+    if (pymcl_ieq(kind, "neoforge")) {
+        cJSON *rows = cJSON_CreateArray();
+        const char *u[] = { NEOFORGE_MAVEN "/maven-metadata.xml" };
+        char *xml = fetch_text_mirrors(u, 1, 30);
+        char **vers = NULL; int nv = 0;
+        parse_maven_versions(xml, &vers, &nv);
+        free(xml);
+        char prefix[64];
+        neoforge_prefix(mc, prefix, sizeof(prefix));
+        char legacy[80]; snprintf(legacy, sizeof(legacy), "%s-", mc);
+        int emitted = 0;
+        for (int i = nv - 1; i >= 0 && emitted < 80; i--) {
+            int hit = prefix[0] ? pymcl_startswith(vers[i], prefix)
+                                : pymcl_startswith(vers[i], legacy);
+            if (hit) {
+                add_loader_row(rows, vers[i], !pymcl_icontains(vers[i], "beta"));
+                emitted++;
+            }
+        }
+        for (int i = 0; i < nv; i++) free(vers[i]);
+        free(vers);
+        return rows;
+    }
+    return NULL;
 }
