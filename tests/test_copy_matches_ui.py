@@ -83,6 +83,16 @@ class CopyMatchesUiTest(unittest.TestCase):
             self.assertNotIn("官方>4秒", src,
                              f"{rel} 不应再内嵌另一种「自动」说法")
 
+    def test_isolation_labels_are_shared(self):
+        """隔离档位名同理：三处界面共用 ISOLATION_LABELS，不许手抄副本。"""
+        for rel in ("app/pages/first_run.py", "app/pages/settings_page.py",
+                    "app/pages/version_setup.py"):
+            src = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertIn("ISOLATION_LABELS", src,
+                          f"{rel} 应引用共享的隔离档位标签表")
+            self.assertNotIn('"saves": tr(', src,
+                             f"{rel} 不应再内嵌档位名副本")
+
     def test_referenced_names_match_sidebar(self):
         """「下载 → 原版游戏」不是随口一说：必须与主窗侧栏/横条命名一致。"""
         src = (ROOT / "app" / "main_window.py").read_text(encoding="utf-8")

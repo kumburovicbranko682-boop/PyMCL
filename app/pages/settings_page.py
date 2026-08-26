@@ -87,12 +87,10 @@ class SettingsPage(QWidget):
             checked=settings["share_assets"])
         iso_group.addSettingCard(self.share_libs_card)
         iso_group.addSettingCard(self.share_assets_card)
-        iso_map = {
-            "none": tr("关闭（共用实例目录）"),
-            "saves": tr("隔离存档"),
-            "mods": tr("隔离 Mod 与配置"),
-            "all": tr("隔离全部"),
-        }
+        # 档位名与首次向导 / 版本设置共用一份表：各抄一份迟早漂移成
+        # 「同一档两种叫法」（下载源的「自动」就吃过这个亏）。
+        from mclauncher.version_settings import ISOLATION_HINTS, ISOLATION_LABELS
+        iso_map = {k: tr(v) for k, v in ISOLATION_LABELS.items()}
         self._iso_keys = {v: k for k, v in iso_map.items()}
         self.iso_card, self.iso_box = _combo_card(
             FIF.FOLDER, tr("新版本默认隔离"),
@@ -100,7 +98,6 @@ class SettingsPage(QWidget):
             list(iso_map.values()),
             iso_map.get(settings.get("default_isolation") or "none", iso_map["none"]))
         # 档位对用户是行话：卡片描述随选项实时换成这一档的人话解释
-        from mclauncher.version_settings import ISOLATION_HINTS
 
         def _update_iso_desc(*_a):
             key = self._iso_keys.get(self.iso_box.currentText(), "none")
