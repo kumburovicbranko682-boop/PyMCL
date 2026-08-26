@@ -193,17 +193,19 @@ export function renderMultiplayerPage(container: HTMLElement) {
     }
     if (state === 'guest-ok') {
       actionsEl.innerHTML =
-        renderActionCard('进', '#2E9B6B', '已加入房间', '启动游戏后到多人游戏双击「陶瓦联机大厅」。', `<button class="btn btn-primary" id="mp-act-refresh">刷新</button>`) +
+        renderActionCard('进', '#2E9B6B', '进入世界', '启动游戏后到多人游戏双击「陶瓦联机大厅」，或点这里直接进入。', `<button class="btn btn-primary" id="mp-act-enter">进入</button>`) +
         renderActionCard('返', '#888888', '退出', '这不会影响其他房客加入当前房间。', `<button class="btn" id="mp-act-idle">退出</button>`);
-      actionsEl.querySelector('#mp-act-refresh')?.addEventListener('click', () => void reload());
+      actionsEl.querySelector('#mp-act-enter')?.addEventListener('click', () => void onEnterWorld());
       actionsEl.querySelector('#mp-act-idle')?.addEventListener('click', () => void onIdle());
       return;
     }
     if (state === 'exception' || state === 'fatal') {
       actionsEl.innerHTML =
         renderActionCard('!', '#D95568', '联机失败', info.error_hint || info.error || '请返回后重试，或检查网络。', `<button class="btn" id="mp-act-idle">返回</button>`) +
+        renderActionCard('直', '#4C8BF5', '朋友是公网就直连', '让他把单人世界对局域网开放，并在路由映射该端口，然后填他的公网 IP:端口。', `<button class="btn" id="mp-act-direct">直连</button>`) +
         renderActionCard('启', '#4C8BF5', '重新启动内核', '若内核已退出，点此重新拉起。', `<button class="btn btn-primary" id="mp-act-prepare">重启</button>`);
       actionsEl.querySelector('#mp-act-idle')?.addEventListener('click', () => void onIdle());
+      actionsEl.querySelector('#mp-act-direct')?.addEventListener('click', () => void onDirect());
       actionsEl.querySelector('#mp-act-prepare')?.addEventListener('click', () => void prepare());
       return;
     }
@@ -246,6 +248,38 @@ export function renderMultiplayerPage(container: HTMLElement) {
       toast(errorMessage(error, '返回失败'), 'error');
     }
     void reload();
+  }
+
+  async function onEnterWorld() {
+    try {
+      const result = await bridge.call<string>('terracotta_enter_world');
+      if (typeof result === 'string' && result.startsWith('task-')) {
+        toast('正在启动游戏，启动后会直接进入陶瓦联机大厅', 'success');
+        await flyToTasks(actionsEl, '进', '#2E9B6B');
+        router.navigate('tasks');
+      } else {
+        toast(result || '请到多人游戏双击「陶瓦联机大厅」。', 'success');
+      }
+    } catch (error) {
+      toast(errorMessage(error, '进入世界失败'), 'error');
+    }
+  }
+
+  async function onDirect() {
+    const address = await inputDialog('公网直连', '请输入房主的公网地址，例如 1.2.3.4:25565', '');
+    if (!address?.trim()) return;
+    try {
+      const result = await bridge.call<string>('terracotta_direct_connect', { address: address.trim() });
+      if (typeof result === 'string' && result.startsWith('task-')) {
+        toast('正在直连，启动后会进入该服务器', 'success');
+        await flyToTasks(actionsEl, '直', '#4C8BF5');
+        router.navigate('tasks');
+      } else {
+        toast(result || '启动后会进入该服务器。', 'success');
+      }
+    } catch (error) {
+      toast(errorMessage(error, '直连失败'), 'error');
+    }
   }
 
   async function confirmGameRunning(): Promise<boolean> {

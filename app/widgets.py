@@ -335,7 +335,9 @@ class ThumbnailTile(QWidget):
     def _disconnect_thumb_hub(self):
         try:
             _thumb_hub().loaded.disconnect(self._on_thumb_loaded)
-        except (TypeError, RuntimeError):
+        except (TypeError, RuntimeError, SystemError):
+            # SystemError：PySide6 在 self 的 C++ 对象已销毁时 disconnect
+            # 会这样抛（destroyed 信号回调里正是这个时机），不是真错误。
             pass
 
     def _on_thumb_loaded(self, url: str, path: str):

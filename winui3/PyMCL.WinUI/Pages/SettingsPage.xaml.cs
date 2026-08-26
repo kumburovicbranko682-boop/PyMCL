@@ -68,6 +68,7 @@ public sealed partial class SettingsPage : UserControl
             HomeBox.SelectedIndex = s.HomepageMode == "custom" ? 1 : s.HomepageMode == "blank" ? 2 : 0;
         if (HomePath != null) HomePath.Text = s.CustomHomepage ?? "";
         if (AutoUpd != null) AutoUpd.IsOn = s.AutoCheckUpdate;
+        if (MultiSw != null) MultiSw.IsOn = s.AllowMultiInstance;
         if (FlyAnimSw != null) FlyAnimSw.IsOn = s.UiFlyAnimation;
         if (FlyDurSpin != null) FlyDurSpin.Value = s.UiFlyDurationMs > 0 ? s.UiFlyDurationMs : 620;
         RootLabel.Text = "启动器主目录: " + s.Root;
@@ -128,6 +129,7 @@ public sealed partial class SettingsPage : UserControl
                     homepage_mode = TagOf(HomeBox, "news"),
                     custom_homepage = HomePath?.Text?.Trim() ?? "",
                     auto_check_update = AutoUpd.IsOn,
+                    allow_multi_instance = MultiSw?.IsOn ?? false,
                     ui_fly_animation = FlyAnimSw?.IsOn ?? true,
                     ui_fly_duration_ms = SpinValue(FlyDurSpin, 620),
                 },
@@ -152,11 +154,10 @@ public sealed partial class SettingsPage : UserControl
         if (AppServices.Client is null) return;
         try
         {
-            // 只写 AI 那几个键。以前这里连 share_libraries / 线程数 / 内存 / 分辨率 /
-            // 微软 ClientID / CurseForge 密钥一起落盘——用户只是想点一下「测试连接」，
-            // 结果页面上还没想好的改动被永久写进 config.json，想反悔都没得反悔。
-            await AppServices.Client.CallAsync("save_settings", new { data = BuildAiPatch() });
-            var msg = await AppServices.Client.CallAsync<string>("test_ai_connection");
+            // 直接把表单里的 AI 值作为 settings 传给后端试连，与 Qt 设置页一致：
+            // 测试不落盘。以前桥上没有 settings 参数，只能先 save_settings 再测，
+            // 就算测试失败，没验证过的密钥也已经被永久写进 config.json。
+            var msg = await AppServices.Client.CallAsync<string>("test_ai_connection", new { settings = BuildAiPatch() });
             AppServices.Toast?.Invoke("AI 连接成功", msg ?? "已连通", InfoBarSeverity.Success);
         }
         catch (Exception ex)

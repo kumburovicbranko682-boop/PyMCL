@@ -70,12 +70,14 @@ public sealed class SettingsDto
     [JsonPropertyName("gc_preset")] public string GcPreset { get; set; } = "auto";
     [JsonPropertyName("download_limit_kbps")] public int DownloadLimitKbps { get; set; }
     [JsonPropertyName("auto_check_update")] public bool AutoCheckUpdate { get; set; } = true;
+    [JsonPropertyName("allow_multi_instance")] public bool AllowMultiInstance { get; set; }
     [JsonPropertyName("custom_homepage")] public string CustomHomepage { get; set; } = "";
     [JsonPropertyName("homepage_mode")] public string HomepageMode { get; set; } = "news";
     [JsonPropertyName("window_mode")] public string WindowMode { get; set; } = "window";
     [JsonPropertyName("game_dir")] public string GameDir { get; set; } = "";
     [JsonPropertyName("ui_fly_animation")] public bool UiFlyAnimation { get; set; } = true;
     [JsonPropertyName("ui_fly_duration_ms")] public int UiFlyDurationMs { get; set; } = 620;
+    [JsonPropertyName("feedback_consent")] public bool FeedbackConsent { get; set; }
 }
 
 public sealed class VersionSettingsDto

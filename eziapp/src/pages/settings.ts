@@ -55,6 +55,12 @@ function render(container: HTMLElement) {
             </div>
           </div>
           <div class="setting-row">
+            <span class="setting-label">允许多开</span>
+            <div class="setting-control">
+              <label class="toggle"><input type="checkbox" id="setting-allow-multi" ${s.allow_multi_instance ? 'checked' : ''}><span class="toggle-slider"></span></label>
+            </div>
+          </div>
+          <div class="setting-row">
             <span class="setting-label">深色模式</span>
             <div class="setting-control">
               <label class="toggle"><input type="checkbox" id="setting-ui-dark" ${s.ui_dark ? 'checked' : ''}><span class="toggle-slider"></span></label>
@@ -143,6 +149,7 @@ function render(container: HTMLElement) {
         parseInt((document.getElementById('setting-height') as HTMLInputElement).value) || 480,
       ],
       download_source: (document.getElementById('setting-download-source') as HTMLSelectElement).value,
+      allow_multi_instance: (document.getElementById('setting-allow-multi') as HTMLInputElement).checked,
       ui_dark: (document.getElementById('setting-ui-dark') as HTMLInputElement).checked,
       ui_fly_animation: (document.getElementById('setting-ui-fly') as HTMLInputElement).checked,
       ui_fly_duration_ms: parseInt((document.getElementById('setting-ui-fly-dur') as HTMLInputElement).value) || 620,
@@ -154,7 +161,9 @@ function render(container: HTMLElement) {
       ai_model: (document.getElementById('setting-ai-model') as HTMLInputElement).value,
     };
     try {
-      await bridge.call('save_settings', settings);
+      // Python 桥的签名是 save_settings(data: dict)：设置必须包在 `data` 里，
+      // 顶层散传会被 _call_kwargs 判成缺参直接报错。
+      await bridge.call('save_settings', { data: settings });
       // 合并而不是替换：本页只提交 13 个键，直接 setSettings 会让 store 变成残缺 dict，
       // 后面别的页面拿去用就会把缺的键当成「用户清空了」再发一次。
       store.setSettings({ ...(store.settings || {}), ...settings } as any);

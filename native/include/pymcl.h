@@ -100,6 +100,8 @@ int pymcl_zip_has(const char *zip_path, const char *inner);
 char *pymcl_zip_read(const char *zip_path, const char *inner, size_t *len);
 int pymcl_zip_extract_one(const char *zip_path, const char *inner, const char *dest);
 int pymcl_open_folder(const char *path);
+int pymcl_split_args(const char *text, char ***out);
+void pymcl_free_args(char **argv, int n);
 int pymcl_run_process(const char **argv, int argc, const char *cwd,
                       void (*on_line)(void *, const char *), void *ud, int timeout_sec);
 HANDLE pymcl_spawn_process(const char **argv, int argc, const char *cwd, HANDLE *out_read);
@@ -115,6 +117,12 @@ const char *pymcl_arch(void);
 int pymcl_is_windows(void);
 void pymcl_native_arch_token(char *out, size_t n);
 
+/* servers_io.c —— 服务器导入/导出与时长汇总的纯逻辑（与 Python 端对拍） */
+int pymcl_servers_import_text(cJSON *servers, const char *text);
+int pymcl_servers_import_json(cJSON *servers, cJSON *data);
+char *pymcl_servers_export_text(cJSON *servers);
+double pymcl_playtime_total(cJSON *playtime_root);
+
 /* ---------- root / config ---------- */
 extern char g_root[PYMCL_PATH];
 void pymcl_set_root(const char *root);
@@ -126,6 +134,8 @@ cJSON *config_obj(void);
 const char *config_str(const char *key, const char *def);
 int config_int(const char *key, int def);
 int config_bool(const char *key, int def);
+int config_community_official_only(void);
+int config_community_mirror_first(void);
 void config_set_str(const char *key, const char *val);
 void config_set_int(const char *key, int val);
 void config_set_bool(const char *key, int v);
@@ -152,10 +162,14 @@ cJSON *http_get_json(const char *url, int timeout);
 cJSON *http_get_json_hdr(const char *url, const char *extra_hdr, int timeout);
 int http_download_one(const char *url, const char *dest, pymcl_ctx *ctx,
                       const char *sha1, long long size, const char *sha512, int timeout);
+int file_official_only(void);
+int file_mirror_first(void);
 int expand_urls(const char *url, char ***out, int *n);
 void free_urls(char **u, int n);
 int download_file(const char *url, const char **extra, int nextra, const char *dest,
                   pymcl_ctx *ctx, const char *sha1, long long size, const char *sha512);
+int download_url_list(cJSON *urls, const char *dest, pymcl_ctx *ctx,
+                      const char *sha1, long long size, const char *sha512);
 int download_all(cJSON *tasks, const char *message, pymcl_ctx *ctx);
 cJSON *fetch_json_mirrors(const char **urls, int n, int timeout);
 char *fetch_text_mirrors(const char **urls, int n, int timeout);
@@ -219,11 +233,14 @@ int extract_natives(const char *instance, cJSON *resolved, const char *vid, char
 int natives_present(const char *dir);
 char *select_native_classifier(cJSON *lib);
 int install_loader(const char *instance, const char *loader, const char *ver, const char *mc, pymcl_ctx *ctx, char *vid_out, size_t n);
+cJSON *list_loader_versions_native(const char *mc_version, const char *loader);
 
 /* ---------- launcher ---------- */
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,
                          const char *java_exe, int memory_mb, int width, int height,
+                         const char *extra_jvm, const char *game_dir,
                          char ***argv, int *argc, char *natives_out, size_t nn);
+void gc_preset_apply(const char *preset, const char *existing, char *out, size_t n);
 HANDLE game_spawn(const char **argv, int argc, const char *cwd, HANDLE *pipe);
 void game_kill(HANDLE proc);
 
@@ -241,6 +258,11 @@ cJSON *catalog_popular_mods(const char *source);
 cJSON *catalog_popular_packs(const char *source);
 int catalog_lookup_mod(const char *q, char *slug, size_t ns, long long *cf, char *title, size_t nt);
 int catalog_lookup_pack(const char *q, char *slug, size_t ns, long long *cf, char *title, size_t nt);
+cJSON *mr_api_get(const char *path_query, int timeout);
+cJSON *cf_api_get(const char *path, const char *query);
+cJSON *cf_files_by_ids(cJSON *file_ids);
+cJSON *cf_file_urls(long long addon_id, long long file_id,
+                    const char *filename, const char *download_url);
 cJSON *search_mods(const char *query, const char *source);
 cJSON *search_modpacks(const char *query, const char *source);
 cJSON *search_content(const char *kind, const char *query, const char *source);
@@ -254,9 +276,11 @@ int delete_instance_file(const char *instance, const char *subdir, const char *f
 typedef void (*sse_emit_fn)(const char *event, cJSON *data);
 void backend_init(sse_emit_fn emit);
 cJSON *backend_call(const char *method, cJSON *params);
+int backend_game_alive(void);
 void backend_shutdown(void);
 int server_run(const char *host, int port, const char *token);
 cJSON *py_rpc_call(const char *method, cJSON *params);
+cJSON *py_rpc_call_t(const char *method, cJSON *params, int timeout_sec);
 cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit);
 
 #ifdef __cplusplus

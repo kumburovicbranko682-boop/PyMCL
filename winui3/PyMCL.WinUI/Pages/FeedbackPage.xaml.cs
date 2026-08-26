@@ -69,6 +69,43 @@ public sealed partial class FeedbackPage : UserControl
         }
     }
 
+    /// <summary>
+    /// 对齐 Qt 的 prompt_feedback_consent：后端 has_consent() 不为 true 时提交
+    /// 必然抛「需要先同意上传诊断数据」，而本页以前既不询问也没有任何开关，
+    /// 反馈功能在 WinUI 下等于摆设。这里现场询问并把选择写回 config。
+    /// </summary>
+    private async Task<bool> EnsureConsentAsync()
+    {
+        try
+        {
+            var settings = await AppServices.Client!.CallAsync<SettingsDto>("get_settings");
+            if (settings?.FeedbackConsent == true) return true;
+        }
+        catch
+        {
+            // 读取失败就按未同意处理，走下面的询问流程。
+        }
+        var ok = await Dialogs.ConfirmAsync(XamlRoot, "是否上传诊断数据",
+            "同意后才会向开发者上传：\n· 你提交的反馈内容\n· 本机配置（CPU / 内存 / 显卡 / Java / 实例）\n\n暂不同意则不会上传，下次提交时会再次询问。",
+            "同意");
+        try
+        {
+            await AppServices.Client!.CallAsync("save_settings", new { data = new { feedback_consent = ok } });
+        }
+        catch (Exception ex)
+        {
+            if (ok)
+            {
+                // 同意没写进 config 的话后端仍会拒绝上传，明确报错而不是假装成功。
+                AppServices.Toast?.Invoke("无法保存选择", ex.Message, InfoBarSeverity.Error);
+                return false;
+            }
+        }
+        if (!ok)
+            AppServices.Toast?.Invoke("未同意", "不同意上传则不会发送反馈", InfoBarSeverity.Warning);
+        return ok;
+    }
+
     private async void Send_Click(object sender, RoutedEventArgs e)
     {
         if (AppServices.Client is null) return;
@@ -79,6 +116,7 @@ public sealed partial class FeedbackPage : UserControl
             AppServices.Toast?.Invoke("内容不完整", "请填写标题和详细描述", InfoBarSeverity.Warning);
             return;
         }
+        if (!await EnsureConsentAsync()) return;
         var idx = Math.Max(0, CategoryBox.SelectedIndex);
         var category = Categories[idx].Key;
         try

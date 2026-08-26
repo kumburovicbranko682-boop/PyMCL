@@ -232,14 +232,12 @@ static int install_assets(const char *inst, cJSON *resolved, pymcl_ctx *ctx) {
         long long sz = cJSON_IsNumber(cJSON_GetObjectItem(obj, "size"))
             ? (long long)cJSON_GetObjectItem(obj, "size")->valuedouble : -1;
         if (pymcl_file_matches(dest, h, sz)) continue;
-        char u1[256], u2[256];
-        snprintf(u1, sizeof(u1), BMCLAPI "/assets/%s/%s", sub, h);
-        snprintf(u2, sizeof(u2), "https://resources.download.minecraft.net/%s/%s", sub, h);
+        /* 只给官方地址：download_file 里 expand_urls 会按 download_source
+         * 决定 BMCLAPI /assets/ 镜像的有无和先后（以前固定镜像在前）。 */
+        char u[256];
+        snprintf(u, sizeof(u), "https://resources.download.minecraft.net/%s/%s", sub, h);
         cJSON *t = cJSON_CreateObject();
-        cJSON *urls = cJSON_CreateArray();
-        cJSON_AddItemToArray(urls, cJSON_CreateString(u1));
-        cJSON_AddItemToArray(urls, cJSON_CreateString(u2));
-        cJSON_AddItemToObject(t, "urls", urls);
+        cJSON_AddStringToObject(t, "url", u);
         cJSON_AddStringToObject(t, "dest", dest);
         cJSON_AddStringToObject(t, "sha1", h);
         if (sz >= 0) cJSON_AddNumberToObject(t, "size", (double)sz);
@@ -427,9 +425,13 @@ int extract_natives(const char *instance, cJSON *resolved, const char *vid, char
 }
 
 char *install_fabric(const char *instance, const char *mc, const char *loader, pymcl_ctx *ctx) {
+    /* fetch_json_mirrors 经 expand_urls 补 BMCLAPI /fabric-meta/ 镜像
+     * （按 download_source 排序）。以前只打官方 meta.fabricmc：
+     * 官方不可达时装 Fabric 在 C 桥必失败，Python 桥却能装。 */
     char url[512];
+    const char *urls1[] = { url };
     snprintf(url, sizeof(url), FABRIC_META "/versions/loader/%s", mc);
-    cJSON *data = http_get_json(url, 45);
+    cJSON *data = fetch_json_mirrors(urls1, 1, 45);
     if (!cJSON_IsArray(data) || cJSON_GetArraySize(data) == 0) {
         cJSON_Delete(data);
         pymcl_set_error("Fabric 不支持 Minecraft %s", mc);
@@ -452,8 +454,9 @@ char *install_fabric(const char *instance, const char *mc, const char *loader, p
     if (!chosen) { cJSON_Delete(data); pymcl_set_error("找不到 Fabric Loader"); return NULL; }
     const char *lv = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(chosen, "loader"), "version"));
     char purl[512];
+    const char *purls[] = { purl };
     snprintf(purl, sizeof(purl), FABRIC_META "/versions/loader/%s/%s/profile/json", mc, lv);
-    cJSON *profile = http_get_json(purl, 45);
+    cJSON *profile = fetch_json_mirrors(purls, 1, 45);
     cJSON_Delete(data);
     if (!profile) return NULL;
     const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(profile, "id"));
@@ -466,9 +469,11 @@ char *install_fabric(const char *instance, const char *mc, const char *loader, p
 }
 
 char *install_quilt(const char *instance, const char *mc, const char *loader, pymcl_ctx *ctx) {
+    /* 同 install_fabric：BMCLAPI /quilt-meta/ 镜像按 download_source 兜底。 */
     char url[512];
+    const char *urls1[] = { url };
     snprintf(url, sizeof(url), QUILT_META "/versions/loader/%s", mc);
-    cJSON *data = http_get_json(url, 45);
+    cJSON *data = fetch_json_mirrors(urls1, 1, 45);
     if (!cJSON_IsArray(data) || cJSON_GetArraySize(data) == 0) {
         cJSON_Delete(data);
         pymcl_set_error("Quilt 不支持 Minecraft %s", mc);
@@ -484,8 +489,9 @@ char *install_quilt(const char *instance, const char *mc, const char *loader, py
     }
     const char *lv = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(chosen, "loader"), "version"));
     char purl[512];
+    const char *purls[] = { purl };
     snprintf(purl, sizeof(purl), QUILT_META "/versions/loader/%s/%s/profile/json", mc, lv);
-    cJSON *profile = http_get_json(purl, 45);
+    cJSON *profile = fetch_json_mirrors(purls, 1, 45);
     cJSON_Delete(data);
     if (!profile) return NULL;
     const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(profile, "id"));
@@ -535,12 +541,14 @@ static char *forge_guess(const char *mc, const char *fv, int idx) {
 }
 
 static int download_forge_installer(const char *full, const char *mc, const char *dest, pymcl_ctx *ctx) {
-    char u1[512], u2[512], u3[512];
+    /* 官方 maven 的 BMCLAPI 镜像由 expand_urls 按 download_source 补齐；
+     * /forge/download 专有接口只在非「仅官方」时兜底。 */
+    char u1[512], u3[512];
     snprintf(u1, sizeof(u1), "%s/%s/forge-%s-installer.jar", FORGE_MAVEN, full, full);
-    snprintf(u2, sizeof(u2), BMCLAPI "/maven/net/minecraftforge/forge/%s/forge-%s-installer.jar", full, full);
     snprintf(u3, sizeof(u3), BMCLAPI "/forge/download?mcversion=%s&version=%s&category=installer&format=jar", mc, full);
-    const char *ex[] = { u2, u3 };
-    if (download_file(u1, ex, 2, dest, ctx, NULL, -1, NULL) != 0) return -1;
+    const char *ex[1]; int ne = 0;
+    if (!file_official_only()) ex[ne++] = u3;
+    if (download_file(u1, ex, ne, dest, ctx, NULL, -1, NULL) != 0) return -1;
     if (!is_forge_installer(dest)) { pymcl_remove_tree(dest); pymcl_set_error("Forge 安装器无效"); return -1; }
     return 0;
 }
@@ -863,20 +871,24 @@ char *install_forge(const char *instance, const char *mc, const char *forge, pym
         dest[0] = 0;
     }
     if (!full) {
-        char url[256];
-        snprintf(url, sizeof(url), BMCLAPI "/forge/minecraft/%s", mc);
-        cJSON *list = http_get_json(url, 60);
         char best[128] = {0};
-        if (cJSON_IsArray(list) && cJSON_GetArraySize(list) > 0) {
-            cJSON *last = cJSON_GetArrayItem(list, cJSON_GetArraySize(list) - 1);
-            const char *ver = cJSON_GetStringValue(cJSON_GetObjectItem(last, "version"));
-            const char *imc = cJSON_GetStringValue(cJSON_GetObjectItem(last, "mcversion")) ?: mc;
-            if (ver) snprintf(best, sizeof(best), "%s-%s", imc, ver);
+        /* BMCLAPI /forge/minecraft 专有接口没有官方对应，仅官方模式跳过 */
+        if (!file_official_only()) {
+            char url[256];
+            snprintf(url, sizeof(url), BMCLAPI "/forge/minecraft/%s", mc);
+            cJSON *list = http_get_json(url, 60);
+            if (cJSON_IsArray(list) && cJSON_GetArraySize(list) > 0) {
+                cJSON *last = cJSON_GetArrayItem(list, cJSON_GetArraySize(list) - 1);
+                const char *ver = cJSON_GetStringValue(cJSON_GetObjectItem(last, "version"));
+                const char *imc = cJSON_GetStringValue(cJSON_GetObjectItem(last, "mcversion")) ?: mc;
+                if (ver) snprintf(best, sizeof(best), "%s-%s", imc, ver);
+            }
+            cJSON_Delete(list);
         }
-        cJSON_Delete(list);
         if (!best[0]) {
-            const char *xmlu[] = { FORGE_MAVEN "/maven-metadata.xml", BMCLAPI "/maven/net/minecraftforge/forge/maven-metadata.xml" };
-            char *xml = fetch_text_mirrors(xmlu, 2, 90);
+            /* expand_urls 会按 download_source 补 BMCLAPI /maven/ 镜像 */
+            const char *xmlu[] = { FORGE_MAVEN "/maven-metadata.xml" };
+            char *xml = fetch_text_mirrors(xmlu, 1, 90);
             char **vers = NULL; int nv = 0;
             parse_maven_versions(xml, &vers, &nv);
             free(xml);
@@ -898,6 +910,29 @@ char *install_forge(const char *instance, const char *mc, const char *forge, pym
     return vid;
 }
 
+/* 前缀推导对齐 mclauncher/neoforge_meta.neoforge_version_prefix：
+ * 1.20.1 -> "47.1."（历史特例）；1.20.2–1.21.x -> 去掉开头 "1."
+ * （1.21 -> "21.0."）；年式 26.x -> 核心段原样（"26.1."）。
+ * 旧逻辑对年式版本算成 "%minor.%patch."——26.1 变成 "1.0."，
+ * 在纯 C 桥上 NeoForge + 26.x 一律报「没有支持的版本」。 */
+static void neoforge_prefix(const char *mc, char *out, size_t n) {
+    int a, b, c;
+    out[0] = 0;
+    if (strcmp(mc, "1.20.1") == 0)
+        snprintf(out, n, "47.1.");
+    else if (mc_version_tuple(mc, &a, &b, &c) == 0) {
+        if (a == 1 && (b > 20 || (b == 20 && c >= 2)))
+            snprintf(out, n, "%d.%d.", b, c);
+        else if (a >= 20) {
+            char core[48];
+            snprintf(core, sizeof(core), "%s", mc);
+            char *cut = strpbrk(core, "-+");
+            if (cut) *cut = 0;
+            snprintf(out, n, "%s.", core);
+        }
+    }
+}
+
 char *install_neoforge(const char *instance, const char *mc, const char *ver, pymcl_ctx *ctx) {
     char *xml = NULL;
     const char *u[] = { NEOFORGE_MAVEN "/maven-metadata.xml" };
@@ -910,14 +945,18 @@ char *install_neoforge(const char *instance, const char *mc, const char *ver, py
         for (int i = 0; i < nv; i++) if (strcmp(vers[i], ver) == 0) snprintf(full, sizeof(full), "%s", ver);
     }
     if (!full[0]) {
-        int a, b, c; mc_version_tuple(mc, &a, &b, &c);
-        char prefix[32];
-        if (a > 1 || (a == 1 && (b > 20 || (b == 20 && c >= 2))))
-            snprintf(prefix, sizeof(prefix), "%d.%d.", b, c);
-        else
-            snprintf(prefix, sizeof(prefix), "%s-", mc);
-        for (int i = 0; i < nv; i++)
-            if (pymcl_startswith(vers[i], prefix)) snprintf(full, sizeof(full), "%s", vers[i]);
+        char prefix[64];
+        neoforge_prefix(mc, prefix, sizeof(prefix));
+        if (prefix[0])
+            for (int i = 0; i < nv; i++)
+                if (pymcl_startswith(vers[i], prefix)) snprintf(full, sizeof(full), "%s", vers[i]);
+        if (!full[0]) {
+            /* 早期 1.20.1 时代的 "1.20.1-47.1.x" 命名（Python 同款兜底）。 */
+            char legacy[64];
+            snprintf(legacy, sizeof(legacy), "%s-", mc);
+            for (int i = 0; i < nv; i++)
+                if (pymcl_startswith(vers[i], legacy)) snprintf(full, sizeof(full), "%s", vers[i]);
+        }
     }
     for (int i = 0; i < nv; i++) free(vers[i]);
     free(vers);
@@ -964,4 +1003,107 @@ int install_loader(const char *instance, const char *loader, const char *ver, co
     if (vid_out) snprintf(vid_out, n, "%s", id);
     free(id);
     return 0;
+}
+
+static void add_loader_row(cJSON *rows, const char *id, int stable) {
+    cJSON *row = cJSON_CreateObject();
+    cJSON_AddStringToObject(row, "id", id);
+    cJSON_AddStringToObject(row, "label", id);
+    cJSON_AddBoolToObject(row, "stable", stable);
+    cJSON_AddItemToArray(rows, row);
+}
+
+/* 加载器版本列表，对齐 mclauncher/loader_meta.list_loader_versions 的
+ * fabric/quilt/forge/neoforge 分支。以前该 RPC 在纯 C 桥下只会回空数组：
+ * EziApp/WinUI 的「加载器版本」下拉框永远只剩「自动选择」。
+ * optifine/liteloader 等返回 NULL，由调用方交给 py_rpc。 */
+cJSON *list_loader_versions_native(const char *mc_version, const char *loader) {
+    const char *mc = mc_version ? mc_version : "";
+    const char *kind = loader ? loader : "";
+    if (!mc[0] || !kind[0]) return NULL;
+    if (pymcl_ieq(kind, "fabric") || pymcl_ieq(kind, "quilt")) {
+        int is_fabric = pymcl_ieq(kind, "fabric");
+        char url[512];
+        const char *urls1[] = { url };
+        snprintf(url, sizeof(url), "%s/versions/loader/%s",
+                 is_fabric ? FABRIC_META : QUILT_META, mc);
+        cJSON *data = fetch_json_mirrors(urls1, 1, 30);
+        cJSON *rows = cJSON_CreateArray();
+        cJSON *d;
+        cJSON_ArrayForEach(d, data) {
+            cJSON *ld = cJSON_GetObjectItem(d, "loader");
+            const char *v = cJSON_GetStringValue(cJSON_GetObjectItem(ld, "version"));
+            if (!v) continue;
+            add_loader_row(rows, v,
+                           is_fabric ? cJSON_IsTrue(cJSON_GetObjectItem(ld, "stable")) : 1);
+        }
+        cJSON_Delete(data);
+        return rows;
+    }
+    if (pymcl_ieq(kind, "forge")) {
+        cJSON *rows = cJSON_CreateArray();
+        /* BMCLAPI 专有列表（升序，倒序输出=新的在前）；仅官方模式跳过 */
+        if (!file_official_only()) {
+            char url[256];
+            snprintf(url, sizeof(url), BMCLAPI "/forge/minecraft/%s", mc);
+            cJSON *list = http_get_json(url, 30);
+            int nl = cJSON_IsArray(list) ? cJSON_GetArraySize(list) : 0;
+            for (int i = nl - 1; i >= 0; i--) {
+                cJSON *it = cJSON_GetArrayItem(list, i);
+                const char *ver = cJSON_GetStringValue(cJSON_GetObjectItem(it, "version"));
+                const char *imc = cJSON_GetStringValue(cJSON_GetObjectItem(it, "mcversion")) ?: mc;
+                const char *br = cJSON_GetStringValue(cJSON_GetObjectItem(it, "branch"));
+                if (!ver || !ver[0]) continue;
+                char art[160];
+                char pref[80]; snprintf(pref, sizeof(pref), "%s-", imc);
+                if (strcmp(ver, imc) == 0 || pymcl_startswith(ver, pref))
+                    snprintf(art, sizeof(art), "%s", ver);
+                else if (br && br[0])
+                    snprintf(art, sizeof(art), "%s-%s-%s", imc, ver, br);
+                else
+                    snprintf(art, sizeof(art), "%s-%s", imc, ver);
+                add_loader_row(rows, art, !strstr(art, "-pre"));
+            }
+            cJSON_Delete(list);
+        }
+        if (cJSON_GetArraySize(rows) == 0) {
+            const char *xmlu[] = { FORGE_MAVEN "/maven-metadata.xml" };
+            char *xml = fetch_text_mirrors(xmlu, 1, 40);
+            char **vers = NULL; int nv = 0;
+            parse_maven_versions(xml, &vers, &nv);
+            free(xml);
+            char pref[80]; snprintf(pref, sizeof(pref), "%s-", mc);
+            for (int i = nv - 1; i >= 0; i--) {
+                if (strcmp(vers[i], mc) == 0 || pymcl_startswith(vers[i], pref))
+                    add_loader_row(rows, vers[i], !strstr(vers[i], "-pre"));
+            }
+            for (int i = 0; i < nv; i++) free(vers[i]);
+            free(vers);
+        }
+        return rows;
+    }
+    if (pymcl_ieq(kind, "neoforge")) {
+        cJSON *rows = cJSON_CreateArray();
+        const char *u[] = { NEOFORGE_MAVEN "/maven-metadata.xml" };
+        char *xml = fetch_text_mirrors(u, 1, 30);
+        char **vers = NULL; int nv = 0;
+        parse_maven_versions(xml, &vers, &nv);
+        free(xml);
+        char prefix[64];
+        neoforge_prefix(mc, prefix, sizeof(prefix));
+        char legacy[80]; snprintf(legacy, sizeof(legacy), "%s-", mc);
+        int emitted = 0;
+        for (int i = nv - 1; i >= 0 && emitted < 80; i--) {
+            int hit = prefix[0] ? pymcl_startswith(vers[i], prefix)
+                                : pymcl_startswith(vers[i], legacy);
+            if (hit) {
+                add_loader_row(rows, vers[i], !pymcl_icontains(vers[i], "beta"));
+                emitted++;
+            }
+        }
+        for (int i = 0; i < nv; i++) free(vers[i]);
+        free(vers);
+        return rows;
+    }
+    return NULL;
 }

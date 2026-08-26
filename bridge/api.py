@@ -212,6 +212,29 @@ class BackendAPI:
     def task_title(self, task_id: str) -> str:
         return self._titles.get(task_id, task_id)
 
+    def list_tasks(self) -> list[dict]:
+        """运行中 + 近期结束的任务快照（WPF/WinUI 任务页轮询用）。"""
+        with self._lock:
+            running = list(self._workers)
+        rows = [{
+            "id": tid,
+            "title": self._titles.get(tid, tid),
+            "status": "running",
+            "success": None,
+            "message": "",
+        } for tid in running]
+        for tid, (ok, msg) in list(self._task_results.items())[-20:]:
+            if tid in running:
+                continue
+            rows.append({
+                "id": tid,
+                "title": self._titles.get(tid, tid),
+                "status": "done" if ok else "failed",
+                "success": bool(ok),
+                "message": msg,
+            })
+        return rows
+
     def get_crash(self, task_id: str = "") -> dict:
         if task_id and task_id in self._crashes:
             return self._crashes[task_id]
@@ -516,6 +539,57 @@ class BackendAPI:
     def terracotta_shutdown(self):
         terracotta_mod.stop()
 
+    def terracotta_remember_lobby(self, url: str) -> str:
+        """把大厅地址写进当前实例的 servers.dat（多人列表出现「陶瓦联机大厅」）。
+
+        C 桥的原生 terracotta_enter_world/direct_connect 在启动前用一次性
+        py_rpc 调这里：NBT 写入只有 Python 有实现。
+        """
+        inst = self._instance()
+        return str(terracotta_mod.remember_lobby(url, inst.path))
+
+    def terracotta_enter_world(self):
+        info = self.terracotta_snapshot()
+        url = str(info.get("url") or "")
+        if info.get("state") != "guest-ok" or not url:
+            raise terracotta_mod.TerracottaError("还没连上房间。请先输入邀请码加入。")
+        return self._launch_into_server(url, "请到游戏「多人游戏」双击「陶瓦联机大厅」。")
+
+    def terracotta_direct_connect(self, address: str):
+        host, port = terracotta_mod.split_join_url(address)
+        if not host or host in ("127.0.0.1", "localhost"):
+            raise terracotta_mod.TerracottaError("请输入房主的公网地址，例如 1.2.3.4:25565")
+        return self._launch_into_server(f"{host}:{port}", "请到游戏「多人游戏」双击「陶瓦联机大厅」。")
+
+    def _launch_into_server(self, url: str, already_msg: str):
+        inst = self._instance()
+        terracotta_mod.remember_lobby(url, inst.path)
+        info = self.terracotta_snapshot()
+        if info.get("game_running"):
+            return already_msg
+        ids = inst.installed_ids()
+        if not ids:
+            raise LaunchError("请先到「启动」页安装一个版本。")
+        version = max(ids, key=lambda vid: (inst.versions_dir() / vid).stat().st_mtime)
+        host, port = terracotta_mod.split_join_url(url)
+        acc = self.accounts.get_active()
+        if acc and acc.get("type") == "microsoft":
+            account = acc.get("name") or "离线模式"
+            username = acc.get("name") or "Player"
+        else:
+            account = "离线模式"
+            username = (acc or {}).get("name") or self.terracotta_player()
+        return self.launch_game(
+            instance=inst.name,
+            version=version,
+            account=account,
+            username=username,
+            memory_mb=int(CONFIG.get("memory_mb") or 4096),
+            width=int(CONFIG.get("width") or 854),
+            height=int(CONFIG.get("height") or 480),
+            extra_game_args=["--server", host, "--port", str(port)],
+        )
+
     def launch_game(self, instance: str, version: str, account: str,
                     username: str, memory_mb: int, width: int, height: int,
                     java: str = "自动选择", extra_game_args=None) -> str:
@@ -544,10 +618,17 @@ class BackendAPI:
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
         from mclauncher import launcher
+        from mclauncher import version_settings as _vs
+        # 对齐 app/backend.py：版本绑定的认证服要体现在预览命令里，
+        # 否则预览与真实启动的 javaagent 参数不一致。
+        auth_server = str(_vs.load(inst, version).get("auth_server") or "").strip()
+        if auth_server and not props.get("authlib_api"):
+            props = dict(props)
+            props["authlib_api"] = auth_server
         java_exe = "自动选择" if java in ("自动选择", "") else java
         cmd, _natives, _vdir, _gdir = launcher.build_launch_command(
             inst, version, props, java_exe, memory_mb=memory_mb,
-            width=width, height=height)
+            width=width, height=height, authlib_api=props.get("authlib_api"))
         return cmd
 
     def start_microsoft_login(self) -> str:
@@ -606,8 +687,9 @@ class BackendAPI:
             return vs.mods_dir(inst, version)
         return inst.path / "mods"
 
-    def get_installed_mods(self, instance: str) -> list[str]:
-        return [p.name for p in mods_mod.list_instance_mods(self._instance(instance))]
+    def get_installed_mods(self, instance: str, version: str = "") -> list[str]:
+        inst = self._instance(instance)
+        return [r["filename"] for r in mods_mod.list_mod_entries_at(self._mods_folder(inst, version)) if r.get("enabled")]
 
     def get_installed_shaders(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "shaderpacks")]
@@ -687,10 +769,16 @@ class BackendAPI:
             "custom_homepage": CONFIG.get("custom_homepage") or "",
             "homepage_mode": CONFIG.get("homepage_mode") or "news",
             "window_mode": CONFIG.get("window_mode") or "window",
+            # 多开开关（对齐 app/backend.py）。启动被拒的报错让用户
+            # 「到设置开启允许多开」，这个键不带出去，桥上的设置页
+            # 根本渲染不出那个开关。
+            "allow_multi_instance": bool(CONFIG.get("allow_multi_instance", False)),
             "game_dir": str(CONFIG.instances_dir),
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
+            "ui_fly_animation": bool(CONFIG.get("ui_fly_animation", True)),
+            "ui_fly_duration_ms": int(CONFIG.get("ui_fly_duration_ms", 620)),
         }
 
     def save_settings(self, data: dict):
@@ -753,10 +841,17 @@ class BackendAPI:
             patch["download_limit_kbps"] = int(data.get("download_limit_kbps") or 0)
         if "auto_check_update" in data:
             patch["auto_check_update"] = bool(data.get("auto_check_update"))
+        if "allow_multi_instance" in data:
+            patch["allow_multi_instance"] = bool(data.get("allow_multi_instance"))
         if "skip_assets" in data:
             patch["skip_assets"] = bool(data.get("skip_assets"))
         if "ui_dark" in data:
             patch["ui_dark"] = bool(data.get("ui_dark"))
+        if "ui_fly_animation" in data:
+            patch["ui_fly_animation"] = bool(data.get("ui_fly_animation"))
+        if "ui_fly_duration_ms" in data:
+            patch["ui_fly_duration_ms"] = int(data.get("ui_fly_duration_ms")
+                                              or CONFIG.get("ui_fly_duration_ms") or 620)
         CONFIG.update(patch)
         CONFIG.save()
 
@@ -823,8 +918,9 @@ class BackendAPI:
         self._emit("ui_changed", {})
         return self.accounts.active
 
-    def add_offline_account(self, username: str):
-        acc = self.accounts.offline_account(username)
+    def add_offline_account(self, username: str, skin: str = ""):
+        acc = self.accounts.offline_account(
+            username, skin=skin or CONFIG.get("offline_skin") or "default")
         self.accounts.add_account({**acc, "type": "offline"})
         self._emit("ui_changed", {})
         return acc["name"]
@@ -1078,9 +1174,15 @@ class BackendAPI:
             "description": hit.get("description") or "",
         }
 
-    def search_modpacks(self, query: str, source: str) -> list[dict]:
+    def search_modpacks(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
+        extra = extra or {}
         src = "curseforge" if (source or "").lower().startswith("curse") else "modrinth"
         q = (query or "").strip()
+        from mclauncher.catalog_files import category_facets
+        cats = category_facets(extra.get("category") or extra.get("type") or "")
+        gv = extra.get("game_version") or extra.get("version") or ""
+        if isinstance(gv, str) and gv.startswith("全部"):
+            gv = ""
         if not q:
             rows = []
             seen = set()
@@ -1112,7 +1214,9 @@ class BackendAPI:
         key = CONFIG.get("curseforge_api_key")
         hits = []
         try:
-            hits = modpack_mod.search_modpacks_chinese(dm, q, limit=25, api_key=key)
+            hits = modpack_mod.search_modpacks_chinese(
+                dm, q, limit=25, api_key=key, game_version=gv or None,
+                categories=cats or None)
         except Exception:
             hits = []
         if hits and any(h.get("matched_alias") for h in hits):
@@ -1122,9 +1226,13 @@ class BackendAPI:
         if not hits:
             try:
                 if src == "curseforge":
-                    hits = modpack_mod.search_cf_modpacks(dm, q, limit=25, api_key=key)
+                    hits = modpack_mod.search_cf_modpacks(
+                        dm, q, limit=25, api_key=key, game_version=gv or None,
+                        categories=cats or None)
                 else:
-                    hits = modpack_mod.modrinth_search(dm, q, limit=25)
+                    hits = modpack_mod.modrinth_search(
+                        dm, q, limit=25, game_version=gv or None,
+                        categories=cats or None)
             except Exception:
                 hits = []
         else:
@@ -1391,27 +1499,36 @@ class BackendAPI:
         vid = extra.get("version_id")
         fid = extra.get("file_id")
         gv = extra.get("game_version") or extra.get("mc_version")
+        # extra["version"] 是安装目标版本（版本隔离时装进 versions/<id>/mods）。
+        # 对齐 app/backend.py：以前桥这边直接丢掉这个键，AI 工具/前端指了
+        # 目标也照样装进实例根 mods，隔离版本进游戏后模组不见了还报安装成功。
+        target = str(extra.get("version") or "").strip()
+        mods_dir = self._mods_folder(inst, target) if target else None
+        if target:
+            log(f"安装目标: {inst.name} / {target}")
         if extra.get("path") or extra.get("url"):
             source = extra.get("path") or extra.get("url")
             log(f"安装模组: {source}")
             mods_mod.install_mod_from_source(dm, str(source), inst, on_progress=on_progress,
-                                             version_id=vid)
+                                             version_id=vid, mods_dir=mods_dir)
         elif src_kind.startswith("curse") and extra.get("id"):
-            log(f"从 CurseForge 安装模组 id={extra.get('id')}")
+            log(f"从 CurseForge 安装模组 id={extra.get('id')}" + (f" file={fid}" if fid else ""))
             mods_mod.install_curseforge_mod(
-                dm, extra["id"], inst, mc_version=gv, on_progress=on_progress, file_id=fid)
+                dm, extra["id"], inst, mc_version=gv, on_progress=on_progress, file_id=fid,
+                mods_dir=mods_dir)
         else:
             hit = extra if extra.get("slug") else self._lookup_mod(str(name), extra.get("source") or "Modrinth")
             if hit.get("id") and str(hit.get("source") or src_kind).lower().startswith("curse"):
                 log(f"从 CurseForge 安装模组 id={hit.get('id')}")
                 mods_mod.install_curseforge_mod(
                     dm, hit["id"], inst, mc_version=gv, on_progress=on_progress,
-                    file_id=fid or extra.get("version_id"))
+                    file_id=fid or extra.get("version_id"), mods_dir=mods_dir)
             else:
                 slug = hit.get("slug") or name
-                log(f"从 Modrinth 安装模组 {slug}")
+                log(f"从 Modrinth 安装模组 {slug}" + (f" @{vid}" if vid else ""))
                 mods_mod.install_mod_from_source(
-                    dm, str(slug), inst, mc_version=gv, on_progress=on_progress, version_id=vid)
+                    dm, str(slug), inst, mc_version=gv, on_progress=on_progress,
+                    version_id=vid, mods_dir=mods_dir)
         log("模组安装完成")
 
     def _install_content_impl(self, progress, log, kind, name, instance, extra=None):
@@ -1427,7 +1544,16 @@ class BackendAPI:
         files = (result or {}).get("files") or []
         log(f"完成: {', '.join(files) or name}")
         if kind == "datapack":
-            log("数据包已放到实例 datapacks 目录，请复制到对应存档的 datapacks 文件夹后进入世界。")
+            # 对齐 app/backend.py：extra 里带 save/world 时直接装进对应存档，
+            # 以前桥这边把这两个键静默丢掉，只提示手动复制。
+            save_name = extra.get("save") or extra.get("world")
+            if save_name:
+                from mclauncher import saves as saves_mod
+                dest = saves_mod.install_datapack_into_save(
+                    inst, (files or [name])[0], save_name, extra.get("version") or "")
+                log(f"已放入存档: {dest}")
+            else:
+                log("数据包已放到实例 datapacks 目录。可在存档管理里选世界安装进去。")
 
     def _download_java_impl(self, progress, log, major):
         dm = self._dm(progress, log)
@@ -1543,15 +1669,25 @@ class BackendAPI:
         log(f"Java -version: {ver_line}")
         log(f"使用 Java {java_mod.get_java_major(java_exe) or '?'}: {java_exe}")
         progress(2, 4, "构建启动参数")
+        # 对齐 app/backend.py：版本设置里的「认证服」在账号不是皮肤站时也按
+        # 自定义 Yggdrasil 注入。以前这里从不读 prep["auth_server"]，版本绑定
+        # 的皮肤站只在 Qt 生效，Python 桥（WinUI/WPF/EziApp）启动时静默走离线。
+        auth_server = str(prep.get("auth_server") or "").strip()
+        if auth_server and not props.get("authlib_api"):
+            props = dict(props)
+            props["authlib_api"] = auth_server
+            log(f"认证服: {auth_server}")
         if props.get("authlib_api"):
             from mclauncher import authlib as authlib_mod
             authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
+            log(f"皮肤站: {props.get('authlib_api')}")
         if props.get("nide8_id") or prep.get("nide8_id"):
             from mclauncher import nide8 as nide8_mod
             nide8_mod.ensure_jar(self._dm(progress, log), on_note=log)
             if prep.get("nide8_id") and not props.get("nide8_id"):
                 props = dict(props)
                 props["nide8_id"] = prep["nide8_id"]
+            log(f"统一通行证: {props.get('nide8_id')}")
         width, height = launch_flow.resolve_resolution(prep, width, height)
         cmd, _natives, _vdir, game_dir = build_launch_command(
             inst, version, props, java_exe,
@@ -1703,6 +1839,18 @@ class BackendAPI:
         props = self.accounts.launch_props(acc)
         prep = launch_flow.prepare(inst, version, memory_mb=int(CONFIG.get("memory_mb") or 4096))
         java_exe = java_mod.resolve_launch_java(inst.version_json(version) or {}, on_note=log)
+        # 对齐 app/backend.py：版本绑定的认证服要进导出的 .bat，
+        # 且 javaagent 指向的 jar 得先确保存在，否则导出的脚本跑不起来。
+        auth_server = str(prep.get("auth_server") or "").strip()
+        if auth_server and not props.get("authlib_api"):
+            props = dict(props)
+            props["authlib_api"] = auth_server
+        if props.get("authlib_api"):
+            from mclauncher import authlib as authlib_mod
+            authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
+        if props.get("nide8_id"):
+            from mclauncher import nide8 as nide8_mod
+            nide8_mod.ensure_jar(self._dm(progress, log), on_note=log)
         cmd, _n, _v, gdir = build_launch_command(
             inst, version, props, java_exe,
             memory_mb=prep["memory_mb"] or 4096,
@@ -1743,7 +1891,22 @@ class BackendAPI:
         servers_mod.delete_server(inst, index)
 
     def import_servers(self, instance: str, text: str) -> int:
+        """导入服务器列表：JSON 数组或逐行文本。
+
+        对齐 app/backend.py——EziApp 的导入框明确写着「粘贴 servers.txt 或
+        JSON 内容」，以前这里只解析逐行文本，贴 JSON 进来要么导入 0 个
+        要么解析出一条乱码服务器。
+        """
         from mclauncher import servers as servers_mod
+        import json as _json
+        stripped = (text or "").lstrip()
+        if stripped.startswith("["):
+            try:
+                data = _json.loads(text)
+            except _json.JSONDecodeError:
+                data = None
+            if isinstance(data, list):
+                return servers_mod.import_servers_json(self._instance(instance), data)
         inst = self._instance(instance)
         return servers_mod.import_servers_txt(inst, text)
 
@@ -1984,9 +2147,10 @@ class BackendAPI:
         from mclauncher.sysinfo import get_smart_recommendation
         return get_smart_recommendation()
 
-    def test_ai_connection(self) -> str:
+    def test_ai_connection(self, settings: dict | None = None) -> str:
+        """试连 AI。传 settings 就用它，让设置页能测「还没保存的值」而不必先落盘。"""
         from mclauncher.ai.client import test_connection
-        return test_connection(self.get_settings())
+        return test_connection(settings if settings is not None else self.get_settings())
 
     def ai_list_chats(self) -> dict:
         from mclauncher.ai import store as chat_store

@@ -28,6 +28,8 @@ target_link_libraries(pymcl-bridge PRIVATE
   pthread
   ole32
   shell32
+  advapi32
+  user32
 )
 
 set_target_properties(pymcl-bridge PROPERTIES
