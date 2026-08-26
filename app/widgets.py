@@ -118,6 +118,14 @@ class DeviceCodeDialog(MessageBoxBase):
     def show_status(self, text: str):
         self.hint.setText(text)
 
+    def show_failure(self, text: str):
+        """登录失败时把原因摆进对话框本体——错误条弹在遮罩后面等于没弹。"""
+        self.hint.setText(tr("登录失败：{msg}").format(msg=text))
+        self.code.setText("")
+        self.uri.setText("")
+        self._uri = ""
+        self.yesButton.setEnabled(False)
+
     def _open(self):
         if self._uri:
             QDesktopServices.openUrl(QUrl(self._uri))

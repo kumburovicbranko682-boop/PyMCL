@@ -307,5 +307,10 @@ class AccountPage(QWidget):
                             position=InfoBarPosition.TOP, duration=2500)
             self.reload()
         elif message != tr("已取消"):
+            if self._login_dlg:
+                # 模态框还开着：错误条会被遮罩挡住，人只会看到「正在获取登录代码…」。
+                # 把失败原因写进对话框本身，人当场就知道怎么了、该点「关闭」。
+                self._login_dlg.show_failure(message)
+                return
             InfoBar.error(tr("登录失败"), message, parent=self,
                           position=InfoBarPosition.TOP, duration=4000)

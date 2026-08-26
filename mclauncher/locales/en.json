@@ -684,6 +684,7 @@
   "留空则用设置页的全局分辨率": "Leave blank to use global resolution from Settings",
   "登录中…": "Signing in…",
   "登录失败": "Sign in failed",
+  "登录失败：{msg}": "Sign in failed: {msg}",
   "登录成功": "Sign in succeeded",
   "登录皮肤站": "Sign in to skin server",
   "登录统一通行证": "Sign in with Nide8 pass",
