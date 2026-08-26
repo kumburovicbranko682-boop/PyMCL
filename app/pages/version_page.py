@@ -397,7 +397,9 @@ class VersionPage(QWidget):
             box = MessageBox(tr("未选择"), tr("请先勾选要卸载的版本"), self)
             box.exec()
             return
-        box = MessageBox(tr("确认卸载"), f"将卸载 {len(selected)} 个版本：\n" + "\n".join(selected), self)
+        box = MessageBox(tr("确认卸载"),
+                         tr("将卸载 {0} 个版本：").format(len(selected))
+                         + "\n" + "\n".join(selected), self)
         if box.exec():
             for spec in selected:
                 try:
@@ -421,8 +423,8 @@ class VersionPage(QWidget):
             inst, vid = spec.split(" / ", 1) if " / " in spec else (
                 self.instance_box.currentText() or "default", spec)
             self.backend.repair_version(inst, vid)
-        InfoBar.success(tr("已开始修复"), f"{len(selected)} 个版本", parent=self,
-                        position=InfoBarPosition.TOP, duration=2500)
+        InfoBar.success(tr("已开始修复"), tr("{0} 个版本").format(len(selected)),
+                        parent=self, position=InfoBarPosition.TOP, duration=2500)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

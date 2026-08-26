@@ -442,7 +442,7 @@ class LaunchPage(QWidget):
         self.log_edit.clear()
         for w in warns:
             self.log_edit.appendPlainText(
-                f"[预检:warn] {w.get('title')}: {w.get('detail')}")
+                tr("[预检:{0}] {1}: {2}").format("warn", w.get("title"), w.get("detail")))
         self.progress.setValue(0)
         self.status_label.setText(tr("准备启动…"))
         self.launch_btn.setEnabled(False)

@@ -50,6 +50,8 @@ class VisibleStringsEnglishTests(unittest.TestCase):
             ("将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。", "w1"): "w1",
             ("将删除「{0}」。", "x.zip"): "x.zip",
             ("从「{0}」还原存档？", "b1"): "b1",
+            ("将卸载 {0} 个版本：", 2): "2",
+            ("[预检:{0}] {1}: {2}", ("warn", "Java", "too old")): "warn",
         }
         for (key, arg), must_contain in cases.items():
             args = arg if isinstance(arg, tuple) else (arg,)

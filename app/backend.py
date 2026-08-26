@@ -1864,7 +1864,7 @@ class BackendAPI(QObject):
         )
         for it in pf.get("items") or []:
             lvl = it.get("level")
-            line = f"[预检:{lvl}] {it.get('title')}: {it.get('detail')}"
+            line = tr("[预检:{0}] {1}: {2}").format(lvl, it.get("title"), it.get("detail"))
             if lvl == "error":
                 log(line)
             elif lvl == "warn":
