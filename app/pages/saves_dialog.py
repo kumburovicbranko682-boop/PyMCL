@@ -54,6 +54,7 @@ class SavesDialog(MessageBoxBase):
         self.cancelButton.hide()
         self.widget.setMinimumWidth(640)
         self.kind.currentTextChanged.connect(self.reload)
+        self.list.itemSelectionChanged.connect(self._update_buttons)
         self.open_btn.clicked.connect(self._open)
         self.del_btn.clicked.connect(self._delete)
         self.dp_btn.clicked.connect(self._datapack)
@@ -62,25 +63,42 @@ class SavesDialog(MessageBoxBase):
         self.export_btn.clicked.connect(self._export)
         self.reload()
 
-    def _set_actions(self, kind: str):
+    def _update_buttons(self):
+        """按钮可用态 = 当前类别 + 是否选中了条目。
+        以前 6 个按钮里 5 个在没选中时点了毫无反应（静默 return），
+        看起来就是坏的；灰掉才是诚实的状态。"""
+        kind = self.kind.currentText()
+        has_sel = self.list.currentItem() is not None and bool(self._selected_name())
         is_save = kind == tr("存档")
         is_backup = kind == tr("备份")
-        self.del_btn.setEnabled(is_save or is_backup)
+        self.open_btn.setEnabled(has_sel)
+        self.del_btn.setEnabled(has_sel and (is_save or is_backup))
         self.del_btn.setText(tr("删除备份") if is_backup else tr("删除存档"))
-        self.dp_btn.setEnabled(is_save)
-        self.backup_btn.setEnabled(is_save)
-        self.export_btn.setEnabled(is_save)
-        self.restore_btn.setEnabled(is_backup)
+        self.dp_btn.setEnabled(has_sel and is_save)
+        self.backup_btn.setEnabled(has_sel and is_save)
+        self.export_btn.setEnabled(has_sel and is_save)
+        self.restore_btn.setEnabled(has_sel and is_backup)
+
+    def _add_empty_hint(self, kind: str):
+        # 空列表不能是一片空白：占位行写清「这里为什么是空的、下一步去哪」
+        hints = {
+            tr("存档"): tr("还没有存档——进游戏创建一个世界后，这里就会出现"),
+            tr("备份"): tr("还没有备份——切到「存档」选中一个，点「备份存档」"),
+            tr("截图"): tr("还没有截图——游戏里按 F2 截图后会出现在这里"),
+            tr("崩溃报告"): tr("没有崩溃报告——游戏崩溃后会出现在这里"),
+            tr("日志"): tr("还没有日志——启动过游戏后会出现在这里"),
+        }
+        item = QListWidgetItem(hints.get(kind, tr("这里还是空的")))
+        item.setFlags(Qt.NoItemFlags)
+        self.list.addItem(item)
 
     def reload(self):
         self.list.clear()
         kind = self.kind.currentText()
-        self._set_actions(kind)
         if kind == tr("备份"):
             for r in self.backend.list_save_backups(self.instance, "", self.version):
                 self.list.addItem(f"{r['name']}  ({format_size(r.get('bytes') or 0)})")
-            return
-        if kind == tr("存档"):
+        elif kind == tr("存档"):
             rows = self.backend.list_saves(self.instance, self.version)
             for r in rows:
                 icon_path = r.get("icon", "")
@@ -98,23 +116,26 @@ class SavesDialog(MessageBoxBase):
                 if pix:
                     item.setIcon(QIcon(pix))
                 self.list.addItem(item)
-            return
-        mapk = {tr("截图"): "screenshots", tr("崩溃报告"): "crash-reports", tr("日志"): "logs"}
-        rows = self.backend.list_media(self.instance, mapk[kind], self.version)
-        for r in rows:
-            path = r.get("path", "")
-            if kind == tr("截图") and path:
-                try:
-                    pix = QPixmap(path)
-                    if not pix.isNull():
-                        thumb = pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                        item = QListWidgetItem(r["name"])
-                        item.setIcon(QIcon(thumb))
-                        self.list.addItem(item)
-                        continue
-                except Exception:
-                    pass
-            self.list.addItem(r["name"])
+        else:
+            mapk = {tr("截图"): "screenshots", tr("崩溃报告"): "crash-reports", tr("日志"): "logs"}
+            rows = self.backend.list_media(self.instance, mapk[kind], self.version)
+            for r in rows:
+                path = r.get("path", "")
+                if kind == tr("截图") and path:
+                    try:
+                        pix = QPixmap(path)
+                        if not pix.isNull():
+                            thumb = pix.scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                            item = QListWidgetItem(r["name"])
+                            item.setIcon(QIcon(thumb))
+                            self.list.addItem(item)
+                            continue
+                    except Exception:
+                        pass
+                self.list.addItem(r["name"])
+        if self.list.count() == 0:
+            self._add_empty_hint(kind)
+        self._update_buttons()
 
     def _selected_name(self) -> str:
         item = self.list.currentItem()
