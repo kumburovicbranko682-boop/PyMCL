@@ -259,8 +259,18 @@ class AccountPage(QWidget):
             return
         self._login_dlg = DeviceCodeDialog(self.window())
         self._login_task = self.backend.start_microsoft_login()
-        self._login_dlg.exec()
+        accepted = self._login_dlg.exec()
         self._login_dlg = None
+        # 关掉设备码框 = 放弃登录：不取消的话轮询会一直问微软要令牌，
+        # 直到超时凭空弹一条「登录失败」（启动页早修了，这里是同一个坑）。
+        if not accepted and self._login_task:
+            cancel = getattr(self.backend, "cancel_task", None)
+            if callable(cancel):
+                try:
+                    cancel(self._login_task)
+                except Exception:
+                    pass
+            self._login_task = None
         self.reload()
 
     def _ygg(self):
