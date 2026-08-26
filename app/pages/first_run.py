@@ -51,7 +51,8 @@ class FirstRunDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.iso_hint)
 
         self.yesButton.setText(tr("开始使用"))
-        self.cancelButton.setText(tr("以后再说"))
+        # 取消 = first_run 置 False，向导不会再弹；按钮必须说实话
+        self.cancelButton.setText(tr("跳过（用默认设置）"))
         self.widget.setMinimumWidth(480)
 
     def _browse(self):
