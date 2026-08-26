@@ -1181,22 +1181,22 @@ class BackendAPI(QObject):
                 except Exception as exc:
                     failed.append(f"{name}: {exc}")
             if not done and failed:
-                return {"ok": False, "message": "未能禁用：" + "; ".join(failed)}
-            msg = f"已禁用 {len(done)} 个 Mod"
+                return {"ok": False, "message": tr("未能禁用：") + "; ".join(failed)}
+            msg = tr("已禁用 {0} 个 Mod").format(len(done))
             if failed:
-                msg += "；部分失败：" + "; ".join(failed)
+                msg += tr("；部分失败：") + "; ".join(failed)
             return {"ok": True, "message": msg}
 
         if aid == "repair_version":
             if not version:
-                return {"ok": False, "message": "报告里没有版本号，无法修复"}
+                return {"ok": False, "message": tr("报告里没有版本号，无法修复")}
             tid = self.repair_version(instance, version)
-            return {"ok": True, "message": f"已开始修复 {version}", "task_id": tid}
+            return {"ok": True, "message": tr("已开始修复 {0}").format(version), "task_id": tid}
 
         if aid == "need_java":
             major = int(action.get("major") or 17)
             tid = self.download_java(str(major), vendor="adoptium")
-            return {"ok": True, "message": f"已开始下载 Java {major}", "task_id": tid}
+            return {"ok": True, "message": tr("已开始下载 Java {0}").format(major), "task_id": tid}
 
         if aid == "bump_memory":
             mb = int(action.get("memory_mb") or 6144)
@@ -1204,27 +1204,27 @@ class BackendAPI(QObject):
             CONFIG.set("memory_mb", mb)
             CONFIG.save()
             self._emit_ui_changed()
-            return {"ok": True, "message": f"默认内存已设为 {mb} MB"}
+            return {"ok": True, "message": tr("默认内存已设为 {0} MB").format(mb)}
 
         if aid == "open_mods_folder":
             inst = self._instance(instance)
             folder = self._mods_folder(inst, version)
             folder.mkdir(parents=True, exist_ok=True)
             open_path(folder)
-            return {"ok": True, "message": "已打开 Mods 文件夹"}
+            return {"ok": True, "message": tr("已打开 Mods 文件夹")}
 
         if aid == "open_crash_file":
             target = (action.get("path") or report.get("direct_file") or "").strip()
             if not target:
-                return {"ok": False, "message": "没有可打开的崩溃文件"}
+                return {"ok": False, "message": tr("没有可打开的崩溃文件")}
             from pathlib import Path as _P
             if not _P(target).is_file():
-                return {"ok": False, "message": f"文件不存在：{target}"}
+                return {"ok": False, "message": tr("文件不存在：{0}").format(target)}
             open_path(target)
-            return {"ok": True, "message": "已打开崩溃报告"}
+            return {"ok": True, "message": tr("已打开崩溃报告")}
 
         if aid == "open_gpu_hint":
-            tip = (
+            tip = tr(
                 "显卡/OpenGL 相关崩溃：请更新显卡驱动，关闭独显强制、"
                 "超采样/滤镜，并确认不是远程桌面/虚拟机缺 OpenGL。"
             )
@@ -1243,9 +1243,9 @@ class BackendAPI(QObject):
             except Exception:
                 pass
             self._emit_ui_changed()
-            return {"ok": True, "message": "已清空自定义 JVM 参数"}
+            return {"ok": True, "message": tr("已清空自定义 JVM 参数")}
 
-        return {"ok": False, "message": f"未知动作: {aid}"}
+        return {"ok": False, "message": tr("未知动作: {0}").format(aid)}
 
     def export_modpack(self, instance: str, dest: str = "") -> str:
         return self.start_task(tr("导出整合包") + f" {instance}", self._export_pack_impl, instance, dest)

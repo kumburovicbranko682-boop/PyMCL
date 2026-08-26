@@ -91,5 +91,43 @@ class CrashDialogFeedbackTests(unittest.TestCase):
         self.assertNotIn('f"完整日志：', src, "「完整日志：」必须走 tr()")
 
 
+class CrashActionMessageTests(unittest.TestCase):
+    """「建议操作」点击后的结果文案必须走 tr()，英文界面不能回中文。"""
+
+    def _backend(self):
+        from app.backend import BackendAPI
+        return BackendAPI()
+
+    def test_bump_memory_message_translated(self):
+        from mclauncher.i18n import tr
+        out = self._backend().apply_crash_action(
+            {"id": "bump_memory", "memory_mb": 6144}, dict(_REPORT))
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["message"], tr("默认内存已设为 {0} MB").format(6144))
+
+    def test_repair_without_version_translated(self):
+        from mclauncher.i18n import tr
+        report = dict(_REPORT)
+        report["version"] = ""
+        out = self._backend().apply_crash_action({"id": "repair_version"}, report)
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["message"], tr("报告里没有版本号，无法修复"))
+
+    def test_unknown_action_translated(self):
+        from mclauncher.i18n import tr
+        out = self._backend().apply_crash_action({"id": "nope"}, dict(_REPORT))
+        self.assertFalse(out["ok"])
+        self.assertEqual(out["message"], tr("未知动作: {0}").format("nope"))
+
+    def test_gpu_hint_key_exists_in_locales(self):
+        import json
+        key = ("显卡/OpenGL 相关崩溃：请更新显卡驱动，关闭独显强制、"
+               "超采样/滤镜，并确认不是远程桌面/虚拟机缺 OpenGL。")
+        for loc in ("en.json", "zh_CN.json"):
+            data = json.loads(
+                (ROOT / "mclauncher" / "locales" / loc).read_text(encoding="utf-8"))
+            self.assertIn(key, data, f"{loc} 缺少显卡崩溃提示的翻译")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

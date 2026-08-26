@@ -1030,5 +1030,19 @@
   "将删除「{0}」。": "This deletes “{0}”.",
   "修复": "Repair",
   "导出整合包": "Export modpack",
-  "检查模组更新": "Check mod updates"
+  "检查模组更新": "Check mod updates",
+  "未能禁用：": "Could not disable: ",
+  "已禁用 {0} 个 Mod": "Disabled {0} mod(s)",
+  "；部分失败：": "; some failed: ",
+  "报告里没有版本号，无法修复": "The report has no version number, so repair can't start",
+  "已开始修复 {0}": "Repair of {0} started",
+  "已开始下载 Java {0}": "Java {0} download started",
+  "默认内存已设为 {0} MB": "Default memory set to {0} MB",
+  "已打开 Mods 文件夹": "Mods folder opened",
+  "没有可打开的崩溃文件": "No crash file to open",
+  "文件不存在：{0}": "File does not exist: {0}",
+  "已打开崩溃报告": "Crash report opened",
+  "已清空自定义 JVM 参数": "Custom JVM arguments cleared",
+  "未知动作: {0}": "Unknown action: {0}",
+  "显卡/OpenGL 相关崩溃：请更新显卡驱动，关闭独显强制、超采样/滤镜，并确认不是远程桌面/虚拟机缺 OpenGL。": "GPU/OpenGL crash: update your graphics driver, turn off forced dedicated-GPU / supersampling / filters, and make sure you're not on a remote desktop or VM without OpenGL."
 }
