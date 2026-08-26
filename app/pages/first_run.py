@@ -80,5 +80,14 @@ class FirstRunDialog(MessageBoxBase):
         if path:
             try:
                 self.backend.set_game_dir(path)
-            except Exception:
-                pass
+            except Exception as e:
+                # 静默吞掉 = 向导装作成功、目录其实没生效（假状态）。
+                # 向导此刻正在关闭，气泡挂到宿主窗口上。
+                from qfluentwidgets import InfoBar, InfoBarPosition
+                host = self.parent()
+                if isinstance(host, QWidget):
+                    InfoBar.warning(
+                        tr("游戏目录未生效"),
+                        tr("{0}；可稍后到「设置」重新选择").format(e),
+                        parent=host, position=InfoBarPosition.TOP,
+                        duration=6000)

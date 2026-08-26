@@ -44,6 +44,36 @@ class FirstRunSkipTests(unittest.TestCase):
             dlg.deleteLater()
             _app.processEvents()
 
+    def test_bad_game_dir_is_not_silently_dropped(self):
+        """apply() 里目录设置失败不许装作成功：宿主窗口必须出现警告气泡。"""
+        from qfluentwidgets import InfoBar
+
+        from app.pages.first_run import FirstRunDialog
+
+        backend = BackendAPI(None)
+
+        def boom(path):
+            raise OSError("disk full")
+
+        backend.set_game_dir = boom
+        _host.show()
+        _app.processEvents()
+        dlg = FirstRunDialog(backend, _host)
+        try:
+            dlg.game_dir.setText("/some/dir")
+            dlg.apply()
+            _app.processEvents()
+            bars = _host.findChildren(InfoBar)
+            texts = " ".join(b.title + b.content for b in bars)
+            self.assertIn(tr("游戏目录未生效"), texts,
+                          "目录没生效必须让用户看见，不能静默吞掉")
+            self.assertIn("disk full", texts)
+            # 其余设置仍应正常落盘（失败只影响目录这一项）
+            self.assertFalse(backend.get_setting("first_run", True))
+        finally:
+            dlg.deleteLater()
+            _app.processEvents()
+
     def test_skip_marks_first_run_done(self):
         CONFIG.set("first_run", True)
         CONFIG.set("feedback_consent", False)   # 挡掉同意弹窗
