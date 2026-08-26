@@ -4,7 +4,7 @@
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtWidgets import QTextBrowser, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, InfoBar, InfoBarPosition, StrongBodyLabel,
+    CaptionLabel, FluentIcon as FIF, InfoBar, InfoBarPosition, StrongBodyLabel,
 )
 
 from mclauncher.config import CONFIG
@@ -349,8 +349,17 @@ class LaunchPage(QWidget):
         self._sync_banner()
 
     def _sync_banner(self):
-        version = self.version_box.currentText() or "—"
+        version = self.version_box.currentText()
         instance = self.instance_box.currentText() or "default"
+        if not version:
+            # 还没有可启动的版本：横幅不再指挥用户点「启动游戏」，
+            # 主按钮变成「安装游戏」直接带去 下载 → 原版游戏。
+            self._set_install_mode(True)
+            self.banner.set_info(
+                tr("先安装一个游戏版本"),
+                tr("实例 {0} 还没有安装版本 · 点击「安装游戏」前往下载").format(instance))
+            return
+        self._set_install_mode(False)
         pack_name = ""
         pack_ver = ""
         pack_mc = ""
@@ -366,12 +375,32 @@ class LaunchPage(QWidget):
         else:
             self.banner.set_info(version, f"实例 {instance} · 点击「启动游戏」进入世界")
 
+    def _set_install_mode(self, install: bool):
+        """没版本时主按钮是「安装游戏」（跳下载页），有版本时是「启动游戏」。"""
+        if getattr(self, "_install_mode", None) == bool(install):
+            return
+        self._install_mode = bool(install)
+        if install:
+            self.launch_btn.setText(tr("安装游戏"))
+            self.launch_btn.setIcon(FIF.DOWNLOAD)
+        else:
+            self.launch_btn.setText(tr("启动游戏"))
+            self.launch_btn.setIcon(FIF.PLAY)
+
     def _on_launch(self):
         from qfluentwidgets import MessageBox
 
         self._flush_launch_defaults()
         instance = self.instance_box.currentText() or "default"
         version = self.version_box.currentText()
+        if not version:
+            # 没版本可启动：不弹「预检未通过」死胡同框，直接带去安装。
+            self.nav_to("version")
+            InfoBar.info(
+                tr("先安装一个版本"),
+                tr("选一个 Minecraft 版本安装，完成后回到启动页即可启动"),
+                parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+            return
         memory_mb = self.memory_slider.value()
         java = self._selected_java()
         try:
