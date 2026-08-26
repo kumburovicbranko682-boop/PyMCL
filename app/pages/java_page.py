@@ -135,7 +135,11 @@ class JavaPage(QWidget):
         local = self.backend.get_java_list(scan_system=False)
         self._fill(local)
         if not scan_system:
-            return
+            # 缓存为空不等于机器上没有 Java：第一次进页自动补一轮系统
+            # 扫描（后台），免得空状态劝人去下载其实已经装好的东西。
+            if local or getattr(self, "_auto_scanned", False):
+                return
+            self._auto_scanned = True
         call_async = getattr(self.backend, "call_async", None)
         if callable(call_async):
             call_async(
@@ -165,7 +169,10 @@ class JavaPage(QWidget):
                 item.widget().deleteLater()
         javas = list(javas or [])
         if not javas:
-            self.env_layout.addWidget(EmptyState(FIF.CODE, tr("未检测到 Java，请从下方下载")))
+            self.env_layout.addWidget(EmptyState(
+                FIF.CODE, tr("未检测到 Java：可重新检测本机，或从下方下载"),
+                action_text=tr("重新检测"),
+                on_action=lambda: self.reload(scan_system=True)))
             return
         for j in javas:
             self.env_layout.addWidget(JavaCard(j))
