@@ -47,6 +47,11 @@ def check(cond, msg):
 # --- 首次向导：每一档都有人话解释，随选项联动 ---
 from app.pages.first_run import FirstRunDialog
 dlg = FirstRunDialog(win.backend, win)
+# 取消 = 跳过且不再询问（first_run 被置 False），按钮不许写「以后再说」
+check("以后再说" not in dlg.cancelButton.text(),
+      "cancel must not promise to ask again - it never does")
+check("跳过" in dlg.cancelButton.text() and "默认" in dlg.cancelButton.text(),
+      f"cancel should say skip-with-defaults, got {dlg.cancelButton.text()!r}")
 check(dlg.iso_hint.text() == ISOLATION_HINTS["none"],
       f"wizard hint should explain the default, got {dlg.iso_hint.text()!r}")
 dlg.iso.setCurrentText(ISOLATION_LABELS["all"])
