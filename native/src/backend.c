@@ -830,6 +830,11 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_AddNumberToObject(o, "download_limit_kbps", config_int("download_limit_kbps", 0));
         cJSON_AddStringToObject(o, "homepage_mode", config_str("homepage_mode", "news"));
         cJSON_AddStringToObject(o, "custom_homepage", config_str("custom_homepage", ""));
+        /* 反馈同意状态（对齐 bridge/api.py）。漏掉它 UI 就无法先询问再上传：
+         * 提交反馈永远撞上「需要先同意上传诊断数据」，而界面上又没有开关。 */
+        cJSON_AddBoolToObject(o, "feedback_consent", config_bool("feedback_consent", 0));
+        cJSON_AddBoolToObject(o, "feedback_heartbeat", config_bool("feedback_heartbeat", 1));
+        cJSON_AddStringToObject(o, "feedback_url", config_str("feedback_url", ""));
         cJSON_AddBoolToObject(o, "auto_check_update", config_bool("auto_check_update", 1));
         cJSON_AddBoolToObject(o, "ui_fly_animation", config_bool("ui_fly_animation", 1));
         cJSON_AddNumberToObject(o, "ui_fly_duration_ms", config_int("ui_fly_duration_ms", 620));
@@ -867,6 +872,7 @@ cJSON *backend_call(const char *method, cJSON *params) {
                 "ai_mode", "ai_gateway_url", "ai_base_url", "ai_api_key", "ai_model",
                 "default_isolation", "default_jvm_args", "launcher_visibility",
                 "gc_preset", "download_source", "homepage_mode", "custom_homepage",
+                "feedback_url",
             };
             for (size_t i = 0; i < sizeof(str_keys) / sizeof(str_keys[0]); i++) {
                 cJSON *v = cJSON_GetObjectItem(d, str_keys[i]);
@@ -879,6 +885,13 @@ cJSON *backend_call(const char *method, cJSON *params) {
             config_set_int("ui_fly_duration_ms", (int)cJSON_GetObjectItem(d, "ui_fly_duration_ms")->valuedouble);
         if (cJSON_IsBool(cJSON_GetObjectItem(d, "auto_check_update")))
             config_set_bool("auto_check_update", cJSON_IsTrue(cJSON_GetObjectItem(d, "auto_check_update")));
+        /* 以前 feedback_consent 在这里被静默丢弃：UI 询问用户、用户点了
+         * 「同意」、save_settings 返回 true，可 config.json 里什么都没写，
+         * 下一次提交反馈照样被 Python 端的 has_consent() 拦下。 */
+        if (cJSON_IsBool(cJSON_GetObjectItem(d, "feedback_consent")))
+            config_set_bool("feedback_consent", cJSON_IsTrue(cJSON_GetObjectItem(d, "feedback_consent")));
+        if (cJSON_IsBool(cJSON_GetObjectItem(d, "feedback_heartbeat")))
+            config_set_bool("feedback_heartbeat", cJSON_IsTrue(cJSON_GetObjectItem(d, "feedback_heartbeat")));
         if (cJSON_IsBool(cJSON_GetObjectItem(d, "ui_fly_animation")))
             config_set_bool("ui_fly_animation", cJSON_IsTrue(cJSON_GetObjectItem(d, "ui_fly_animation")));
         if (cJSON_IsBool(cJSON_GetObjectItem(d, "ui_dark")))
