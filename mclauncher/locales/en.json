@@ -1092,5 +1092,8 @@
   "已选择": "Selection made",
   "拦截重复搜索": "Skipped duplicate search",
   "还没有记录可清除": "No playtime recorded yet, nothing to clear",
-  "游玩时长记录已全部清空": "All playtime records have been cleared"
+  "游玩时长记录已全部清空": "All playtime records have been cleared",
+  "缺少账号信息": "Missing account details",
+  "请填写邮箱 / 用户名和密码": "Enter your email / username and password",
+  "请填写用户名和密码": "Enter your username and password"
 }
