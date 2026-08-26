@@ -128,7 +128,12 @@ class FeedbackPage(QWidget):
             btn = TransparentPushButton(art.get("title") or art.get("id") or "?", self)
             btn.setProperty("article_id", art.get("id") or "")
             btn.clicked.connect(lambda _=False, a=art: self._show_help(a))
-            self._help_host.addWidget(btn)
+            # 按钮不铺满整行：直接加进 VBox 会拉满宽、文字居中，
+            # 一列 FAQ 像悬在卡片中间的浮动按钮
+            row = QHBoxLayout()
+            row.addWidget(btn)
+            row.addStretch(1)
+            self._help_host.addLayout(row)
 
     def _show_help(self, art: dict):
         from qfluentwidgets import MessageBox

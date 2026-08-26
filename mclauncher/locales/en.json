@@ -755,6 +755,7 @@
   "自动选择": "Auto",
   "自动（官方>4秒改 BMCLAPI）": "Auto (BMCLAPI if official >4s)",
   "自动（官方慢则 BMCLAPI）": "Auto (BMCLAPI when official is slow)",
+  "自定义": "Custom",
   "自定义 NewAPI": "Custom NewAPI",
   "自定义主页": "Custom Home Page",
   "自定义侧栏": "Customize sidebar",
@@ -966,5 +967,7 @@
   "桌面快捷方式：\n{0}\n\n双击即可直接启动该版本。": "Desktop shortcut:\n{0}\n\nDouble-click it to launch this version directly.",
   "将卸载 {0} 个版本：": "About to uninstall {0} version(s):",
   "{0} 个版本": "{0} version(s)",
-  "还没有安装版本，从上方选择一个版本开始": "No versions installed yet — pick one above to get started"
+  "还没有安装版本，从上方选择一个版本开始": "No versions installed yet — pick one above to get started",
+  "确定删除实例「{0}」？其中的存档与配置将一并移除。": "Delete instance \"{0}\"? Its saves and settings will be removed as well.",
+  "实例「{0}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。": "Java used when launching instance \"{0}\". Auto-select matches the game version (17 for 1.19+, 8 for legacy)."
 }

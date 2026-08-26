@@ -152,6 +152,20 @@ def grid_columns(scroll, page, card_w: int, spacing: int = 12, gutter: int = 8) 
     return max(1, (avail + spacing) // (card_w + spacing))
 
 
+def anchor_grid(grid, col: int, row: int):
+    """卡片网格贴左上：让第 col 列 / 第 row 行（都在内容之后）吃掉剩余空间。
+
+    QGridLayout 只建有内容的列，这些列会平分宿主宽度；卡片是固定尺寸，
+    卡少的时候就「悬浮居中」在各自的格子里。重填时列数会变，先清掉
+    旧 stretch 再设尾部，免得上一轮的尾列残留在中间。"""
+    for c in range(grid.columnCount() + 1):
+        grid.setColumnStretch(c, 0)
+    for r in range(grid.rowCount() + 1):
+        grid.setRowStretch(r, 0)
+    grid.setColumnStretch(col, 1)
+    grid.setRowStretch(row, 1)
+
+
 class IconTile(QWidget):
     """圆角彩色磁贴，中间显示一个字符。"""
 

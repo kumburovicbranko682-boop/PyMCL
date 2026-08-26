@@ -9,7 +9,7 @@ from qfluentwidgets import (
 )
 
 from mclauncher.config import CONFIG
-from ..widgets import ComboDialog, IconTile, InputDialog, Pill, grid_columns
+from ..widgets import ComboDialog, IconTile, InputDialog, Pill, anchor_grid, grid_columns
 from mclauncher.i18n import tr
 
 
@@ -28,12 +28,12 @@ class InstanceCard(SimpleCardWidget):
         name_box = QVBoxLayout()
         name_box.setSpacing(2)
         name_box.addWidget(StrongBodyLabel(info["name"]))
-        name_box.addWidget(CaptionLabel(f'{info["versions"]} 个版本'))
+        name_box.addWidget(CaptionLabel(tr("{0} 个版本").format(info["versions"])))
         top.addLayout(name_box, 1)
         top.addWidget(Pill(tr("默认") if info["name"] == CONFIG.get("default_instance") else tr("实例"), "#4C8BF5"))
         layout.addLayout(top)
         layout.addWidget(CaptionLabel(str(info.get("mc") or "")))
-        layout.addWidget(CaptionLabel(f"Java · {info.get('java_label') or '自动选择'}"))
+        layout.addWidget(CaptionLabel(f"Java · {info.get('java_label') or tr('自动选择')}"))
         layout.addStretch(1)
 
         actions = QHBoxLayout()
@@ -131,6 +131,7 @@ class InstancePage(QWidget):
             while self.grid.count():
                 item = self.grid.takeAt(0)
                 if item.widget():
+                    item.widget().hide()
                     item.widget().deleteLater()
             insts = self.backend.get_instances()
             cols = grid_columns(self.scroll, self, 240)
@@ -139,6 +140,7 @@ class InstancePage(QWidget):
                 self.grid.addWidget(InstanceCard(inst, self), i // cols, i % cols)
             n = len(insts)
             self.grid.addWidget(NewInstanceCard(self), n // cols, n % cols)
+            anchor_grid(self.grid, cols, n // cols + 1)
             # reload 会重建卡片宿主，深色底要再刷一次
             from ..pcl_chrome import paint_theme_surfaces
             paint_theme_surfaces(self)
@@ -155,7 +157,8 @@ class InstancePage(QWidget):
             self.reload()
 
     def delete(self, name: str):
-        box = MessageBox(tr("删除实例"), f"确定删除实例「{name}」？其中的存档与配置将一并移除。", self)
+        box = MessageBox(tr("删除实例"),
+                         tr("确定删除实例「{0}」？其中的存档与配置将一并移除。").format(name), self)
         if box.exec():
             try:
                 self.backend.delete_instance(name)
@@ -187,7 +190,7 @@ class InstancePage(QWidget):
             current = self.backend.java_combo_label_for(name, opts)
             dlg = ComboDialog(
                 tr("选择 Java"),
-                f"实例「{name}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。",
+                tr("实例「{0}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。").format(name),
                 labels, current, self,
             )
             if dlg.exec():
@@ -238,3 +241,14 @@ class InstancePage(QWidget):
         if cols == self._cols:
             return
         self._resize_timer.start()
+
+    def showEvent(self, event):
+        """懒构造时页面只有 100px 宽，列数算成 1、实例卡挤成居中一列；
+        且 resizeEvent 里的 isVisible 守卫会吞掉显示前的那次修正。
+        首次显示后补一次列数校验。"""
+        super().showEvent(event)
+        QTimer.singleShot(0, self._recheck_cols)
+
+    def _recheck_cols(self):
+        if grid_columns(self.scroll, self, 240) != self._cols:
+            self.reload()

@@ -564,15 +564,21 @@ class AiPage(QWidget):
         self.status = CaptionLabel("")
         head.addWidget(self.status)
         head.addStretch(1)
+        # 空闲时不摆一排灰按钮：停止只在回复中出现，重试只在有历史时出现
         self.stop_btn = PushButton(FIF.CLOSE, tr("停止"))
         self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
         self.retry_btn = TransparentPushButton(FIF.SYNC, tr("重试"))
         self.retry_btn.setEnabled(False)
+        self.retry_btn.setVisible(False)
         head.addWidget(self.stop_btn)
         head.addWidget(self.retry_btn)
         main.addLayout(head)
 
-        chips = QHBoxLayout()
+        # 建议话术只在空对话时展示，聊起来后让位给内容
+        self._chips_host = QWidget()
+        chips = QHBoxLayout(self._chips_host)
+        chips.setContentsMargins(0, 0, 0, 0)
         chips.setSpacing(8)
         for t in _CHIPS:
             b = PushButton(t)
@@ -580,7 +586,7 @@ class AiPage(QWidget):
             b.clicked.connect(lambda *_a, s=t: self._send_text(s))
             chips.addWidget(b)
         chips.addStretch(1)
-        main.addLayout(chips)
+        main.addWidget(self._chips_host)
 
         self.scroll = ScrollArea(self)
         self.scroll.setWidgetResizable(True)
@@ -645,7 +651,8 @@ class AiPage(QWidget):
         self.chat_list.setStyleSheet(
             f"QListWidget {{ border: none; background: transparent; color: {Theme.text}; }}"
             f"QListWidget::item {{ padding: 8px; border-radius: 6px; }}"
-            f"QListWidget::item:selected {{ background: {Theme.hover}; }}"
+            # 不写 color 的话选中项走 Qt 默认高亮白字，浅色 hover 底上直接隐身
+            f"QListWidget::item:selected {{ background: {Theme.hover}; color: {Theme.text}; }}"
         )
         self._input_box.setStyleSheet(
             f"QFrame {{ background: {Theme.card}; border: 1px solid {Theme.line}; border-radius: 10px; }}"
@@ -661,9 +668,9 @@ class AiPage(QWidget):
         s = self.backend.get_settings()
         mode = s.get("ai_mode") or "public"
         if mode == "custom":
-            label = f"自定义 · {s.get('ai_model') or DEFAULT_MODEL}"
+            label = f"{tr('自定义')} · {s.get('ai_model') or DEFAULT_MODEL}"
         else:
-            label = f"公益接口 · {DEFAULT_MODEL}"
+            label = f"{tr('公益接口')} · {DEFAULT_MODEL}"
         self.status.setText(label)
 
     def _perm_level(self) -> str:
@@ -725,7 +732,9 @@ class AiPage(QWidget):
         active = self._store.get("active_id")
         pick = None
         for c in self._store.get("chats") or []:
-            item = QListWidgetItem(c.get("title") or tr("对话"))
+            # 存盘里的默认标题是中文原文，展示时过一遍 tr，英文界面不漏翻
+            title = c.get("title") or "对话"
+            item = QListWidgetItem(tr(title) if title in ("新对话", "对话") else title)
             item.setData(Qt.UserRole, c.get("id"))
             self.chat_list.addItem(item)
             if c.get("id") == active:
@@ -739,6 +748,7 @@ class AiPage(QWidget):
             item = self.chat.takeAt(0)
             w = item.widget()
             if w:
+                w.hide()
                 w.deleteLater()
         self._assistant_bubble = None
         self._stream = ""
@@ -758,6 +768,9 @@ class AiPage(QWidget):
                 role = m.get("role") or "assistant"
                 if role in ("user", "assistant", "error"):
                     self._add_bubble(role, m.get("content") or "")
+        self._chips_host.setVisible(not self._history)
+        self.retry_btn.setVisible(bool(self._history) and not self._worker)
+        self.retry_btn.setEnabled(bool(self._history) and not self._worker)
         self._scroll_bottom()
 
     def _persist(self):
@@ -823,7 +836,10 @@ class AiPage(QWidget):
     def _busy(self, on: bool):
         self.send_btn.setEnabled(not on)
         self.stop_btn.setEnabled(on)
-        self.retry_btn.setEnabled(not on and bool(self._history))
+        self.stop_btn.setVisible(on)
+        retry_on = not on and bool(self._history)
+        self.retry_btn.setEnabled(retry_on)
+        self.retry_btn.setVisible(retry_on)
 
     def _send_text(self, text: str):
         text = (text or "").strip()
@@ -843,6 +859,7 @@ class AiPage(QWidget):
     def _send(self, text: str, *, echo: bool = True):
         if echo:
             self._add_bubble("user", text)
+        self._chips_host.setVisible(False)
         self._stream = ""
         self._notes = []
         self._tool_lines = {}

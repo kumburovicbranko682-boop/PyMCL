@@ -10,7 +10,7 @@ from qfluentwidgets import (
 )
 
 from mclauncher.config import CONFIG
-from ..widgets import EmptyState, Pill, grid_columns
+from ..widgets import EmptyState, Pill, anchor_grid, grid_columns
 from mclauncher.i18n import tr
 
 
@@ -230,16 +230,21 @@ class VersionPage(QWidget):
         if not rows:
             self.grid.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的版本")), 0, 0)
             self._cols = 1
+            # 空态占满整个滚动区居中，而不是被上一轮的尾列 stretch 挤扁
+            anchor_grid(self.grid, 0, 0)
             return
         cols = grid_columns(self.scroll, self, 240)
         self._cols = cols
         shown = rows[: self._limit]
         for i, v in enumerate(shown):
             self.grid.addWidget(VersionCard(v, self._install), i // cols, i % cols)
+        last_row = (len(shown) - 1) // cols
         if len(rows) > self._limit:
             more = PushButton(tr("加载更多（还有 {0}）").format(len(rows) - self._limit))
             more.clicked.connect(self._more)
-            self.grid.addWidget(more, (len(shown) + cols - 1) // cols, 0, 1, cols)
+            last_row = (len(shown) + cols - 1) // cols
+            self.grid.addWidget(more, last_row, 0, 1, cols)
+        anchor_grid(self.grid, cols, last_row + 1)
 
     def _reload_installed(self):
         while self.installed_area.count():
