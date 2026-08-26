@@ -40,9 +40,9 @@ class PlaytimePage(QWidget):
         self._title_lab.setStyleSheet(f"color: {Theme.text}; font-size: 18px;")
         tl.addWidget(self._title_lab)
         tl.addStretch(1)
-        clear_btn = PushButton(tr("清除记录"))
-        clear_btn.clicked.connect(self._on_clear)
-        tl.addWidget(clear_btn)
+        self.clear_btn = PushButton(tr("清除记录"))
+        self.clear_btn.clicked.connect(self._on_clear)
+        tl.addWidget(self.clear_btn)
         root.addWidget(self.topBar)
 
         # 内容
@@ -97,6 +97,9 @@ class PlaytimePage(QWidget):
         elif isinstance(data, dict):
             rows = [(name, d) for name, d in data.items()
                     if isinstance(d, dict) and d.get("total", 0) > 0]
+        # 没有记录时「清除记录」还能点，会对着空数据弹「不可恢复」确认框
+        self.clear_btn.setEnabled(bool(rows))
+        self.clear_btn.setToolTip("" if rows else tr("还没有记录可清除"))
         # 只按顶层 total 判空会漏掉「所有实例时长都是 0」这种情况，那样会渲染出一整页空白
         if not rows:
             self._body.setCurrentWidget(self.empty)
@@ -200,7 +203,8 @@ class PlaytimePage(QWidget):
         if box.exec():
             try:
                 self.backend.clear_playtime(self._instance)
-                InfoBar.success(tr("已清除"), "", duration=2000, parent=self)
+                InfoBar.success(tr("已清除"), tr("游玩时长记录已全部清空"),
+                                duration=2000, parent=self)
                 self.reload(self._instance)
             except Exception as e:
                 InfoBar.error(tr("清除失败"), str(e), duration=3000, parent=self)

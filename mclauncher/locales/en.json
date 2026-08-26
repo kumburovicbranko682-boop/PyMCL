@@ -1090,5 +1090,7 @@
   "改配置 {0} @ {1}": "Edit config {0} @ {1}",
   "执行 {0}": "Run {0}",
   "已选择": "Selection made",
-  "拦截重复搜索": "Skipped duplicate search"
+  "拦截重复搜索": "Skipped duplicate search",
+  "还没有记录可清除": "No playtime recorded yet, nothing to clear",
+  "游玩时长记录已全部清空": "All playtime records have been cleared"
 }
