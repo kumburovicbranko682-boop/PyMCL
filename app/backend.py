@@ -157,6 +157,8 @@ class BackendAPI(QObject):
     task_count_changed = Signal(int)
     game_started = Signal()
     game_exited = Signal(object)
+    # 启动时按设置自动弹日志窗口（HMCL「显示日志」同款）：task_id, version
+    game_log_requested = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1174,6 +1176,7 @@ class BackendAPI(QObject):
             "gc_preset": CONFIG.get("gc_preset") or "auto",
             "gpu_mode": CONFIG.get("gpu_mode") or "auto",
             "renderer": CONFIG.get("renderer") or "auto",
+            "show_log_window": bool(CONFIG.get("show_log_window", False)),
             "download_limit_kbps": int(CONFIG.get("download_limit_kbps") or 0),
             "auto_check_update": bool(CONFIG.get("auto_check_update", True)),
             "custom_homepage": CONFIG.get("custom_homepage") or "",
@@ -1262,6 +1265,8 @@ class BackendAPI(QObject):
             "gc_preset": data.get("gc_preset") or CONFIG.get("gc_preset") or "auto",
             "gpu_mode": data.get("gpu_mode") or CONFIG.get("gpu_mode") or "auto",
             "renderer": data.get("renderer") or CONFIG.get("renderer") or "auto",
+            "show_log_window": bool(data.get("show_log_window",
+                                             CONFIG.get("show_log_window", False))),
             "download_limit_kbps": int(_keep("download_limit_kbps", default=0) or 0),
             "auto_check_update": bool(data.get("auto_check_update", CONFIG.get("auto_check_update", True))),
             "custom_homepage": data.get("custom_homepage") if "custom_homepage" in data else CONFIG.get("custom_homepage") or "",
@@ -2559,6 +2564,8 @@ class BackendAPI(QObject):
                 "started_at": proc.started_at,
             }
         self.game_started.emit()
+        if prep.get("show_log"):
+            self.game_log_requested.emit(game_key, version)
         code = None
         # 游戏时长统计
         try:

@@ -147,6 +147,45 @@ class FacadeGameLogTests(unittest.TestCase):
         self.assertFalse(out["running"])
 
 
+class ShowLogResolveTests(unittest.TestCase):
+    def test_version_override_beats_global(self):
+        from unittest.mock import patch
+        from mclauncher import launch_flow
+        from mclauncher.config import CONFIG
+        with patch.object(CONFIG, "get", return_value=True):
+            self.assertFalse(launch_flow.resolve_show_log({"show_log": "off"}))
+            self.assertTrue(launch_flow.resolve_show_log({"show_log": "on"}))
+        with patch.object(CONFIG, "get", return_value=False):
+            self.assertTrue(launch_flow.resolve_show_log({"show_log": "on"}))
+            self.assertFalse(launch_flow.resolve_show_log({"show_log": ""}))
+            self.assertFalse(launch_flow.resolve_show_log({}))
+            self.assertFalse(launch_flow.resolve_show_log(None))
+
+    def test_global_fallback(self):
+        from unittest.mock import patch
+        from mclauncher.config import CONFIG
+        from mclauncher import launch_flow
+        with patch.object(CONFIG, "get", return_value=True):
+            self.assertTrue(launch_flow.resolve_show_log({}))
+
+    def test_defaults_declared(self):
+        from mclauncher.config import DEFAULT_CONFIG
+        from mclauncher import version_settings
+        self.assertIs(DEFAULT_CONFIG.get("show_log_window"), False)
+        self.assertEqual(version_settings.DEFAULTS.get("show_log"), "")
+
+    def test_facades_emit_log_request(self):
+        root = Path(__file__).resolve().parents[1]
+        qt_src = (root / "app" / "backend.py").read_text(encoding="utf-8")
+        self.assertIn("game_log_requested = Signal(str, str)", qt_src)
+        self.assertIn('prep.get("show_log")', qt_src)
+        br_src = (root / "bridge" / "api.py").read_text(encoding="utf-8")
+        self.assertIn('"game_log_requested"', br_src)
+        self.assertIn('prep.get("show_log")', br_src)
+        mw_src = (root / "app" / "main_window.py").read_text(encoding="utf-8")
+        self.assertIn("game_log_requested.connect", mw_src)
+
+
 class _LogBackend:
     """按 since 返回预置日志块的假后端，call_async 同步执行。"""
 

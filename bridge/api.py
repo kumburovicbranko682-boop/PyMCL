@@ -939,6 +939,7 @@ class BackendAPI:
             "gc_preset": CONFIG.get("gc_preset") or "auto",
             "gpu_mode": CONFIG.get("gpu_mode") or "auto",
             "renderer": CONFIG.get("renderer") or "auto",
+            "show_log_window": bool(CONFIG.get("show_log_window", False)),
             "download_limit_kbps": int(CONFIG.get("download_limit_kbps") or 0),
             "auto_check_update": bool(CONFIG.get("auto_check_update", True)),
             "custom_homepage": CONFIG.get("custom_homepage") or "",
@@ -1033,6 +1034,8 @@ class BackendAPI:
             patch["auto_check_update"] = bool(data.get("auto_check_update"))
         if "skip_assets" in data:
             patch["skip_assets"] = bool(data.get("skip_assets"))
+        if "show_log_window" in data:
+            patch["show_log_window"] = bool(data.get("show_log_window"))
         if "ui_dark" in data:
             patch["ui_dark"] = bool(data.get("ui_dark"))
         if "theme_color" in data:
@@ -2216,6 +2219,8 @@ class BackendAPI:
                 "started_at": proc.started_at,
             }
         self._emit("game_started", {})
+        if prep.get("show_log"):
+            self._emit("game_log_requested", {"task_id": game_key, "version": version})
         code = None
         # 游戏时长统计
         try:

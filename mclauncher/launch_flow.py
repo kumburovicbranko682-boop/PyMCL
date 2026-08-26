@@ -86,7 +86,20 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "game_lang": game_lang,
         "gpu_mode": gpu.resolve_mode(settings),
         "renderer": gpu.resolve_renderer(settings),
+        "show_log": resolve_show_log(settings),
     }
+
+
+def resolve_show_log(settings: dict | None) -> bool:
+    """启动时是否自动弹日志窗口（HMCL「显示日志」同款）。
+
+    版本设置 "on"/"off" 覆盖全局；空串跟随全局 show_log_window。"""
+    v = str((settings or {}).get("show_log") or "").strip().lower()
+    if v in ("on", "true", "1"):
+        return True
+    if v in ("off", "false", "0"):
+        return False
+    return bool(CONFIG.get("show_log_window", False))
 
 
 def apply_wrapper(cmd, wrapper: str) -> list:

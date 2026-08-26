@@ -195,6 +195,11 @@ class SettingsPage(QWidget):
             tr("游戏启动后启动器窗口怎么处理。关闭不会杀掉游戏进程。"),
             list(vis_map.values()),
             vis_map.get(settings.get("launcher_visibility") or "keep", vis_map["keep"]))
+        # HMCL「显示日志」同款：启动游戏时自动弹实时日志窗口
+        self.show_log_card, self.show_log_sw = _switch_card(
+            FIF.DOCUMENT, tr("启动时显示游戏日志"),
+            tr("启动游戏后自动弹出实时日志窗口（级别高亮 / 搜索 / 导出）。版本设置可覆盖。"),
+            checked=bool(settings.get("show_log_window", False)))
         home_map = {"news": tr("Minecraft 新闻"), "custom": tr("本地 HTML"), "blank": tr("空白")}
         self._home_keys = {v: k for k, v in home_map.items()}
         self.home_card, self.home_box = _combo_card(
@@ -229,6 +234,7 @@ class SettingsPage(QWidget):
         ui_group.addSettingCard(self.bg_card)
         ui_group.addSettingCard(self.font_card)
         ui_group.addSettingCard(self.vis_card)
+        ui_group.addSettingCard(self.show_log_card)
         ui_group.addSettingCard(self.home_card)
         ui_group.addSettingCard(self.hp_card)
         ui_group.addSettingCard(self.win_card)
@@ -1361,6 +1367,7 @@ class SettingsPage(QWidget):
             "default_jvm_args": self.jvm_edit.text().strip(),
             "update_url": self.upd_url.text().strip(),
             "launcher_visibility": self._vis_keys.get(self.vis_box.currentText(), "keep"),
+            "show_log_window": self.show_log_sw.isChecked(),
             "gc_preset": self._gc_keys.get(self.gc_box.currentText(), "auto"),
             "gpu_mode": self._gpu_keys.get(self.gpu_box.currentText(), "auto"),
             "renderer": self._rnd_keys.get(self.rnd_box.currentText(), "auto"),

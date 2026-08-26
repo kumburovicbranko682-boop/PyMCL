@@ -102,6 +102,8 @@ DEFAULT_CONFIG = {
     "gpu_mode": "auto",
     # 渲染器（HMCL 同款，仅 Linux/Mesa 生效）：auto / llvmpipe / zink
     "renderer": "auto",
+    # 启动游戏时自动弹出日志窗口（HMCL「显示日志」同款）
+    "show_log_window": False,
     "download_limit_kbps": 0,
     "auto_check_update": True,
     "custom_homepage": "",

@@ -95,6 +95,14 @@ class VersionSetupDialog(MessageBoxBase):
         if rndk in self._rnd_labels:
             self.renderer.setCurrentText(self._rnd_labels[rndk])
 
+        # 启动时自动弹日志窗口（HMCL「显示日志」同款），空 = 跟随全局
+        self._log_labels = {"on": tr("开启"), "off": tr("关闭")}
+        self.show_log = ComboBox()
+        self.show_log.addItems([tr("跟随全局")] + list(self._log_labels.values()))
+        logk = data.get("show_log") or ""
+        if logk in self._log_labels:
+            self.show_log.setCurrentText(self._log_labels[logk])
+
         self.game = LineEdit()
         self.game.setPlaceholderText(tr("附加游戏参数"))
         self.game.setText(data.get("game_args") or "")
@@ -162,6 +170,7 @@ class VersionSetupDialog(MessageBoxBase):
         form.addRow(form_label("GC"), self.gc)
         form.addRow(form_label(tr("显卡")), self.gpu)
         form.addRow(form_label(tr("渲染器")), self.renderer)
+        form.addRow(form_label(tr("显示日志")), self.show_log)
         form.addRow(form_label(tr("JVM 参数")), self.jvm)
         form.addRow(form_label(tr("游戏参数")), self.game)
         form.addRow(form_label(tr("绑定账号")), self.login)
@@ -236,6 +245,8 @@ class VersionSetupDialog(MessageBoxBase):
                 self.gpu.currentText(), ""),
             "renderer": {v: k for k, v in self._rnd_labels.items()}.get(
                 self.renderer.currentText(), ""),
+            "show_log": {v: k for k, v in self._log_labels.items()}.get(
+                self.show_log.currentText(), ""),
             "window_title": self.title.text().strip(),
             "window_mode": "maximize" if self.win_mode.currentText() == tr("全屏") else "window",
             "window_width": size_of(self.win_w),

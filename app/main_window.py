@@ -255,6 +255,7 @@ class MainWindow(FluentWindowBase):
         self.backend.task_count_changed.connect(self._update_task_badge)
         self.backend.game_started.connect(self._on_game_started)
         self.backend.game_exited.connect(self._on_game_exited)
+        self.backend.game_log_requested.connect(self._open_game_log)
         self.stackedWidget.currentChanged.connect(lambda *_: self._place_download_dock())
         self.resize(1180, 760)
         # 拖拽导入：整合包 / 模组 / 世界 / 资源包 / 光影 / 数据包丢进窗口即装
@@ -922,6 +923,12 @@ class MainWindow(FluentWindowBase):
         if self._quit_on_exit:
             self._quit_on_exit = False
             QApplication.instance().quit()
+
+    def _open_game_log(self, task_id: str, version: str):
+        """启动设置勾了「显示日志」时自动弹出实时日志窗口（HMCL 同款）。"""
+        from .pages.game_log_window import GameLogWindow
+        win = GameLogWindow(self.backend, task_id or "", version or "", parent=self)
+        win.show()
 
     # ------------------------------------------------------------------
     # 拖拽导入（对标 PCL2：文件拖进窗口自动识别安装）

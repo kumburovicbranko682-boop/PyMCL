@@ -45,6 +45,7 @@ DEFAULTS = {
     "gc": "",
     "gpu": "",
     "renderer": "",
+    "show_log": "",
     "window_title": "",
     "window_mode": "window",
     "window_width": None,
