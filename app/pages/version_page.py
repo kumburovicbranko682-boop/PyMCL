@@ -122,9 +122,12 @@ class VersionPage(QWidget):
         self.launch_after.setChecked(True)
         self.hidden_box = CheckBox(tr("显示隐藏"))
         self.hidden_box.setChecked(self._show_hidden)
+        self.json_btn = PushButton(FIF.CODE, tr("版本 JSON"))
+        self.json_btn.setToolTip(tr("从本地版本 JSON 文件安装版本（HMCL 同款）"))
         bar.addWidget(self.search)
         bar.addWidget(self.pivot)
         bar.addStretch(1)
+        bar.addWidget(self.json_btn)
         bar.addWidget(BodyLabel(tr("实例")))
         bar.addWidget(self.instance_box)
         bar.addWidget(self.hidden_box)
@@ -165,6 +168,7 @@ class VersionPage(QWidget):
         self.repair_btn.clicked.connect(self._repair_selected)
         self.instance_box.currentTextChanged.connect(self._reload_installed)
         self.hidden_box.toggled.connect(self._toggle_hidden)
+        self.json_btn.clicked.connect(self._install_from_json)
 
         self.reload()
 
@@ -419,6 +423,35 @@ class VersionPage(QWidget):
             self.backend.open_version_folder(instance, version, which)
         except Exception as e:
             MessageBox(tr("无法打开"), str(e), self).exec()
+
+    def _install_from_json(self):
+        """从本地版本 JSON 安装（HMCL「通过版本 JSON 安装」同款入口）。"""
+        from PySide6.QtWidgets import QFileDialog
+        from ..widgets import InputDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选择版本 JSON 文件"), "",
+            tr("版本 JSON (*.json)") + ";;" + tr("所有文件 (*)"))
+        if not path:
+            return
+        info = self.backend.classify_import(path)
+        if info.get("kind") != "version_json":
+            MessageBox(tr("无法识别"),
+                       tr("该文件不是 Minecraft 版本 JSON（缺少 id 与 mainClass / inheritsFrom）。"),
+                       self).exec()
+            return
+        from pathlib import Path as _P
+        default_id = info.get("version_id") or _P(path).stem
+        dlg = InputDialog(tr("通过版本 JSON 安装"), tr("版本名称"), text=default_id, parent=self)
+        if not dlg.exec() or not dlg.value():
+            return
+        instance = self.instance_box.currentText() or ""
+        try:
+            self.backend.install_version_json(path, dlg.value(), instance)
+        except Exception as e:
+            MessageBox(tr("安装失败"), str(e), self).exec()
+            return
+        InfoBar.success(tr("已开始安装"), tr("进度见「下载任务」"), parent=self,
+                        position=InfoBarPosition.TOP_RIGHT, duration=3500)
 
     def _saves(self, instance, version):
         from .saves_dialog import SavesDialog

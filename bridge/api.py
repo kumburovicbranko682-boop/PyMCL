@@ -348,8 +348,14 @@ class BackendAPI:
         return self.start_task(f"安装世界 {Path(str(name)).name}", self._install_world_impl,
                                name, instance, extra or {})
 
+    def install_version_json(self, path: str, name: str = "", instance: str = "") -> str:
+        """通过本地版本 JSON 文件安装版本（HMCL「通过版本 JSON 安装」同款）。"""
+        inst = instance or CONFIG.get("default_instance", "default")
+        title = "安装版本 JSON " + (name or Path(str(path)).name)
+        return self.start_task(title, self._install_version_json_impl, path, name, inst)
+
     def classify_import(self, path: str) -> dict:
-        """识别本地文件类型（整合包/模组/世界/资源包/光影/数据包），供拖拽导入用。"""
+        """识别本地文件类型（整合包/模组/世界/资源包/光影/数据包/版本 JSON），供拖拽导入用。"""
         from mclauncher import import_files
         return import_files.classify_file(path)
 
@@ -372,7 +378,9 @@ class BackendAPI:
             return self.install_shader(name, instance, extra={"path": str(p)})
         if kind == "datapack":
             return self.install_datapack(name, instance, extra={"path": str(p)})
-        raise ValueError(f"无法识别的文件：{name}（支持整合包 / 模组 / 世界 / 资源包 / 光影包 / 数据包）")
+        if kind == "version_json":
+            return self.install_version_json(str(p), instance=instance)
+        raise ValueError(f"无法识别的文件：{name}（支持整合包 / 模组 / 世界 / 资源包 / 光影包 / 数据包 / 版本 JSON）")
 
     def list_catalog_files(self, extra: dict | None = None) -> list[dict]:
         from mclauncher.catalog_files import list_project_files
@@ -2377,6 +2385,16 @@ class BackendAPI:
         dm = self._dm(progress, log)
         installer = Installer(inst, dm, on_progress=dm.on_progress, cancel=dm.cancel)
         return repair(installer, version)
+
+    def _install_version_json_impl(self, progress, log, path, name, instance):
+        from mclauncher.version_json_install import install_from_json
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        installer = Installer(inst, dm, on_progress=dm.on_progress, cancel=dm.cancel)
+        installer.skip_assets = bool(CONFIG.get("skip_assets"))
+        log(f"读取版本 JSON：{path}")
+        target = install_from_json(installer, path, name=name)
+        return f"已通过版本 JSON 安装 {target}"
 
     def _export_pack_impl(self, progress, log, instance, dest, fmt="mrpack",
                           include=None, meta=None):

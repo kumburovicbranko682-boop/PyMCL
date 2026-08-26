@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""本地文件导入识别：整合包 / 模组 / 世界 / 资源包 / 光影包 / 数据包。
+"""本地文件导入识别：整合包 / 模组 / 世界 / 资源包 / 光影包 / 数据包 / 版本 JSON。
 
 对标 PCL2「把文件拖进启动器窗口，自动识别类型并安装」。
 识别只读 zip 中央目录（必要时读一个 manifest 成员），不解压。
@@ -20,10 +20,11 @@ KIND_LABELS = {
     "resourcepack": "资源包",
     "shaderpack": "光影包",
     "datapack": "数据包",
+    "version_json": "版本 JSON",
     "unknown": "无法识别",
 }
 
-SUPPORTED_EXTS = (".mrpack", ".jar", ".litemod", ".zip")
+SUPPORTED_EXTS = (".mrpack", ".jar", ".litemod", ".zip", ".json")
 
 _SHADER_EXTS = (".fsh", ".vsh", ".gsh", ".csh", ".glsl")
 
@@ -100,6 +101,20 @@ def _zip_kind(path: Path) -> str:
     return "unknown"
 
 
+def _json_kind(path: Path) -> dict:
+    """识别 .json：是版本 JSON 就带上里面的版本 id，其余算 unknown。"""
+    from .version_json_install import MAX_JSON_BYTES, looks_like_version_json
+    try:
+        if path.stat().st_size > MAX_JSON_BYTES:
+            return {"kind": "unknown"}
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return {"kind": "unknown"}
+    if not looks_like_version_json(data):
+        return {"kind": "unknown"}
+    return {"kind": "version_json", "version_id": str(data.get("id") or "").strip()}
+
+
 def classify_file(path) -> dict:
     """识别一个本地文件。返回 {kind, name, label, path}；识别不了 kind="unknown"。"""
     p = Path(path)
@@ -114,6 +129,8 @@ def classify_file(path) -> dict:
         info["kind"] = "mod"
     elif ext == ".zip":
         info["kind"] = _zip_kind(p)
+    elif ext == ".json":
+        info.update(_json_kind(p))
     info["label"] = KIND_LABELS.get(info["kind"], KIND_LABELS["unknown"])
     return info
 

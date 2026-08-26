@@ -958,7 +958,7 @@ class MainWindow(FluentWindowBase):
         if not known:
             InfoBar.warning(
                 tr("无法识别"),
-                tr("支持整合包(.mrpack/.zip)、模组(.jar)、世界、资源包、光影包、数据包"),
+                tr("支持整合包(.mrpack/.zip)、模组(.jar)、世界、资源包、光影包、数据包、版本 JSON(.json)"),
                 parent=self, position=InfoBarPosition.TOP, duration=4000)
             return
         from mclauncher.config import CONFIG
