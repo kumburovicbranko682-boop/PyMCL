@@ -313,6 +313,9 @@ class DownloadCatBar(QFrame):
         return QRect(r.x() + pad, self._host.height() - 6, max(16, r.width() - pad * 2), 2)
 
     def _move_indicator(self, btn, animate: bool = True):
+        # 「界面动画」关掉时指示器也必须瞬移，否则设置开关名不副实
+        from ..motion_prefs import ui_motion_ok
+        animate = animate and ui_motion_ok()
         if btn is None:
             return
         target = self._indicator_rect(btn)

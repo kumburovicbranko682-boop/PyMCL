@@ -1048,6 +1048,9 @@ class MainWindow(FluentWindowBase):
         dock = getattr(self, "download_dock", None)
         if not dock:
             return
+        # 悬浮条飞入/飞出也要听「界面动画」开关，不能只有画布动效听话
+        from .motion_prefs import ui_motion_ok
+        animate = animate and ui_motion_ok()
         hide_on = {"settings", "instance", "tasks", "feedback"}
         want = bool(getattr(dock, "_active", None)) and self._visible_key() not in hide_on
         g = self.stackedWidget.geometry()

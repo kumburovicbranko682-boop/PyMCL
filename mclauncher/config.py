@@ -73,11 +73,19 @@ DEFAULT_CONFIG = {
     "theme_color": "#2E9B6B",
     "ui_dark": False,
     "ui_background": "",
-    # 这三个键以前只在 save_settings 里写、没在这儿声明。
+    # 这些键以前只在 save_settings / 主窗里写、没在这儿声明。
     # `save()` 落的是整份 data，`load()` 却只按本表的键名回读 ——
     # 结果就是「关掉飞入动画、重开启动器它又自己回来了」。
     "ui_fly_animation": True,
     "ui_fly_duration_ms": 620,
+    # 界面动画总开关 + 侧栏自定义（排序/固定/显隐/分区成员/宽度）。
+    # 少声明一个，用户的开关和拖出来的布局就会在重启时静默归零。
+    "ui_motion": True,
+    "ui_nav_order": None,
+    "ui_nav_pinned": None,
+    "ui_nav_hidden": None,
+    "ui_section_members": None,
+    "ui_sidebar_width": 0,
     # 全局默认 Java：版本设置与实例偏好都是「自动」时才生效
     "default_java": "",
     "global_mods_dir": "",
