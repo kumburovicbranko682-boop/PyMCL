@@ -376,6 +376,21 @@ int download_file(const char *url, const char **extra, int nextra, const char *d
     return last;
 }
 
+int download_url_list(cJSON *urls, const char *dest, pymcl_ctx *ctx,
+                      const char *sha1, long long size, const char *sha512) {
+    int n = cJSON_IsArray(urls) ? cJSON_GetArraySize(urls) : 0;
+    const char *first = NULL;
+    const char *extras[32]; int ne = 0;
+    for (int i = 0; i < n; i++) {
+        const char *u = cJSON_GetStringValue(cJSON_GetArrayItem(urls, i));
+        if (!u || !u[0]) continue;
+        if (!first) first = u;
+        else if (ne < 32) extras[ne++] = u;
+    }
+    if (!first) { pymcl_set_error("没有可下载文件"); return -1; }
+    return download_file(first, extras, ne, dest, ctx, sha1, size, sha512);
+}
+
 typedef struct {
     cJSON *task;
     pymcl_ctx *ctx;

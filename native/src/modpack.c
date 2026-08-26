@@ -161,31 +161,43 @@ static int install_cf_zip_file(const char *pack, const char *instance, pymcl_ctx
             free(play); cJSON_Delete(man); pymcl_remove_tree(tdir); return -1;
         }
     }
-    /* mods */
+    /* mods：先批量拿真实 fileName / downloadUrl（对齐 mclauncher/modpack.py
+     * cf_files_by_ids）。以前用编出来的 mod-<pid>-<fid>.jar 拼 forgecdn 直链，
+     * CDN 按文件名寻址必然 404；唯一没编错的候选是需要 x-api-key 的官方
+     * /download——没配 key 的纯 C 桥整包 Mod 一个都下不下来。 */
     cJSON *tasks = cJSON_CreateArray();
     char ip[PYMCL_PATH];
     instance_path(instance, ip, sizeof(ip));
     cJSON *file;
+    cJSON *want = cJSON_CreateArray();
+    cJSON_ArrayForEach(file, cJSON_GetObjectItem(man, "files")) {
+        long long fid = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(file, "fileID"));
+        if (fid) cJSON_AddItemToArray(want, cJSON_CreateNumber((double)fid));
+    }
+    if (cJSON_GetArraySize(want) > 0) emit(ctx, "解析整合包 Mod 文件");
+    cJSON *meta_files = cf_files_by_ids(want);
+    cJSON_Delete(want);
     cJSON_ArrayForEach(file, cJSON_GetObjectItem(man, "files")) {
         long long pid = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(file, "projectID"));
         long long fid = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(file, "fileID"));
         if (!pid || !fid) continue;
-        char dest[PYMCL_PATH], fn[64];
-        snprintf(fn, sizeof(fn), "mod-%lld-%lld.jar", pid, fid);
-        pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn);
-        char u1[256], u2[256], u3[256];
-        snprintf(u1, sizeof(u1), "https://mediafilez.forgecdn.net/files/%lld/%lld/%s", fid / 1000, fid % 1000, fn);
-        snprintf(u2, sizeof(u2), "https://edge.forgecdn.net/files/%lld/%lld/%s", fid / 1000, fid % 1000, fn);
-        snprintf(u3, sizeof(u3), CF_OFFICIAL "/mods/%lld/files/%lld/download", pid, fid);
+        char key[32]; snprintf(key, sizeof(key), "%lld", fid);
+        cJSON *info = cJSON_GetObjectItem(meta_files, key);
+        const char *fn = cJSON_GetStringValue(cJSON_GetObjectItem(info, "fileName"));
+        const char *du = cJSON_GetStringValue(cJSON_GetObjectItem(info, "downloadUrl"));
+        char fallback[64], dest[PYMCL_PATH];
+        if (!fn || !fn[0]) {
+            /* 元数据没拿到：API download 端点带真实文件名重定向，仍可下载 */
+            snprintf(fallback, sizeof(fallback), "mod-%lld-%lld.jar", pid, fid);
+            fn = NULL;
+        }
+        pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn ? fn : fallback);
         cJSON *t = cJSON_CreateObject();
-        cJSON *urls = cJSON_CreateArray();
-        cJSON_AddItemToArray(urls, cJSON_CreateString(u1));
-        cJSON_AddItemToArray(urls, cJSON_CreateString(u2));
-        cJSON_AddItemToArray(urls, cJSON_CreateString(u3));
-        cJSON_AddItemToObject(t, "urls", urls);
+        cJSON_AddItemToObject(t, "urls", cf_file_urls(pid, fid, fn, du));
         cJSON_AddStringToObject(t, "dest", dest);
         cJSON_AddItemToArray(tasks, t);
     }
+    cJSON_Delete(meta_files);
     if (cJSON_GetArraySize(tasks) > 0) {
         emit(ctx, "下载整合包 Mod");
         download_all(tasks, "下载整合包 Mod", ctx);
@@ -214,18 +226,10 @@ static int install_cf_zip_file(const char *pack, const char *instance, pymcl_ctx
 }
 
 static int install_cf_modpack_id(long long addon, const char *instance, const char *slug, pymcl_ctx *ctx) {
+    /* cf_api_get 按 community_source 排基址顺序，并只在配了 key 时带
+     * x-api-key（以前这里给镜像也发空 key 头）。 */
     char path[64]; snprintf(path, sizeof(path), "/mods/%lld", addon);
-    /* reuse search via HTTP */
-    char url[256];
-    snprintf(url, sizeof(url), CF_OFFICIAL "/mods/%lld", addon);
-    char hdr[512];
-    const char *key = config_str("curseforge_api_key", "");
-    snprintf(hdr, sizeof(hdr), "Accept: application/json\nx-api-key: %s", key ? key : "");
-    cJSON *d = http_get_json_hdr(url, hdr, 45);
-    if (!d) {
-        snprintf(url, sizeof(url), "https://mod.mcimirror.top/curseforge/v1/mods/%lld", addon);
-        d = http_get_json_hdr(url, hdr, 45);
-    }
+    cJSON *d = cf_api_get(path, NULL);
     cJSON *mod = d ? cJSON_GetObjectItem(d, "data") : NULL;
     cJSON *files = mod ? cJSON_GetObjectItem(mod, "latestFiles") : NULL;
     cJSON *f = files && cJSON_GetArraySize(files) ? cJSON_GetArrayItem(files, 0) : NULL;
@@ -236,13 +240,10 @@ static int install_cf_modpack_id(long long addon, const char *instance, const ch
     char tmp[MAX_PATH], dest[PYMCL_PATH];
     GetTempPathA(MAX_PATH, tmp);
     snprintf(dest, sizeof(dest), "%spymcl_cfpack_%lld_%lld.zip", tmp, addon, fid);
-    char u1[256], u2[256];
-    snprintf(u1, sizeof(u1), "https://mediafilez.forgecdn.net/files/%lld/%lld/%s", fid / 1000, fid % 1000, fn);
-    snprintf(u2, sizeof(u2), "https://edge.forgecdn.net/files/%lld/%lld/%s", fid / 1000, fid % 1000, fn);
-    const char *first = du && du[0] ? du : u1;
-    const char *ex[] = { u1, u2 };
     emit(ctx, "下载整合包");
-    int r = download_file(first, ex, 2, dest, ctx, NULL, -1, NULL);
+    cJSON *urls = cf_file_urls(addon, fid, fn, du);
+    int r = download_url_list(urls, dest, ctx, NULL, -1, NULL);
+    cJSON_Delete(urls);
     cJSON_Delete(d);
     if (r != 0) return -1;
     r = install_cf_zip_file(dest, instance, ctx);
@@ -252,9 +253,10 @@ static int install_cf_modpack_id(long long addon, const char *instance, const ch
 }
 
 static int install_mr_slug(const char *slug, const char *instance, pymcl_ctx *ctx) {
-    char url[256];
-    snprintf(url, sizeof(url), MODRINTH_API "/project/%s/version", slug);
-    cJSON *vers = http_get_json(url, 45);
+    /* 候选链对齐 mclauncher/source.py：Modrinth 官方不可达时走 MCIM。 */
+    char pq[256];
+    snprintf(pq, sizeof(pq), "/project/%s/version", slug);
+    cJSON *vers = mr_api_get(pq, 45);
     if (!cJSON_IsArray(vers)) { cJSON_Delete(vers); pymcl_set_error("整合包 %s 没有可下载的版本", slug); return -1; }
     cJSON *v;
     cJSON_ArrayForEach(v, vers) {

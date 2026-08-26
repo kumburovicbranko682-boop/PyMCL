@@ -166,6 +166,8 @@ int expand_urls(const char *url, char ***out, int *n);
 void free_urls(char **u, int n);
 int download_file(const char *url, const char **extra, int nextra, const char *dest,
                   pymcl_ctx *ctx, const char *sha1, long long size, const char *sha512);
+int download_url_list(cJSON *urls, const char *dest, pymcl_ctx *ctx,
+                      const char *sha1, long long size, const char *sha512);
 int download_all(cJSON *tasks, const char *message, pymcl_ctx *ctx);
 cJSON *fetch_json_mirrors(const char **urls, int n, int timeout);
 char *fetch_text_mirrors(const char **urls, int n, int timeout);
@@ -253,6 +255,11 @@ cJSON *catalog_popular_mods(const char *source);
 cJSON *catalog_popular_packs(const char *source);
 int catalog_lookup_mod(const char *q, char *slug, size_t ns, long long *cf, char *title, size_t nt);
 int catalog_lookup_pack(const char *q, char *slug, size_t ns, long long *cf, char *title, size_t nt);
+cJSON *mr_api_get(const char *path_query, int timeout);
+cJSON *cf_api_get(const char *path, const char *query);
+cJSON *cf_files_by_ids(cJSON *file_ids);
+cJSON *cf_file_urls(long long addon_id, long long file_id,
+                    const char *filename, const char *download_url);
 cJSON *search_mods(const char *query, const char *source);
 cJSON *search_modpacks(const char *query, const char *source);
 cJSON *search_content(const char *kind, const char *query, const char *source);

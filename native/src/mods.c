@@ -1,10 +1,6 @@
 #include "pymcl.h"
 
-static const char *cf_bases[] = {
-    CF_OFFICIAL,
-    "https://mod.mcimirror.top/curseforge/v1",
-    BMCLAPI "/curseforge/v1",
-};
+#define CF_MCIM_BASE MCIM_MIRROR "/curseforge/v1"
 
 static void cf_hdr(char *out, size_t n) {
     const char *key = config_str("curseforge_api_key", "");
@@ -12,18 +8,55 @@ static void cf_hdr(char *out, size_t n) {
     else snprintf(out, n, "Accept: application/json");
 }
 
-static cJSON *cf_get(const char *path, const char *query) {
+/* CurseForge API 基址顺序，对齐 mclauncher/source.py cf_api_bases()：
+ * auto=官方在前、MCIM 兜底；mcim=镜像在前、官方垫底；official=仅官方。
+ * 以前固定官方→MCIM→BMCLAPI：选「仅官方」照样打镜像，「MCIM 优先」
+ * 却每次先等官方超时；BMCLAPI /curseforge/v1 已 404（Python 侧已移除）。 */
+static int cf_bases_ordered(const char **bases) {
+    if (config_community_official_only()) {
+        bases[0] = CF_OFFICIAL;
+        return 1;
+    }
+    if (config_community_mirror_first()) {
+        bases[0] = CF_MCIM_BASE;
+        bases[1] = CF_OFFICIAL;
+    } else {
+        bases[0] = CF_OFFICIAL;
+        bases[1] = CF_MCIM_BASE;
+    }
+    return 2;
+}
+
+cJSON *cf_api_get(const char *path, const char *query) {
     char hdr[512]; cf_hdr(hdr, sizeof(hdr));
-    for (int i = 0; i < 3; i++) {
+    const char *bases[2];
+    int nb = cf_bases_ordered(bases);
+    for (int i = 0; i < nb; i++) {
         char url[1024];
         if (query && query[0])
-            snprintf(url, sizeof(url), "%s%s?%s", cf_bases[i], path, query);
+            snprintf(url, sizeof(url), "%s%s?%s", bases[i], path, query);
         else
-            snprintf(url, sizeof(url), "%s%s", cf_bases[i], path);
+            snprintf(url, sizeof(url), "%s%s", bases[i], path);
         cJSON *j = http_get_json_hdr(url, hdr, 45);
         if (j) return j;
     }
     return NULL;
+}
+
+/* Modrinth v2 API GET，候选链对齐 mclauncher/source.py modrinth_api_bases()。
+ * 以前除全文搜索外全部只打官方 API：Modrinth 不可达时搜索靠镜像兜底
+ * 还能出结果，点「安装」却必失败——纯 C 桥下装模组/光影/整合包全挂。 */
+cJSON *mr_api_get(const char *path_query, int timeout) {
+    char off[1280], mir[1280];
+    snprintf(off, sizeof(off), MODRINTH_API "%s", path_query);
+    snprintf(mir, sizeof(mir), MCIM_MIRROR "/modrinth/v2%s", path_query);
+    if (config_community_official_only())
+        return http_get_json(off, timeout);
+    const char *first = config_community_mirror_first() ? mir : off;
+    const char *second = config_community_mirror_first() ? off : mir;
+    cJSON *j = http_get_json(first, timeout);
+    if (!j) j = http_get_json(second, timeout);
+    return j;
 }
 
 static cJSON *cf_items(cJSON *data) {
@@ -90,14 +123,10 @@ static cJSON *mr_search(const char *query, const char *ptype, int limit) {
     char enc[512];
     urlenc(query, enc, sizeof(enc));
     /* encode facets brackets */
-    char url1[1024], url2[1024];
-    snprintf(url1, sizeof(url1), MODRINTH_API "/search?query=%s&limit=%d&index=relevance&facets=%%5B%%5B%%22project_type%%3A%s%%22%%5D%%5D",
+    char pq[1024];
+    snprintf(pq, sizeof(pq), "/search?query=%s&limit=%d&index=relevance&facets=%%5B%%5B%%22project_type%%3A%s%%22%%5D%%5D",
              enc[0] ? enc : "%20", limit, ptype);
-    snprintf(url2, sizeof(url2), MCIM_MIRROR "/modrinth/v2/search?query=%s&limit=%d&index=relevance&facets=%%5B%%5B%%22project_type%%3A%s%%22%%5D%%5D",
-             enc[0] ? enc : "%20", limit, ptype);
-    cJSON *j = http_get_json(url1, 45);
-    if (!j) j = http_get_json(url2, 45);
-    return j;
+    return mr_api_get(pq, 45);
 }
 
 static cJSON *row_from_mr_hit(cJSON *h) {
@@ -158,8 +187,8 @@ cJSON *search_mods(const char *query, const char *source) {
      * 以前 C 桥继续用中文原词全文搜索，"高清修复/考古/经验书" 一律空结果。 */
     const char *ftq = (title[0] && !slug[0] && !cf) ? title : q;
     if (slug[0] && want_mr) {
-        char url[256]; snprintf(url, sizeof(url), MODRINTH_API "/project/%s", slug);
-        cJSON *p = http_get_json(url, 30);
+        char pq[256]; snprintf(pq, sizeof(pq), "/project/%s", slug);
+        cJSON *p = mr_api_get(pq, 30);
         if (p) {
             cJSON *row = cJSON_CreateObject();
             cJSON_AddStringToObject(row, "name", cJSON_GetStringValue(cJSON_GetObjectItem(p, "title")) ?: title);
@@ -173,7 +202,7 @@ cJSON *search_mods(const char *query, const char *source) {
     }
     if (cf && want_cf) {
         char path[64]; snprintf(path, sizeof(path), "/mods/%lld", cf);
-        cJSON *d = cf_get(path, NULL);
+        cJSON *d = cf_api_get(path, NULL);
         cJSON *m = d ? cJSON_GetObjectItem(d, "data") : NULL;
         if (cJSON_IsObject(m)) cJSON_AddItemToArray(out, row_from_cf(m));
         cJSON_Delete(d);
@@ -192,7 +221,7 @@ cJSON *search_mods(const char *query, const char *source) {
         urlenc(ftq, enc, sizeof(enc));
         snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=30&index=0&searchFilter=%s",
                  CF_CLASS_MOD, enc);
-        cJSON *d = cf_get("/mods/search", queryp);
+        cJSON *d = cf_api_get("/mods/search", queryp);
         cJSON *items = cf_items(d);
         cJSON *m;
         cJSON_ArrayForEach(m, items) cJSON_AddItemToArray(out, row_from_cf(m));
@@ -214,14 +243,14 @@ cJSON *search_modpacks(const char *query, const char *source) {
     const char *ftq = (title[0] && !slug[0] && !cf) ? title : q;
     if (cf && want_cf) {
         char path[64]; snprintf(path, sizeof(path), "/mods/%lld", cf);
-        cJSON *d = cf_get(path, NULL);
+        cJSON *d = cf_api_get(path, NULL);
         cJSON *m = d ? cJSON_GetObjectItem(d, "data") : NULL;
         if (cJSON_IsObject(m)) cJSON_AddItemToArray(out, row_from_cf(m));
         cJSON_Delete(d);
     }
     if (slug[0] && want_mr) {
-        char url[256]; snprintf(url, sizeof(url), MODRINTH_API "/project/%s", slug);
-        cJSON *p = http_get_json(url, 30);
+        char pq[256]; snprintf(pq, sizeof(pq), "/project/%s", slug);
+        cJSON *p = mr_api_get(pq, 30);
         if (p) {
             cJSON *row = cJSON_CreateObject();
             cJSON_AddStringToObject(row, "name", cJSON_GetStringValue(cJSON_GetObjectItem(p, "title")) ?: title);
@@ -245,7 +274,7 @@ cJSON *search_modpacks(const char *query, const char *source) {
         urlenc(ftq, enc, sizeof(enc));
         snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=25&index=0&searchFilter=%s",
                  CF_CLASS_MODPACK, enc);
-        cJSON *d = cf_get("/mods/search", queryp);
+        cJSON *d = cf_api_get("/mods/search", queryp);
         cJSON *items = cf_items(d);
         cJSON *m;
         cJSON_ArrayForEach(m, items) cJSON_AddItemToArray(out, row_from_cf(m));
@@ -276,7 +305,7 @@ cJSON *search_content(const char *kind, const char *query, const char *source) {
         urlenc(query, enc, sizeof(enc));
         snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=30&index=0%s%s",
                  cf, enc[0] ? "&searchFilter=" : "", enc);
-        cJSON *d = cf_get("/mods/search", queryp);
+        cJSON *d = cf_api_get("/mods/search", queryp);
         cJSON *items = cf_items(d);
         cJSON *m;
         cJSON_ArrayForEach(m, items) cJSON_AddItemToArray(out, row_from_cf(m));
@@ -326,9 +355,9 @@ static char *detect_mc(const char *inst) {
 }
 
 static int install_modrinth_mod(const char *inst, const char *slug, pymcl_ctx *ctx) {
-    char url[256];
-    snprintf(url, sizeof(url), MODRINTH_API "/project/%s/version", slug);
-    cJSON *vers = http_get_json(url, 45);
+    char pq[256];
+    snprintf(pq, sizeof(pq), "/project/%s/version", slug);
+    cJSON *vers = mr_api_get(pq, 45);
     if (!cJSON_IsArray(vers) || cJSON_GetArraySize(vers) == 0) {
         cJSON_Delete(vers);
         pymcl_set_error("模组 %s 没有可下载版本", slug);
@@ -366,19 +395,111 @@ static int install_modrinth_mod(const char *inst, const char *slug, pymcl_ctx *c
     return r;
 }
 
-static void cf_cdn(long long fid, const char *fn, const char *host, char *out, size_t n) {
-    snprintf(out, n, "https://%s/files/%lld/%lld/%s", host, fid / 1000, fid % 1000, fn ? fn : "file.jar");
+/* 文件名段编码，对齐 Python quote(filename, safe="._-+()[]")：
+ * CDN 路径里的空格/中文不编码会让请求行非法，整条候选直接失败。 */
+static void cf_enc_name(const char *s, char *enc, size_t n) {
+    size_t o = 0;
+    enc[0] = 0;
+    for (s = s ? s : ""; *s && o + 4 < n; s++) {
+        unsigned char c = (unsigned char)*s;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+            || strchr("._-+()[]", (char)c))
+            enc[o++] = (char)c;
+        else { snprintf(enc + o, n - o, "%%%02X", c); o = strlen(enc); }
+    }
+    enc[o] = 0;
+}
+
+static void add_url_once(cJSON *arr, const char *u) {
+    if (!u || !u[0]) return;
+    cJSON *it;
+    cJSON_ArrayForEach(it, arr)
+        if (cJSON_IsString(it) && strcmp(it->valuestring, u) == 0) return;
+    cJSON_AddItemToArray(arr, cJSON_CreateString(u));
+}
+
+/* CurseForge 文件下载候选，对齐 mclauncher/mods.py cf_mod_download_urls：
+ * downloadUrl → CDN 直链（含 MCIM 镜像）→ 官方 API download → MCIM download
+ * → 官网内部 API。以前 C 桥没有任何 MCIM 兜底：forgecdn 被墙时下载必败，
+ * 而同一台机器换 Python 桥就能装上。 */
+cJSON *cf_file_urls(long long addon_id, long long file_id,
+                    const char *filename, const char *download_url) {
+    cJSON *urls = cJSON_CreateArray();
+    add_url_once(urls, download_url);
+    if (filename && filename[0]) {
+        char fn[512];
+        cf_enc_name(filename, fn, sizeof(fn));
+        const char *hosts[] = { "mediafilez.forgecdn.net", "edge.forgecdn.net" };
+        for (int i = 0; i < 2; i++) {
+            char cdn[1024], mir[1024];
+            snprintf(cdn, sizeof(cdn), "https://%s/files/%lld/%lld/%s",
+                     hosts[i], file_id / 1000, file_id % 1000, fn);
+            add_url_once(urls, cdn);
+            snprintf(mir, sizeof(mir), MCIM_MIRROR "/files/%lld/%lld/%s",
+                     file_id / 1000, file_id % 1000, fn);
+            add_url_once(urls, mir);
+        }
+    }
+    char api[256];
+    snprintf(api, sizeof(api), CF_OFFICIAL "/mods/%lld/files/%lld/download", addon_id, file_id);
+    add_url_once(urls, api);
+    snprintf(api, sizeof(api), CF_MCIM_BASE "/mods/%lld/files/%lld/download", addon_id, file_id);
+    add_url_once(urls, api);
+    snprintf(api, sizeof(api), "https://www.curseforge.com/api/v1/mods/%lld/files/%lld/download",
+             addon_id, file_id);
+    add_url_once(urls, api);
+    return urls;
+}
+
+/* 批量查文件元数据 POST /v1/mods/files，返回 {"<fileId>": file}。
+ * 对齐 mclauncher/mods.py cf_files_by_ids（每批 50 个）。 */
+cJSON *cf_files_by_ids(cJSON *file_ids) {
+    cJSON *out = cJSON_CreateObject();
+    int n = cJSON_IsArray(file_ids) ? cJSON_GetArraySize(file_ids) : 0;
+    if (n == 0) return out;
+    char hdr[512]; cf_hdr(hdr, sizeof(hdr));
+    const char *bases[2];
+    int nb = cf_bases_ordered(bases);
+    for (int i = 0; i < n; i += 50) {
+        cJSON *body = cJSON_CreateObject();
+        cJSON *ids = cJSON_CreateArray();
+        for (int k = i; k < n && k < i + 50; k++)
+            cJSON_AddItemToArray(ids, cJSON_Duplicate(cJSON_GetArrayItem(file_ids, k), 1));
+        cJSON_AddItemToObject(body, "fileIds", ids);
+        char *payload = cJSON_PrintUnformatted(body);
+        cJSON_Delete(body);
+        if (!payload) continue;
+        cJSON *data = NULL;
+        for (int b = 0; b < nb && !data; b++) {
+            char url[256]; snprintf(url, sizeof(url), "%s/mods/files", bases[b]);
+            http_resp r;
+            if (http_post_json(url, payload, &r, hdr, 45) == 0 && r.body)
+                data = cJSON_Parse(r.body);
+            http_resp_free(&r);
+        }
+        free(payload);
+        cJSON *f;
+        cJSON_ArrayForEach(f, cf_items(data)) {
+            cJSON *fid = cJSON_GetObjectItem(f, "id");
+            if (!cJSON_IsNumber(fid)) continue;
+            char key[32]; snprintf(key, sizeof(key), "%lld", (long long)fid->valuedouble);
+            cJSON_DeleteItemFromObject(out, key);
+            cJSON_AddItemToObject(out, key, cJSON_Duplicate(f, 1));
+        }
+        cJSON_Delete(data);
+    }
+    return out;
 }
 
 static int install_cf_mod(const char *inst, long long addon, pymcl_ctx *ctx) {
     char path[64]; snprintf(path, sizeof(path), "/mods/%lld", addon);
-    cJSON *d = cf_get(path, NULL);
+    cJSON *d = cf_api_get(path, NULL);
     cJSON *mod = d ? cJSON_GetObjectItem(d, "data") : NULL;
     if (!cJSON_IsObject(mod)) { cJSON_Delete(d); pymcl_set_error("获取 CurseForge 详情失败"); return -1; }
     cJSON *files = cJSON_GetObjectItem(mod, "latestFiles");
     if (!cJSON_IsArray(files) || cJSON_GetArraySize(files) == 0) {
         char p2[80]; snprintf(p2, sizeof(p2), "/mods/%lld/files", addon);
-        cJSON *fl = cf_get(p2, "pageSize=50");
+        cJSON *fl = cf_api_get(p2, "pageSize=50");
         files = cf_items(fl);
         /* leak fl with d - keep both */
         if (!files) { cJSON_Delete(d); cJSON_Delete(fl); pymcl_set_error("没有可下载文件"); return -1; }
@@ -394,15 +515,9 @@ static int install_cf_mod(const char *inst, long long addon, pymcl_ctx *ctx) {
     instance_path(inst, ip, sizeof(ip));
     instance_ensure_dirs(inst);
     pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn);
-    char u1[512], u2[512], u3[512];
-    cf_cdn(fid, fn, "mediafilez.forgecdn.net", u1, sizeof(u1));
-    cf_cdn(fid, fn, "edge.forgecdn.net", u2, sizeof(u2));
-    snprintf(u3, sizeof(u3), CF_OFFICIAL "/mods/%lld/files/%lld/download", addon, fid);
-    const char *first = du && du[0] ? du : u1;
-    const char *ex[4]; int ne = 0;
-    if (first != u1) ex[ne++] = u1;
-    ex[ne++] = u2; ex[ne++] = u3;
-    int r = download_file(first, ex, ne, dest, ctx, NULL, -1, NULL);
+    cJSON *urls = cf_file_urls(addon, fid, fn, du);
+    int r = download_url_list(urls, dest, ctx, NULL, -1, NULL);
+    cJSON_Delete(urls);
     cJSON_Delete(d);
     return r;
 }
@@ -471,29 +586,30 @@ int install_content(const char *kind, const char *instance, const char *name, cJ
     }
     const char *src = extra ? cJSON_GetStringValue(cJSON_GetObjectItem(extra, "source")) : NULL;
     if (src && pymcl_startswith(src, "curse") && extra && cJSON_IsNumber(cJSON_GetObjectItem(extra, "id"))) {
-        /* reuse cf download into subdir */
-        char tmpname[64];
-        snprintf(tmpname, sizeof(tmpname), "%s", name ? name : "pack");
-        /* install to mods then move — simpler: download via cf into subdir */
         long long id = (long long)cJSON_GetObjectItem(extra, "id")->valuedouble;
         char pth[64]; snprintf(pth, sizeof(pth), "/mods/%lld", id);
-        cJSON *d = cf_get(pth, NULL);
+        cJSON *d = cf_api_get(pth, NULL);
         cJSON *mod = d ? cJSON_GetObjectItem(d, "data") : NULL;
         cJSON *files = mod ? cJSON_GetObjectItem(mod, "latestFiles") : NULL;
         cJSON *f = files && cJSON_GetArraySize(files) ? cJSON_GetArrayItem(files, 0) : NULL;
         if (!f) { cJSON_Delete(d); pymcl_set_error("没有可下载文件"); return -1; }
+        long long fid = (long long)cJSON_GetNumberValue(cJSON_GetObjectItem(f, "id"));
         const char *fn = cJSON_GetStringValue(cJSON_GetObjectItem(f, "fileName")) ?: "pack.zip";
         const char *du = cJSON_GetStringValue(cJSON_GetObjectItem(f, "downloadUrl"));
         pymcl_path_join3(dest, sizeof(dest), ip, subdir, fn);
-        int r = download_file(du ? du : "", NULL, 0, dest, ctx, NULL, -1, NULL);
+        /* 以前只认 downloadUrl：CF 该字段经常为 null，这里稳定报
+         * 「HTTP 失败」，同一资源在 Python 桥能装（CDN/镜像候选兜底）。 */
+        cJSON *urls = cf_file_urls(id, fid, fn, du);
+        int r = download_url_list(urls, dest, ctx, NULL, -1, NULL);
+        cJSON_Delete(urls);
         cJSON_Delete(d);
         return r;
     }
     const char *slug = extra ? cJSON_GetStringValue(cJSON_GetObjectItem(extra, "slug")) : NULL;
     if (!slug) slug = name;
-    char u[256];
-    snprintf(u, sizeof(u), MODRINTH_API "/project/%s/version", slug);
-    cJSON *vers = http_get_json(u, 45);
+    char pq[256];
+    snprintf(pq, sizeof(pq), "/project/%s/version", slug);
+    cJSON *vers = mr_api_get(pq, 45);
     if (!cJSON_IsArray(vers) || cJSON_GetArraySize(vers) == 0) {
         cJSON_Delete(vers); pymcl_set_error("%s 没有可下载版本", slug); return -1;
     }
