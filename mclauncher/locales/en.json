@@ -966,5 +966,6 @@
   "还没有安装任何版本。请先到「下载 → 原版游戏」安装一个版本。": "No versions installed yet. Install one from Download → Vanilla Game first.",
   "请先选择版本；还没有版本时，到「下载 → 原版游戏」安装": "Select a version first; if none are installed, get one from Download → Vanilla Game",
   "请先到「下载 → 原版游戏」安装一个版本": "Install a version from Download → Vanilla Game first",
-  "搜索失败": "Search failed"
+  "搜索失败": "Search failed",
+  "正版 / 皮肤站账号使用账号自己的名字；用户名仅离线模式生效": "Microsoft / skin-server accounts use their own name; the username only applies in offline mode"
 }

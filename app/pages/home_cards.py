@@ -147,7 +147,8 @@ class ConfigBody(QWidget):
         page.java_box = ComboBox()
         page.username_edit = LineEdit()
         page.username_edit.setPlaceholderText(tr("离线用户名"))
-        page.username_edit.setText("Player")
+        page.username_edit.setText(str(CONFIG.get("offline_username") or "Player"))
+        page.username_edit.textChanged.connect(page._persist_launch_defaults)
 
         page.memory_slider = Slider(Qt.Horizontal)
         page.memory_slider.setRange(512, 32768)

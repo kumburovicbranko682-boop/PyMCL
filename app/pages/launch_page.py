@@ -42,6 +42,8 @@ class LaunchPage(QWidget):
         self.instance_box.currentTextChanged.connect(self._on_instance_changed)
         self.java_box.currentTextChanged.connect(self._on_java_changed)
         self.version_box.currentTextChanged.connect(self._sync_banner)
+        self.account_box.currentTextChanged.connect(self._sync_username_state)
+        self._sync_username_state()
         # 记住「上次从 CONFIG 同步过来的值」，reload() 靠它区分
         # 「用户在本页手改过」和「一直是配置里的默认值」。
         self._cfg_snapshot = (
@@ -266,8 +268,19 @@ class LaunchPage(QWidget):
         CONFIG.set("memory_mb", mem)
         CONFIG.set("width", w)
         CONFIG.set("height", h)
+        CONFIG.set("offline_username",
+                   self.username_edit.text().strip() or "Player")
         CONFIG.save()
         self._cfg_snapshot = (mem, w, h)
+
+    def _sync_username_state(self, *_args):
+        """用户名只在离线模式下生效（见 _launch_game_impl）——别的账号
+        选中时把输入框禁用并说明原因，不让人填一个会被忽略的值。"""
+        offline = (self.account_box.currentText() or tr("离线模式")) == tr("离线模式")
+        self.username_edit.setEnabled(offline)
+        self.username_edit.setToolTip(
+            "" if offline
+            else tr("正版 / 皮肤站账号使用账号自己的名字；用户名仅离线模式生效"))
 
     def _sync_from_config(self):
         """把设置页刚保存的内存 / 分辨率同步到本页。
