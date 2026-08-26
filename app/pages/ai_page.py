@@ -793,10 +793,18 @@ class AiPage(QWidget):
         self._reload_list()
 
     def _on_pick_chat(self, item, _prev=None):
-        if item is None or self._worker:
+        if item is None:
             return
         cid = item.data(Qt.UserRole)
         if cid == self._store.get("active_id"):
+            return
+        if self._worker:
+            # 忙碌时以前是静默 return，但列表高亮已经跳到新对话上了：
+            # 选中 B、显示 A，选中态就是假的。把高亮弹回去并说明出路。
+            self._reload_list()
+            InfoBar.info(tr("正在回复"), tr("先点「停止」或等回复结束，再切换对话"),
+                         parent=self.window() or self,
+                         position=InfoBarPosition.TOP, duration=2500)
             return
         chat_store.set_active(self._store, cid)
         self._load_active()
