@@ -141,7 +141,7 @@ _NO_ORIGIN_HINT = (
 
 
 def check_modpack_update(dm: DownloadManager, instance: Instance, api_key=None) -> dict:
-    """检查实例整合包是否有新版本（Modrinth / CurseForge）。
+    """检查实例整合包是否有新版本（Modrinth / CurseForge / MCBBS fileApi）。
 
     返回 {source, name, slug, current, latest, current_id, latest_id,
     update, url, mc_versions}。没有安装记录 / 来源不支持时抛 ModpackError。
@@ -195,6 +195,24 @@ def check_modpack_update(dm: DownloadManager, instance: Instance, api_key=None) 
             "mc_versions": [],
         }
 
+    if source == "mcbbs":
+        file_api = str(meta.get("file_api") or "").strip().rstrip("/")
+        if not file_api:
+            raise ModpackError(
+                "该 MCBBS 整合包没有声明 fileApi 更新源（mcbbs.packmeta 里未填写），"
+                "无法在线检查更新")
+        remote = fetch_mcbbs_manifest(dm, file_api)
+        latest = str(remote.get("version") or "?")
+        game = parse_mcbbs_addons(remote).get("mc")
+        return {
+            "source": "mcbbs", "name": str(remote.get("name") or name),
+            "current": current, "latest": latest,
+            "current_id": None, "latest_id": None,
+            "update": latest != current, "url": file_api,
+            "mc_versions": [game] if game else [],
+            "force": bool(remote.get("forceUpdate")),
+        }
+
     raise ModpackError(
         f"整合包来源「{source or '未知'}」不支持在线检查更新"
         "（本地 zip / MultiMC 实例包没有更新源）"
@@ -224,6 +242,8 @@ def update_modpack(dm: DownloadManager, instance: Instance, on_progress=None,
         meta = install_mrpack(
             dm, info["url"], instance, on_progress=on_progress, cancel=cancel,
             origin={"slug": info.get("slug"), "version_id": info.get("latest_id")})
+    elif info.get("source") == "mcbbs":
+        meta = update_mcbbs_pack(dm, instance, on_progress=on_progress, cancel=cancel)
     else:
         meta = install_cf_modpack(
             dm, info.get("addon_id"), instance, api_key=api_key,
@@ -1328,6 +1348,93 @@ def _apply_mcbbs_launch_info(instance: Instance, version_id, info, on_progress=N
     if "game_args" in patch:
         parts.append("游戏参数")
     _emit(on_progress, f"已按整合包 launchInfo 预设版本设置：{'、'.join(parts)}")
+
+
+def fetch_mcbbs_manifest(dm: DownloadManager, file_api: str) -> dict:
+    """拉取 fileApi 更新源上的 mcbbs.packmeta。"""
+    url = f"{file_api.rstrip('/')}/{MCBBS_MANIFEST}"
+    try:
+        data = dm.fetch_json(url, timeout=60)
+    except Exception as e:
+        raise ModpackError(f"获取整合包更新清单失败（{url}）: {e}")
+    if not isinstance(data, dict):
+        raise ModpackError("更新源返回的 mcbbs.packmeta 不是有效的 JSON 对象")
+    return data
+
+
+def update_mcbbs_pack(dm: DownloadManager, instance: Instance,
+                      on_progress=None, cancel=None, java=None) -> dict:
+    """按 fileApi 增量更新 MCBBS 整合包（HMCL McbbsModpackCompletionTask 同款）。
+
+    重新拉取远端 mcbbs.packmeta：addons 变化补装游戏/加载器，curse 条目
+    走 CurseForge 下载，addFile 条目从 {fileApi}/overrides/{path} 同步
+    （带 hash 且本地一致的自动跳过），launchInfo 重新落进版本设置。
+    旧版本残留文件的清理由 update_modpack 统一做。
+    """
+    from urllib.parse import quote
+
+    meta = (instance.meta() or {}).get("modpack") or {}
+    file_api = str(meta.get("file_api") or "").strip().rstrip("/")
+    if not file_api:
+        raise ModpackError("该 MCBBS 整合包没有声明 fileApi 更新源，无法在线更新")
+    mf = fetch_mcbbs_manifest(dm, file_api)
+    name = str(mf.get("name") or meta.get("name") or "?")
+    _emit(on_progress, f"按更新源同步 MCBBS 整合包「{name}」版本 {mf.get('version', '?')}")
+
+    parsed = parse_mcbbs_addons(mf)
+    if not parsed["mc"]:
+        raise ModpackError("更新清单的 addons 里没有 game（Minecraft 版本）")
+    installer = Installer(instance, dm, on_progress=on_progress or dm.on_progress, cancel=cancel)
+    mc_version = _resolve_pack_minecraft(dm, parsed["mc"], on_progress) or parsed["mc"]
+    installer.install_version(mc_version, java=java)
+
+    loader = parsed["loader"]
+    loader_version = parsed["loader_version"]
+    loader_vid = None
+    if loader:
+        loader_vid = install_loader(installer, loader, loader_version, mc_version)
+    for aid, ver in parsed["extras"]:
+        extra_vid = _install_mcbbs_extra(installer, instance, aid, ver, mc_version,
+                                         loader, on_progress=on_progress)
+        loader_vid = extra_vid or loader_vid
+
+    curse_files, add_files = split_mcbbs_files(mf)
+    manual_mods, pack_paths = _download_cf_pack_files(dm, instance, curse_files, on_progress)
+
+    tasks = []
+    for f in add_files:
+        rel = str(f.get("path") or "").replace("\\", "/").strip("/")
+        if not rel or ".." in rel.split("/"):
+            continue
+        sha1 = str(f.get("hash") or "").strip() or None
+        tasks.append(([f"{file_api}/overrides/{quote(rel)}"],
+                      Path(instance.path) / rel, sha1, None))
+        pack_paths.append(rel)
+    if tasks:
+        _emit(on_progress, f"同步整合包文件（{len(tasks)} 个，hash 未变的自动跳过）")
+        dm.download_all(tasks, message="同步整合包文件")
+
+    version_id = loader_vid or mc_version
+    _apply_mcbbs_launch_info(instance, version_id, mf.get("launchInfo"), on_progress)
+
+    pack_meta = {
+        "name": name,
+        "version": str(mf.get("version") or "?"),
+        "mc_version": mc_version,
+        "loader": (f"{loader}-{loader_version}" if loader else "vanilla"),
+        "source": "mcbbs",
+        "instance": instance.name,
+        "file_api": file_api,
+    }
+    if mf.get("author"):
+        pack_meta["author"] = str(mf.get("author"))
+    if manual_mods:
+        pack_meta["manual_mods"] = manual_mods
+    instance.set_meta("modpack", pack_meta)
+    instance.set_meta("mc_version", version_id)
+    write_pack_files(instance, pack_paths)
+    _emit(on_progress, f"整合包 {name} 同步完成 -> 实例 {instance.name}")
+    return pack_meta
 
 
 def _install_mcbbs_pack(dm: DownloadManager, root: Path, instance: Instance, pack_path,
