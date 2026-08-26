@@ -207,6 +207,79 @@ def _primary_file(version):
 
 # ================================================================ 中文搜索（别名目录 + 多源）
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_EN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9']{2,}")
+_EN_STOPWORDS = {
+    "the", "and", "for", "mod", "mods", "with", "you", "your", "all",
+    "minecraft", "edition", "fabric", "forge", "quilt", "neoforge",
+}
+
+
+def _has_cjk(text) -> bool:
+    return bool(_CJK_RE.search(str(text or "")))
+
+
+def _english_terms_from_hits(hits, limit=3) -> list:
+    """从 Modrinth 命中标题里提取英文关键词，供 CurseForge 二次搜索。
+
+    CurseForge 只有英文标题，中文直查基本返回空（PCL CE 同款思路）。
+    """
+    weight = {}
+    for rank, h in enumerate(hits[:8]):
+        title = str(h.get("title") or h.get("name") or "")
+        for w in _EN_WORD_RE.findall(title):
+            lw = w.lower()
+            if lw in _EN_STOPWORDS:
+                continue
+            weight[lw] = weight.get(lw, 0.0) + max(1.0, 8.0 - rank)
+    ordered = sorted(weight.items(), key=lambda kv: -kv[1])
+    return [w for w, _ in ordered[:limit]]
+
+
+def _mcim_translate_hits(dm: DownloadManager, hits, limit=6):
+    """用 MCIM 翻译接口补中文简介（/translate/modrinth/{id}、/translate/curseforge/{id}）。
+
+    公益接口，失败静默忽略；连续 2 次失败就不再尝试，避免拖慢搜索。
+    """
+    failures = 0
+    for h in hits[:limit]:
+        if failures >= 2:
+            break
+        src = str(h.get("source") or "")
+        if src == "modrinth":
+            key = h.get("slug") or h.get("project_id") or h.get("id")
+        elif src == "curseforge":
+            key = h.get("id")
+        else:
+            continue
+        if not key:
+            continue
+        try:
+            data = dm.fetch_json(
+                f"{MCIM_MIRROR}/translate/{src}/{key}", timeout=(2, 4), expand=False)
+        except Exception:
+            failures += 1
+            continue
+        translated = str((data or {}).get("translated") or "").strip()
+        if translated:
+            if h.get("description"):
+                h["description_orig"] = h.get("description")
+            h["description"] = translated[:160]
+    return hits
+
+
+def _dedupe_hits(hits) -> list:
+    out, seen = [], set()
+    for h in hits:
+        key = (str(h.get("source") or ""),
+               str(h.get("slug") or h.get("id") or h.get("title") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+    return out
+
+
 def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
     """中文搜索模组：优先命中内置中文别名目录，其次按别名到多源搜索。
 
@@ -224,9 +297,17 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
         return []
     hits = []
 
+    def _finish(rows):
+        rows = _dedupe_hits(rows)[:limit]
+        if _has_cjk(q):
+            _mcim_translate_hits(dm, rows)
+        return rows
+
     # 1) 精确别名命中：详情 404 当没命中，继续走全文搜索，不把死 slug 当结果
     dead_slugs = set()
     slug, cf_id, title = catalog.lookup_mod_alias(q)
+    # 别名只有 title（如 OptiFine 不在 Modrinth）：拿 title 当全文搜索关键词
+    fallback_q = title if (title and not slug and not cf_id) else q
     if slug:
         got = _alias_to_modrinth_hits(dm, slug, title, limit)
         if got:
@@ -240,7 +321,7 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
         except Exception as e:
             utils.log.warning("别名命中后 CurseForge 查询失败 %s: %s", cf_id, e)
     if hits:
-        return hits[:limit]
+        return _finish(hits)
 
     # 2) 模糊匹配：跳过已经 404 的 slug，最多 3 条
     fuzzy = catalog.fuzzy_match_mod(q)
@@ -262,19 +343,26 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
         if len(hits) >= 4:
             break
     if hits:
-        return hits[:limit]
+        return _finish(hits)
 
-    # 3) 别名未命中：回退到 Modrinth（英文原文）+ CurseForge 全文
+    # 3) 别名未命中：回退到 Modrinth 全文 + CurseForge（中文查询提英文词再搜）
+    mr_hits = []
     try:
-        hits.extend(search_mods(dm, q, limit=limit))
+        mr_hits = search_mods(dm, fallback_q, limit=limit)
+        hits.extend(mr_hits)
     except Exception as e:
         utils.log.warning("中文搜索回退 Modrinth 失败: %s", e)
-    try:
-        hits.extend(search_curseforge(dm, q, limit=limit, api_key=api_key,
-                                      class_id=CF_CLASS_MOD))
-    except Exception as e:
-        utils.log.warning("中文搜索回退 CurseForge 失败: %s", e)
-    return hits[:limit]
+    cf_query = fallback_q
+    if _has_cjk(cf_query):
+        terms = _english_terms_from_hits(mr_hits)
+        cf_query = " ".join(terms) if terms else None
+    if cf_query:
+        try:
+            hits.extend(search_curseforge(dm, cf_query, limit=limit, api_key=api_key,
+                                          class_id=CF_CLASS_MOD))
+        except Exception as e:
+            utils.log.warning("中文搜索回退 CurseForge 失败: %s", e)
+    return _finish(hits)
 
 
 def _alias_to_modrinth_hits(dm: DownloadManager, slug, title=None, limit=30):

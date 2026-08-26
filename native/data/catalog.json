@@ -53,12 +53,10 @@
       "title": "Xaero's World Map"
     },
     "高清修复": {
-      "slug": "iris",
-      "title": "Iris Shaders"
+      "title": "OptiFine"
     },
     "optifine": {
-      "slug": "iris",
-      "title": "Iris Shaders"
+      "title": "OptiFine"
     },
     "光影": {
       "slug": "iris",
@@ -413,12 +411,12 @@
       "title": "Lithium"
     },
     "磷": {
-      "slug": "phosphor",
-      "title": "Phosphor"
+      "slug": "starlight",
+      "title": "Starlight（Phosphor 已停更）"
     },
     "phosphor": {
-      "slug": "phosphor",
-      "title": "Phosphor"
+      "slug": "starlight",
+      "title": "Starlight（Phosphor 已停更）"
     },
     "星光": {
       "slug": "starlight",
@@ -682,7 +680,6 @@
       "title": "MCDungeons Weapons"
     },
     "考古": {
-      "slug": "archaeology",
       "title": "Archaeology"
     },
     "传送书": {
@@ -738,7 +735,6 @@
       "title": "Pam's HarvestCraft 2"
     },
     "糖果世界": {
-      "slug": "candy-world",
       "title": "Candy World"
     },
     "梦幻世界": {
@@ -751,11 +747,9 @@
       "title": "ATC Alarm"
     },
     "经验书": {
-      "slug": "xp-book",
       "title": "XP Book"
     },
     "xp book": {
-      "slug": "xp-book",
       "title": "XP Book"
     },
     "通用机械": {
@@ -1150,11 +1144,9 @@
       "title": "Ars Nouveau"
     },
     "巫术": {
-      "slug": "witchcraft",
       "title": "Witchcraft"
     },
     "witchcraft": {
-      "slug": "witchcraft",
       "title": "Witchcraft"
     },
     "血魔法": {
@@ -1449,7 +1441,7 @@
       "name": "Sodium 钠 (渲染优化)",
       "source": "modrinth",
       "key": "sodium",
-      "mc": "1.20.1",
+      "mc": null,
       "loader": "fabric"
     },
     {
