@@ -1088,6 +1088,12 @@ class MainWindow(FluentWindowBase):
         self._dock_anim = self._anim_pos(dock, QPoint(dest.x(), dest.y() + 24), 200, after)
 
     def _anim_pos(self, widget, end, ms, done=None):
+        from .motion_prefs import ui_motion_ok
+        if not ui_motion_ok():
+            widget.move(end)
+            if done:
+                done()
+            return None
         anim = QPropertyAnimation(widget, b"pos", self)
         anim.setDuration(ms)
         anim.setEasingCurve(QEasingCurve.OutCubic)
@@ -1123,6 +1129,10 @@ class MainWindow(FluentWindowBase):
 
     def fly_to_tasks(self, source, text: str, color: str | None = None):
         if source is None:
+            return
+        # 「界面动画」总开关承诺「关闭则全部瞬时」，飞入动画也要听它的
+        from .motion_prefs import ui_motion_ok
+        if not ui_motion_ok():
             return
         if not self.backend.get_setting("ui_fly_animation", True):
             return
