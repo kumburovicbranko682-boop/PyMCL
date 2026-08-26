@@ -53,6 +53,14 @@ class CopyMatchesUiTest(unittest.TestCase):
                 for phrase in _GHOST_PHRASES:
                     self.assertNotIn(phrase, key, f"{name} 还留着幽灵页面词条: {key}")
 
+    def test_multiplayer_intro_leads_with_actions(self):
+        """联机页开头必须是「怎么加入」，黑话只能放在技术说明里。"""
+        src = (ROOT / "app" / "pages" / "multiplayer_page.py").read_text(encoding="utf-8")
+        for jargon in ("打洞", "FRP"):
+            self.assertNotIn(jargon, src,
+                             f"联机页文案不应再出现黑话「{jargon}」")
+        self.assertIn("邀请码即可加入", src, "开头应直接告诉玩家怎么加入")
+
     def test_download_source_labels_are_shared(self):
         """首次向导与设置页必须共用 DOWNLOAD_SOURCE_LABELS，不许各写一份。"""
         for rel in ("app/pages/first_run.py", "app/pages/settings_page.py"):

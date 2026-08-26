@@ -814,7 +814,6 @@
   "跳过资源文件校验（加快重装）": "Skip asset verification (faster reinstall)",
   "输入名称后点击搜索": "Enter a name, then search",
   "输入房主提供的邀请码加入游戏世界。": "Enter the host's invite code to join the world.",
-  "输入邀请码即可加入。陶瓦是 EasyTier P2P 打洞，不是 FRP 隧道；会和 HMCL 一样传官方节点，并带上本机 HMCL 用过的自定义会合节点。官方 PCL 联机大厅协议未开放，PCL 房间号无法互通；局域网请用下面地址。": "Enter an invite code to join. Terracotta uses EasyTier P2P (not FRP); it uses official nodes like HMCL plus any custom rendezvous nodes HMCL used. Official PCL lobby protocol is closed—PCL room codes won't interop; use the LAN address below.",
   "迁移中": "Migrating",
   "迁移失败": "Migration failed",
   "返": "Back",
@@ -957,5 +956,7 @@
   "所有版本共用这个实例的存档、Mod 和设置": "All versions share this instance's saves, mods and settings",
   "每个版本有自己的存档；Mod 和设置仍与实例共用": "Each version keeps its own saves; mods and settings stay shared",
   "每个版本有自己的 Mod 和设置；存档仍与实例共用": "Each version keeps its own mods and settings; saves stay shared",
-  "存档、Mod、设置全部独立，互不影响": "Saves, mods and settings are fully separate per version"
+  "存档、Mod、设置全部独立，互不影响": "Saves, mods and settings are fully separate per version",
+  "输入好友发来的邀请码即可加入；创建房间后把邀请码发给好友。可与 HMCL 的联机互通；PCL 房间号不互通。同一局域网不用邀请码，直接连下面的地址。": "Enter the invite code your friend sent to join; after creating a room, share your code. Works with HMCL multiplayer; PCL room codes are not compatible. On the same LAN, skip the code and connect to the address below.",
+  "技术说明：基于 EasyTier 点对点直连（与 HMCL 同款），会连接官方节点和本机 HMCL 配置过的自定义会合节点。": "Technical note: peer-to-peer via EasyTier (same as HMCL); connects to official nodes plus any custom rendezvous nodes HMCL configured on this machine."
 }

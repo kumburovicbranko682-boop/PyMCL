@@ -55,10 +55,15 @@ class MultiplayerPage(QWidget):
         title_row.addWidget(self.state_pill)
         title_row.addStretch(1)
         head.addLayout(title_row)
+        # 第一行是给普通玩家的行动指南；网络实现细节与节点披露放第二行小字，
+        # 不再把网络黑话堆在开头。
         head.addWidget(CaptionLabel(
-            tr("输入邀请码即可加入。陶瓦是 EasyTier P2P 打洞，不是 FRP 隧道；"
-            "会和 HMCL 一样传官方节点，并带上本机 HMCL 用过的自定义会合节点。"
-            "官方 PCL 联机大厅协议未开放，PCL 房间号无法互通；局域网请用下面地址。")
+            tr("输入好友发来的邀请码即可加入；创建房间后把邀请码发给好友。"
+               "可与 HMCL 的联机互通；PCL 房间号不互通。同一局域网不用邀请码，直接连下面的地址。")
+        ))
+        head.addWidget(CaptionLabel(
+            tr("技术说明：基于 EasyTier 点对点直连（与 HMCL 同款），"
+               "会连接官方节点和本机 HMCL 配置过的自定义会合节点。")
         ))
         self.lan_hint = CaptionLabel(self.backend.lan_hint())
         self.lan_hint.setWordWrap(True)
