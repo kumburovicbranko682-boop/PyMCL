@@ -33,7 +33,8 @@ class InstanceCard(SimpleCardWidget):
         top.addWidget(Pill(tr("默认") if info["name"] == CONFIG.get("default_instance") else tr("实例"), "#4C8BF5"))
         layout.addLayout(top)
         layout.addWidget(CaptionLabel(str(info.get("mc") or "")))
-        layout.addWidget(CaptionLabel(f"Java · {info.get('java_label') or tr('自动选择')}"))
+        # java_label 若是「自动选择」哨兵原文，过一遍 tr 让英文界面不漏翻
+        layout.addWidget(CaptionLabel(f"Java · {tr(info.get('java_label') or '自动选择')}"))
         layout.addStretch(1)
 
         actions = QHBoxLayout()

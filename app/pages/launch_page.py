@@ -318,7 +318,7 @@ class LaunchPage(QWidget):
             self.java_box.clear()
             self.java_box.addItems(labels)
             want = self.backend.java_combo_label_for(instance, self._java_opts)
-            self.java_box.setCurrentText(want if want in labels else JAVA_AUTO)
+            self.java_box.setCurrentText(want if want in labels else tr(JAVA_AUTO))
             self.java_box.blockSignals(False)
         finally:
             self._syncing_java = False

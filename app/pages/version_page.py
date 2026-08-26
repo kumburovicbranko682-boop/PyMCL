@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """版本页：版本卡片网格 + 加载器安装 + 已安装管理。"""
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action, BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
@@ -24,12 +24,21 @@ class VersionCard(SimpleCardWidget):
         layout.setSpacing(6)
 
         top = QHBoxLayout()
-        top.addWidget(StrongBodyLabel(info["version"]), 1)
+        title = StrongBodyLabel(info["version"])
+        top.addWidget(title, 1)
         vtype = info["type"]
         labels = {"release": tr("正式版"), "snapshot": tr("快照"), "old_alpha": tr("远古"), "old_beta": tr("远古")}
         colors = {"release": "#2FA36B", "snapshot": "#E8862E", "old_alpha": "#7C5CD6", "old_beta": "#7C5CD6"}
-        top.addWidget(Pill(labels.get(vtype, vtype), colors.get(vtype, "#E8862E")))
+        pill = Pill(labels.get(vtype, vtype), colors.get(vtype, "#E8862E"))
+        top.addWidget(pill)
         layout.addLayout(top)
+        # 卡片定宽 216：英文 Pill 更宽时长版本号会被硬裁掉尾部（如
+        # 26.3-snapshot-10 → 26.3-snapshot），改成省略号 + 悬停看全名
+        avail = 216 - 32 - pill.sizeHint().width() - top.spacing()
+        fm = title.fontMetrics()
+        if fm.horizontalAdvance(info["version"]) > avail:
+            title.setText(fm.elidedText(info["version"], Qt.ElideRight, avail))
+            title.setToolTip(info["version"])
         layout.addWidget(CaptionLabel(tr("发布于 {0}").format(info["date"])))
         layout.addStretch(1)
 
@@ -72,7 +81,10 @@ class VersionPage(QWidget):
         bar.setSpacing(12)
         self.search = SearchLineEdit()
         self.search.setPlaceholderText(tr("搜索版本号…"))
-        self.search.setFixedWidth(260)
+        # 定宽会把整行顶溢出：英文下 Pivot / 勾选框更宽，右端控件被裁掉。
+        # 给可压缩区间，宽度不够时先缩搜索框，而不是裁「显示隐藏/完成后启动」。
+        self.search.setMinimumWidth(150)
+        self.search.setMaximumWidth(260)
         self.pivot = Pivot(self)
         self.pivot.addItem("all", tr("全部"))
         self.pivot.addItem("release", tr("正式版"))
@@ -80,12 +92,13 @@ class VersionPage(QWidget):
         self.pivot.addItem("old_alpha", tr("远古"))
         self.pivot.setCurrentItem("all")
         self.instance_box = ComboBox()
-        self.instance_box.setFixedWidth(140)
+        self.instance_box.setMinimumWidth(110)
+        self.instance_box.setMaximumWidth(140)
         self.launch_after = CheckBox(tr("完成后启动"))
         self.launch_after.setChecked(True)
         self.hidden_box = CheckBox(tr("显示隐藏"))
         self.hidden_box.setChecked(self._show_hidden)
-        bar.addWidget(self.search)
+        bar.addWidget(self.search, 1)
         bar.addWidget(self.pivot)
         bar.addStretch(1)
         bar.addWidget(BodyLabel(tr("实例")))

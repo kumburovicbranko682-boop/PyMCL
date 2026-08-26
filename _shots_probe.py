@@ -1,10 +1,6 @@
 # -*- coding: utf-8 -*-
-"""临时探针：离屏抓各主要页面截图，审计视觉问题用。
+"""UI 审计截图：单次 app.exec() 内遍历全部页面，浅色+深色各抓一张。"""
 
-单次 event loop 内串行执行（QTimer 链），窗口全程保持可见——
-中途 app.exec() 退出会把顶层窗口隐藏，showEvent/isVisible 相关
-逻辑全部失真，抓出来的截图不代表真实运行状态。
-"""
 import os
 import sys
 import traceback
@@ -18,10 +14,16 @@ _fb.stop_heartbeat = lambda *a, **k: None
 from PySide6.QtCore import QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-OUT = "_shots"
+OUT = sys.argv[1] if len(sys.argv) > 1 else "_shots/audit"
+LANG = sys.argv[2] if len(sys.argv) > 2 else ""
 os.makedirs(OUT, exist_ok=True)
 
 app = QApplication([])
+
+if LANG:
+    from mclauncher import i18n
+    i18n._ensure()
+    i18n._current_lang = LANG  # 不落盘
 
 from app.main_window import MainWindow  # noqa: E402
 from mclauncher.config import CONFIG  # noqa: E402
@@ -30,81 +32,46 @@ win = MainWindow()
 win.resize(1280, 800)
 win.show()
 
-_steps = []
+KEYS = ["launch", "version", "mod", "modpack", "datapack", "resource", "shader",
+        "world", "java", "instance", "mods", "account", "multiplayer", "servers",
+        "playtime", "feedback", "settings", "ai", "tasks"]
+
+# 导航与截图放在不同的事件循环轮次：同一回调里 deleteLater 的旧控件
+# 还没销毁、会一起画进截图，看起来像“控件重影”的假 bug。
+steps = []
+for mode in ("light", "dark"):
+    steps.append(("theme", mode))
+    for k in KEYS:
+        steps.append(("page", k))
+        steps.append(("grab", f"{mode}-{k}"))
+
+idx = 0
 
 
-def step(fn=None, *, shot=None, settle=700):
-    _steps.append((fn, shot, settle))
-
-
-step(settle=800)  # 等首页装配完
-step(shot="01-launch")
-step(lambda: win.side.set_current("download", emit=True))
-step(shot="02-download-version")
-step(lambda: win.switchTo("mod"))
-step(shot="03-mod")
-step(lambda: win.switchTo("java"))
-step(shot="04-java")
-step(lambda: win.side.set_current("ai", emit=True))
-step(shot="05-ai")
-step(lambda: win.side.set_current("more", emit=True))
-step(shot="06-more-instance")
-step(lambda: win.switchTo("account"))
-step(shot="07-account")
-step(lambda: win.switchTo("settings"))
-step(shot="08-settings")
-step(lambda: win.switchTo("multiplayer"))
-step(shot="09-multiplayer")
-step(lambda: win.switchTo("feedback"))
-step(shot="10-feedback")
-step(lambda: win.switchTo("playtime"))
-step(shot="11-playtime")
-step(lambda: win.side.set_current("tasks", emit=True))
-step(shot="12-tasks")
-
-step(lambda: win.side.set_current("launch", emit=True))
-step(lambda: win.launch_page.canvas.set_edit_mode(True))
-step(shot="13-edit-mode")
-step(lambda: win.launch_page.canvas.set_edit_mode(False))
-
-
-def _dark(on):
-    CONFIG.set("ui_dark", on)
-    CONFIG.save()
-    win.apply_theme()
-
-
-step(lambda: _dark(True))
-step(shot="14-launch-dark")
-step(lambda: win.switchTo("settings"))
-step(shot="15-settings-dark")
-step(lambda: _dark(False))
-
-step(lambda: win.resize(900, 620))
-step(lambda: win.side.set_current("launch", emit=True))
-step(shot="16-launch-narrow")
-
-
-def _run_next():
-    if not _steps:
-        print("DONE")
+def step():
+    global idx
+    if idx >= len(steps):
+        # 复位浅色，不污染 config
+        CONFIG.set("ui_dark", False)
         app.quit()
         return
-    fn, shot, settle = _steps.pop(0)
+    s = steps[idx]
+    idx += 1
     try:
-        if fn is not None:
-            fn()
-        if shot is not None:
-            ok = win.grab().save(f"{OUT}/{shot}.png")
-            print(("saved " if ok else "FAILED ") + shot)
+        if s[0] == "theme":
+            CONFIG.set("ui_dark", s[1] == "dark")
+            win.apply_theme()
+        elif s[0] == "page":
+            win.switchTo(s[1])
+        else:
+            ok = win.grab().save(f"{OUT}/{s[1]}.png")
+            print(("saved " if ok else "FAILED ") + s[1], flush=True)
     except Exception:
         traceback.print_exc()
-        print("FAIL")
-        app.quit()
-        sys.exit(1)
-    # 动作步之后等 settle 让动画/布局走完；纯截图步之间只留 60ms
-    QTimer.singleShot(settle if shot is None else 60, _run_next)
+    # SlideHStack 动画 260ms：至少等它跑完再抓，否则截到中间帧当假 bug
+    QTimer.singleShot(600, step)
 
 
-QTimer.singleShot(0, _run_next)
+QTimer.singleShot(900, step)
 app.exec()
+print("done", flush=True)
