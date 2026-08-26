@@ -433,6 +433,11 @@ class LaunchPage(QWidget):
             if not box.exec():
                 return
 
+        username = self.username_edit.text().strip()
+        if username and username != CONFIG.get("last_username"):
+            CONFIG.set("last_username", username)
+            CONFIG.save()
+
         self.log_edit.clear()
         for w in warns:
             self.log_edit.appendPlainText(
