@@ -1024,5 +1024,8 @@
   "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant",
   "；安装新版本时写入，可稍后在版本设置改": "; applied to newly installed versions, changeable later in version setup",
   "共 {0} 个文件": "{0} files",
-  "{0} 个匹配 / 共 {1} 个文件": "{0} matched / {1} files total"
+  "{0} 个匹配 / 共 {1} 个文件": "{0} matched / {1} files total",
+  "将删除整个实例「{0}」及其文件，不可恢复。": "This deletes the entire instance “{0}” and its files. This cannot be undone.",
+  "将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。": "This permanently deletes the world “{0}” - builds and progress in it cannot be recovered.",
+  "将删除「{0}」。": "This deletes “{0}”."
 }

@@ -57,6 +57,9 @@ class I18nLeftoverTests(unittest.TestCase):
             "加载更多（还有 {0}）",
             "桌面快捷方式：\n{0}\n\n双击即可直接启动该版本。",
             "将卸载 {0} 个版本：\n",
+            "将删除整个实例「{0}」及其文件，不可恢复。",
+            "将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。",
+            "将删除「{0}」。",
         ]
         for loc in ("en.json", "zh_CN.json"):
             data = json.loads((ROOT / "mclauncher" / "locales" / loc).read_text(encoding="utf-8"))
@@ -79,6 +82,9 @@ class I18nLeftoverTests(unittest.TestCase):
             ("app/pages/version_page.py", 'f"桌面快捷方式'),
             ("app/pages/version_page.py", 'f"将卸载'),
             ("app/pages/version_page.py", 'f"{len(selected)} 个版本"'),
+            ("app/pages/catalog_page.py", 'f"将删除整个实例'),
+            ("app/pages/catalog_page.py", 'f"将永久删除世界'),
+            ("app/pages/catalog_page.py", 'f"将删除「'),
         ]
         for rel, needle in cases:
             src = (ROOT / rel).read_text(encoding="utf-8")
