@@ -377,6 +377,9 @@ class MultiplayerPage(QWidget):
         elif info.get("difficulty_hint"):
             status_text = tr(info.get("label") or "") + "\n" + tr(info["difficulty_hint"])
         self.status.setText(status_text)
+        # 状态行只有比角标多说了内容才占一行：无错误/提示时它和角标
+        # 一字不差（「联机内核未下载」×2），纯重复
+        self.status.setVisible(bool(status_text) and status_text != pill_text)
         room = info.get("room") or ""
         url = info.get("url") or ""
         if room or url:

@@ -229,7 +229,9 @@ class FilePickDialog(MessageBoxBase):
             info.addWidget(fn)
         lay.addLayout(info, 1)
         btn = PushButton(tr("安装"))
-        btn.setFixedSize(64, 28)
+        # 定高不定宽：英文 “Install” 在 64px 里被裁边
+        btn.setFixedHeight(28)
+        btn.setMinimumWidth(64)
         btn.setStyleSheet(ghost_btn_qss())
         btn.clicked.connect(lambda _, r=row: self._pick(r))
         lay.addWidget(btn)

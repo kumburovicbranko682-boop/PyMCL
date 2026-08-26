@@ -607,7 +607,8 @@ class AiPage(QWidget):
         # 输入框旁的权限快捷区：下拉直接切三档，齿轮开完整说明面板
         self.perm_combo = ComboBox()
         self.perm_combo.setFixedHeight(34)
-        self.perm_combo.setFixedWidth(112)
+        # 最小宽而非定宽：英文 “No confirmations” 在 112px 里被省略成没意义的词头
+        self.perm_combo.setMinimumWidth(112)
         self.perm_combo.setToolTip(tr("AI 权限等级"))
         self.perm_combo.addItems([tr("标准"), tr("完全访问"), tr("免确认")])
         self.perm_combo.currentIndexChanged.connect(self._on_perm_level)

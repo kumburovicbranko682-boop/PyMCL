@@ -32,12 +32,13 @@ class VersionCard(SimpleCardWidget):
         pill = Pill(labels.get(vtype, vtype), colors.get(vtype, "#E8862E"))
         top.addWidget(pill)
         layout.addLayout(top)
-        # 卡片定宽 216：英文 Pill 更宽时长版本号会被硬裁掉尾部（如
-        # 26.3-snapshot-10 → 26.3-snapshot），改成省略号 + 悬停看全名
+        # 卡片定宽 216：英文 Pill 更宽时长版本号放不下。省略号必须打在
+        # 中间——版本号的区分度全在结尾（26.3-snapshot-8/-9 右截后
+        # 一屏卡片全叫 26.3-snapsh…，等于没有名字）。悬停看全名。
         avail = 216 - 32 - pill.sizeHint().width() - top.spacing()
         fm = title.fontMetrics()
         if fm.horizontalAdvance(info["version"]) > avail:
-            title.setText(fm.elidedText(info["version"], Qt.ElideRight, avail))
+            title.setText(fm.elidedText(info["version"], Qt.ElideMiddle, avail))
             title.setToolTip(info["version"])
         layout.addWidget(CaptionLabel(tr("发布于 {0}").format(info["date"])))
         layout.addStretch(1)
