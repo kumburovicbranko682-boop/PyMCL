@@ -315,7 +315,7 @@
   "存档管理…": "Save manager…",
   "安装": "Install",
   "安装 {0}": "Install {0}",
-  "安装世界": "InstallWorld",
+  "安装世界": "Install World",
   "安装光影": "Install Shader",
   "安装到": "Install to",
   "安装到当前实例 resourcepacks": "Install into this instance's resourcepacks",
@@ -1027,5 +1027,8 @@
   "{0} 个匹配 / 共 {1} 个文件": "{0} matched / {1} files total",
   "将删除整个实例「{0}」及其文件，不可恢复。": "This deletes the entire instance “{0}” and its files. This cannot be undone.",
   "将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。": "This permanently deletes the world “{0}” - builds and progress in it cannot be recovered.",
-  "将删除「{0}」。": "This deletes “{0}”."
+  "将删除「{0}」。": "This deletes “{0}”.",
+  "修复": "Repair",
+  "导出整合包": "Export modpack",
+  "检查模组更新": "Check mod updates"
 }

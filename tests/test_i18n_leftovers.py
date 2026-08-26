@@ -91,6 +91,19 @@ class I18nLeftoverTests(unittest.TestCase):
             self.assertNotIn(needle, src,
                              f"{rel} 里 {needle!r} 又变回硬编码了")
 
+    def test_task_titles_translated(self):
+        """任务标题显示在「下载任务」列表里，必须走 tr()。"""
+        src = (ROOT / "app" / "backend.py").read_text(encoding="utf-8")
+        self.assertNotIn('start_task(f"', src,
+                         "backend.py 出现硬编码任务标题（start_task(f\"…\"））")
+        for loc in ("en.json", "zh_CN.json"):
+            data = json.loads((ROOT / "mclauncher" / "locales" / loc).read_text(encoding="utf-8"))
+            for k in ("修复", "导出整合包", "检查模组更新", "安装世界"):
+                self.assertIn(k, data, f"{loc} 缺少任务标题键：{k}")
+        en = json.loads((ROOT / "mclauncher" / "locales" / "en.json").read_text(encoding="utf-8"))
+        self.assertEqual(en["安装世界"], "Install World",
+                         "英文翻译不能是挤在一起的 InstallWorld")
+
     def test_dock_count_title_translated(self):
         from app.backend import BackendAPI
         from app.pages.tasks_page import DownloadDock
