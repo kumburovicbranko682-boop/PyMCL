@@ -106,5 +106,40 @@ class InstanceExportFeedbackTests(unittest.TestCase):
         self.assertIn("exports", data[key])
 
 
+class VersionExportScriptFeedbackTests(unittest.TestCase):
+    """版本菜单「导出启动脚本」同款：不许静默开任务。"""
+
+    def test_export_script_gives_feedback(self):
+        from PySide6.QtWidgets import QPushButton
+        from app.backend import BackendAPI
+        from app.pages.version_page import VersionPage
+
+        backend = BackendAPI(None)
+        backend.call_async = lambda fn, ok, err=None: None
+        calls = []
+        backend.export_launch_script = (
+            lambda inst, ver, dest="": calls.append((inst, ver)) or "task-1")
+
+        host = _Host()
+        lay = QVBoxLayout(host)
+        page = VersionPage(backend, None)
+        lay.addWidget(page)
+        host.show()
+        _app.processEvents()
+
+        src = QPushButton("…", page)
+        page._export_script("default", "1.21.1", src)
+        _app.processEvents()
+
+        self.assertEqual(calls, [("default", "1.21.1")],
+                         "菜单项必须真调 backend.export_launch_script")
+        self.assertEqual(len(host.fly_calls), 1, "应有飞向任务入口的反馈")
+        bars = page.findChildren(InfoBar)
+        contents = " ".join(b.content for b in bars)
+        self.assertIn("exports", contents, "气泡必须告诉用户去哪找脚本")
+        host.close()
+        _app.processEvents()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -316,8 +316,18 @@ class VersionPage(QWidget):
         add(tr("复制"), lambda: self._copy(instance, version))
         add(tr("隐藏 / 取消隐藏"), lambda: self._hide(instance, version))
         add(tr("创建桌面快捷方式"), lambda: self._shortcut(instance, version))
-        add(tr("导出启动脚本"), lambda: self.backend.export_launch_script(instance, version))
+        add(tr("导出启动脚本"), lambda: self._export_script(instance, version, btn))
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _export_script(self, instance, version, source=None):
+        # 导出跑在后台任务里，点了必须看得出开始了、知道去哪找 .bat
+        win = self.window()
+        if source is not None and hasattr(win, "fly_to_tasks"):
+            win.fly_to_tasks(source, version)
+        self.backend.export_launch_script(instance, version)
+        InfoBar.success(tr("开始导出"),
+                        tr("完成后可在启动器目录的 exports 文件夹找到 launch-{0}-{1}.bat").format(instance, version),
+                        parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def _shortcut(self, instance, version):
         try:
@@ -325,7 +335,9 @@ class VersionPage(QWidget):
         except Exception as e:
             MessageBox(tr("创建失败"), str(e), self).exec()
             return
-        MessageBox(tr("已创建"), f"桌面快捷方式：\n{path}\n\n双击即可直接启动该版本。", self).exec()
+        MessageBox(tr("已创建"),
+                   tr("桌面快捷方式：{0}").format(path) + "\n\n"
+                   + tr("双击即可直接启动该版本。"), self).exec()
 
     def _open_folder(self, instance, version, which):
         try:

@@ -1036,5 +1036,8 @@
   "已保存到 {0}": "Saved to {0}",
   "已开始检查模组更新": "Mod update check started",
   "结果见「下载任务」页": "See the result on the Download Tasks page",
-  "将删除模组文件「{0}」，不可恢复。": "This deletes the mod file “{0}”. It cannot be undone."
+  "将删除模组文件「{0}」，不可恢复。": "This deletes the mod file “{0}”. It cannot be undone.",
+  "完成后可在启动器目录的 exports 文件夹找到 launch-{0}-{1}.bat": "When it finishes, look for launch-{0}-{1}.bat in the launcher's exports folder",
+  "桌面快捷方式：{0}": "Desktop shortcut: {0}",
+  "双击即可直接启动该版本。": "Double-click it to launch this version directly."
 }
