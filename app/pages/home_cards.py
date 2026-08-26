@@ -390,16 +390,20 @@ class TasksBody(QWidget):
         root.addWidget(self.last)
         root.addStretch(1)
         be = page.backend
+        self._has_result = False
         be.task_count_changed.connect(self._on_count)
         be.finished.connect(self._on_finished)
         self._on_count(getattr(be, "_download_task_count", lambda: 0)())
 
     def _on_count(self, n: int):
         self.count.setText(tr("下载任务") + f"：{n}")
-        if n == 0:
+        # 任务结束时 finished 先到、count=0 紧跟着到：以前这里无条件重置，
+        # 「✓ 刚完成了什么」显示即消失，用户永远看不到最后一个任务的结果
+        if n == 0 and not self._has_result:
             self.last.setText(tr("暂无任务"))
 
     def _on_finished(self, _tid, success, message):
+        self._has_result = True
         self.last.setText(("✓ " if success else "✗ ") + str(message or "")[:120])
 
 
