@@ -66,12 +66,16 @@ static int install_mrpack_file(const char *pack, const char *instance, pymcl_ctx
         cJSON *u;
         cJSON_ArrayForEach(u, dls) {
             if (!cJSON_IsString(u)) continue;
-            char mir[1024];
-            if (strstr(u->valuestring, MODRINTH_CDN)) {
+            /* 顺序对齐 mclauncher/source.py：auto=官方优先、MCIM 兜底；
+             * mcim=镜像优先；official=不加镜像。 */
+            char mir[1024] = {0};
+            if (strstr(u->valuestring, MODRINTH_CDN) && !config_community_official_only())
                 snprintf(mir, sizeof(mir), "%s%s", MCIM_MIRROR, u->valuestring + strlen(MODRINTH_CDN));
+            if (mir[0] && config_community_mirror_first())
                 cJSON_AddItemToArray(urls, cJSON_CreateString(mir));
-            }
             cJSON_AddItemToArray(urls, cJSON_CreateString(u->valuestring));
+            if (mir[0] && !config_community_mirror_first())
+                cJSON_AddItemToArray(urls, cJSON_CreateString(mir));
         }
         cJSON_AddItemToObject(t, "urls", urls);
         cJSON_AddStringToObject(t, "dest", dest);
@@ -263,13 +267,21 @@ static int install_mr_slug(const char *slug, const char *instance, pymcl_ctx *ct
                 char tmp[MAX_PATH], dest[PYMCL_PATH];
                 GetTempPathA(MAX_PATH, tmp);
                 snprintf(dest, sizeof(dest), "%spymcl_%s.mrpack", tmp, slug);
-                char mir[1024];
-                snprintf(mir, sizeof(mir), "%s", u);
-                if (strstr(u, MODRINTH_CDN))
+                /* 顺序对齐 mclauncher/source.py（auto=官方优先、MCIM 兜底）。 */
+                char mir[1024] = {0};
+                if (strstr(u, MODRINTH_CDN) && !config_community_official_only())
                     snprintf(mir, sizeof(mir), "%s%s", MCIM_MIRROR, u + strlen(MODRINTH_CDN));
-                const char *ex[] = { u };
                 emit(ctx, "下载整合包");
-                int r = download_file(mir, ex, 1, dest, ctx, NULL, -1, NULL);
+                int r;
+                if (!mir[0]) {
+                    r = download_file(u, NULL, 0, dest, ctx, NULL, -1, NULL);
+                } else if (config_community_mirror_first()) {
+                    const char *ex[] = { u };
+                    r = download_file(mir, ex, 1, dest, ctx, NULL, -1, NULL);
+                } else {
+                    const char *ex[] = { mir };
+                    r = download_file(u, ex, 1, dest, ctx, NULL, -1, NULL);
+                }
                 if (r == 0) r = install_mrpack_file(dest, instance, ctx);
                 pymcl_remove_tree(dest);
                 cJSON_Delete(vers);

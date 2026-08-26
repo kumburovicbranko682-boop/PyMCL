@@ -66,6 +66,15 @@ int config_bool(const char *key, int def) {
     if (cJSON_IsNumber(v)) return v->valuedouble != 0;
     return def;
 }
+/* 社区资源源模式（community_source，与 Qt 侧共用同一份 config.json）：
+ * 三态对齐 mclauncher/source.py community_mode——auto=官方优先、MCIM 兜底；
+ * mcim=镜像优先；official=仅官方。 */
+int config_community_official_only(void) {
+    return pymcl_ieq(config_str("community_source", "auto"), "official");
+}
+int config_community_mirror_first(void) {
+    return pymcl_ieq(config_str("community_source", "auto"), "mcim");
+}
 void config_set_str(const char *key, const char *val) {
     if (!g_cfg) return;
     cJSON_DeleteItemFromObject(g_cfg, key);

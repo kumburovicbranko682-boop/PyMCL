@@ -134,6 +134,8 @@ cJSON *config_obj(void);
 const char *config_str(const char *key, const char *def);
 int config_int(const char *key, int def);
 int config_bool(const char *key, int def);
+int config_community_official_only(void);
+int config_community_mirror_first(void);
 void config_set_str(const char *key, const char *val);
 void config_set_int(const char *key, int val);
 void config_set_bool(const char *key, int v);

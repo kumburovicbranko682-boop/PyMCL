@@ -69,6 +69,23 @@ static void urlenc(const char *s, char *enc, size_t n) {
     enc[o] = 0;
 }
 
+/* Modrinth 文件下载顺序对齐 mclauncher/source.py：auto=官方优先、MCIM 兜底；
+ * mcim=镜像优先（官方垫底）；official=仅官方。以前 C 桥固定镜像优先，
+ * Qt 设置页选「仅官方」后换到桥接 UI 照旧先走 MCIM。 */
+static int mr_download(const char *url, const char *dest, pymcl_ctx *ctx,
+                       const char *sha1, const char *sha512) {
+    char mir[1024];
+    mirror_mr(url, mir, sizeof(mir));
+    if (config_community_official_only() || strcmp(mir, url) == 0)
+        return download_file(url, NULL, 0, dest, ctx, sha1, -1, sha512);
+    if (config_community_mirror_first()) {
+        const char *ex[] = { url };
+        return download_file(mir, ex, 1, dest, ctx, sha1, -1, sha512);
+    }
+    const char *ex[] = { mir };
+    return download_file(url, ex, 1, dest, ctx, sha1, -1, sha512);
+}
+
 static cJSON *mr_search(const char *query, const char *ptype, int limit) {
     char enc[512];
     urlenc(query, enc, sizeof(enc));
@@ -342,13 +359,9 @@ static int install_modrinth_mod(const char *inst, const char *slug, pymcl_ctx *c
     instance_path(inst, ip, sizeof(ip));
     instance_ensure_dirs(inst);
     pymcl_path_join3(dest, sizeof(dest), ip, "mods", fn ? fn : "mod.jar");
-    char mir[1024];
-    mirror_mr(u, mir, sizeof(mir));
-    const char *ex[] = { u };
-    int r = download_file(mir, ex, 1, dest, ctx,
-                          cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(file, "hashes"), "sha1")),
-                          -1,
-                          cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(file, "hashes"), "sha512")));
+    int r = mr_download(u, dest, ctx,
+                        cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(file, "hashes"), "sha1")),
+                        cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(file, "hashes"), "sha512")));
     cJSON_Delete(vers);
     return r;
 }
@@ -489,10 +502,8 @@ int install_content(const char *kind, const char *instance, const char *name, cJ
     const char *fn = file ? cJSON_GetStringValue(cJSON_GetObjectItem(file, "filename")) : "pack.zip";
     const char *du = file ? cJSON_GetStringValue(cJSON_GetObjectItem(file, "url")) : NULL;
     pymcl_path_join3(dest, sizeof(dest), ip, subdir, fn);
-    char mir[1024];
-    if (du) mirror_mr(du, mir, sizeof(mir));
-    const char *ex[] = { du };
-    int r = du ? download_file(mir, ex, 1, dest, ctx, NULL, -1, NULL) : -1;
+    int r = du ? mr_download(du, dest, ctx, NULL, NULL) : -1;
+    if (!du) pymcl_set_error("%s 没有可下载文件", slug);
     cJSON_Delete(vers);
     return r;
 }
