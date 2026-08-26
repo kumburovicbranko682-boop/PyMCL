@@ -1041,5 +1041,8 @@
   "桌面快捷方式：{0}": "Desktop shortcut: {0}",
   "双击即可直接启动该版本。": "Double-click it to launch this version directly.",
   "游戏目录未生效": "Game folder not applied",
-  "{0}；可稍后到「设置」重新选择": "{0}; you can pick it again later in Settings"
+  "{0}；可稍后到「设置」重新选择": "{0}; you can pick it again later in Settings",
+  "找不到背景图": "Background image not found",
+  "请检查路径，或点「选择文件」挑一张图片": "Check the path, or click Choose File to pick an image",
+  "已恢复纯色背景": "Restored the solid-color background"
 }

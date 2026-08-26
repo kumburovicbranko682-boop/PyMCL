@@ -526,8 +526,18 @@ class SettingsPage(QWidget):
         path = self.bg_edit.text().strip()
         if path == (self.backend.get_setting("ui_background") or ""):
             return
+        # 手打的路径打错时背景不会变，不提示的话像什么都没发生
+        if path and not os.path.isfile(path):
+            InfoBar.warning(tr("找不到背景图"),
+                            tr("请检查路径，或点「选择文件」挑一张图片"),
+                            parent=self, position=InfoBarPosition.TOP,
+                            duration=4000)
+            return
         self.backend.save_settings({"ui_background": path})
         self._apply_theme_now()
+        InfoBar.success(tr("已应用"),
+                        tr("背景已更新") if path else tr("已恢复纯色背景"),
+                        parent=self, position=InfoBarPosition.TOP, duration=2000)
 
     # ------------------------------------------------------------------
     # 个性化布局
