@@ -9,19 +9,8 @@ from qfluentwidgets import (
 
 from ..pcl_chrome import Theme, ghost_btn_qss, row_qss
 from ..ui_alive import guard
+from ..widgets import fmt_downloads
 from mclauncher.i18n import tr
-
-
-def fmt_downloads(n) -> str:
-    try:
-        n = int(n or 0)
-    except (TypeError, ValueError):
-        return "—"
-    if n >= 100_000_000:
-        return f"{n / 100_000_000:.1f}亿".replace(".0", "")
-    if n >= 10_000:
-        return f"{n / 10_000:.0f}万"
-    return str(n) if n else "—"
 
 
 class FilePickDialog(MessageBoxBase):
@@ -148,7 +137,7 @@ class FilePickDialog(MessageBoxBase):
         super().accept()
 
     def _on_err(self, err):
-        self.status.setText(f"加载失败: {err}")
+        self.status.setText(tr("加载失败: {0}").format(err))
 
     def _on_ok(self, rows):
         self._rows = list(rows or [])
@@ -166,7 +155,7 @@ class FilePickDialog(MessageBoxBase):
         if want and want in gvs:
             self.gv.setCurrentText(want)
         self.gv.blockSignals(False)
-        self.status.setText(f"{len(self._rows)} 个文件")
+        self.status.setText(tr("{0} 个文件").format(len(self._rows)))
         self._limit = self.PAGE
         self._refill()
 
@@ -206,11 +195,11 @@ class FilePickDialog(MessageBoxBase):
             self.list_layout.addWidget(BodyLabel(tr("没有匹配的文件，试试放宽筛选。")))
         rest = len(matched) - len(shown)
         if rest > 0:
-            more = PushButton(f"加载更多（还有 {rest}）")
+            more = PushButton(tr("加载更多（还有 {0}）").format(rest))
             more.clicked.connect(self._more)
             self.list_layout.addWidget(more)
         self.list_layout.addStretch(1)
-        self.status.setText(f"{len(matched)} 个匹配 / 共 {len(self._rows)} 个文件")
+        self.status.setText(tr("{0} 个匹配 / 共 {1} 个文件").format(len(matched), len(self._rows)))
 
     def _more(self):
         self._limit += self.PAGE
@@ -227,7 +216,7 @@ class FilePickDialog(MessageBoxBase):
         title.setStyleSheet(f"color: {Theme.title}; font-weight: 700; font-size: 13px; background: transparent;")
         meta = QLabel(
             f"{', '.join((row.get('game_versions') or [])[:4]) or '—'}  ·  "
-            f"{', '.join(row.get('loaders') or []) or '任意'}  ·  "
+            f"{', '.join(row.get('loaders') or []) or tr('任意')}  ·  "
             f"{row.get('date') or '—'}  ·  {fmt_downloads(row.get('downloads'))}  ·  "
             f"{row.get('release_type') or 'release'}"
         )
@@ -252,7 +241,9 @@ class FilePickDialog(MessageBoxBase):
             lambda _, r=row, lab=changelog_lab, b=cl_btn: self._toggle_changelog(r, lab, b))
         lay.addWidget(cl_btn)
         btn = PushButton(tr("安装"))
-        btn.setFixedSize(64, 28)
+        # 定高不定宽：英文 “Install” 在 64px 里被裁边
+        btn.setFixedHeight(28)
+        btn.setMinimumWidth(64)
         btn.setStyleSheet(ghost_btn_qss())
         btn.clicked.connect(lambda _, r=row: self._pick(r))
         lay.addWidget(btn)

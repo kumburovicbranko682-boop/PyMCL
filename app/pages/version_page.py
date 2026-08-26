@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """版本页：版本卡片网格 + 加载器安装 + 已安装管理。"""
 
-from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action, BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
     MessageBox, MessageBoxBase, Pivot, PushButton, CheckBox, RoundMenu, ScrollArea,
@@ -11,7 +11,7 @@ from qfluentwidgets import (
 )
 
 from mclauncher.config import CONFIG
-from ..widgets import EmptyState, Pill, grid_columns
+from ..widgets import EmptyState, Pill, anchor_grid, grid_columns
 from mclauncher.i18n import tr
 
 
@@ -25,13 +25,23 @@ class VersionCard(SimpleCardWidget):
         layout.setSpacing(6)
 
         top = QHBoxLayout()
-        top.addWidget(StrongBodyLabel(info["version"]), 1)
+        title = StrongBodyLabel(info["version"])
+        top.addWidget(title, 1)
         vtype = info["type"]
         labels = {"release": tr("正式版"), "snapshot": tr("快照"), "old_alpha": tr("远古"), "old_beta": tr("远古")}
         colors = {"release": "#2FA36B", "snapshot": "#E8862E", "old_alpha": "#7C5CD6", "old_beta": "#7C5CD6"}
-        top.addWidget(Pill(labels.get(vtype, vtype), colors.get(vtype, "#E8862E")))
+        pill = Pill(labels.get(vtype, vtype), colors.get(vtype, "#E8862E"))
+        top.addWidget(pill)
         layout.addLayout(top)
-        layout.addWidget(CaptionLabel(f'发布于 {info["date"]}'))
+        # 卡片定宽 216：英文 Pill 更宽时长版本号放不下。省略号必须打在
+        # 中间——版本号的区分度全在结尾（26.3-snapshot-8/-9 右截后
+        # 一屏卡片全叫 26.3-snapsh…，等于没有名字）。悬停看全名。
+        avail = 216 - 32 - pill.sizeHint().width() - top.spacing()
+        fm = title.fontMetrics()
+        if fm.horizontalAdvance(info["version"]) > avail:
+            title.setText(fm.elidedText(info["version"], Qt.ElideMiddle, avail))
+            title.setToolTip(info["version"])
+        layout.addWidget(CaptionLabel(tr("发布于 {0}").format(info["date"])))
         layout.addStretch(1)
 
         row = QHBoxLayout()
@@ -109,7 +119,10 @@ class VersionPage(QWidget):
         bar.setSpacing(12)
         self.search = SearchLineEdit()
         self.search.setPlaceholderText(tr("搜索版本号…"))
-        self.search.setFixedWidth(260)
+        # 定宽会把整行顶溢出：英文下 Pivot / 勾选框更宽，右端控件被裁掉。
+        # 给可压缩区间，宽度不够时先缩搜索框，而不是裁「显示隐藏/完成后启动」。
+        self.search.setMinimumWidth(150)
+        self.search.setMaximumWidth(260)
         self.pivot = Pivot(self)
         self.pivot.addItem("all", tr("全部"))
         self.pivot.addItem("release", tr("正式版"))
@@ -117,14 +130,15 @@ class VersionPage(QWidget):
         self.pivot.addItem("old_alpha", tr("远古"))
         self.pivot.setCurrentItem("all")
         self.instance_box = ComboBox()
-        self.instance_box.setFixedWidth(140)
+        self.instance_box.setMinimumWidth(110)
+        self.instance_box.setMaximumWidth(140)
         self.launch_after = CheckBox(tr("完成后启动"))
         self.launch_after.setChecked(True)
         self.hidden_box = CheckBox(tr("显示隐藏"))
         self.hidden_box.setChecked(self._show_hidden)
         self.json_btn = PushButton(FIF.CODE, tr("版本 JSON"))
         self.json_btn.setToolTip(tr("从本地版本 JSON 文件安装版本（HMCL 同款）"))
-        bar.addWidget(self.search)
+        bar.addWidget(self.search, 1)
         bar.addWidget(self.pivot)
         bar.addStretch(1)
         bar.addWidget(self.json_btn)
@@ -143,6 +157,8 @@ class VersionPage(QWidget):
         self.scroll.setWidget(self.grid_host)
         root.addWidget(self.scroll, 3)
 
+        # 已安装卡片按内容取高（上限 240px 内部滚动），不再固定占页面
+        # 1/4 的死空间——没装版本时那是一大块空白，版本网格反而被压扁。
         installed_card = SimpleCardWidget(self)
         ic_layout = QVBoxLayout(installed_card)
         ic_layout.setContentsMargins(20, 14, 20, 14)
@@ -157,10 +173,23 @@ class VersionPage(QWidget):
         head.addWidget(self.repair_btn)
         head.addWidget(self.uninstall_btn)
         ic_layout.addLayout(head)
-        self.installed_area = QVBoxLayout()
+        self.installed_scroll = ScrollArea()
+        self.installed_scroll.setWidgetResizable(True)
+        self.installed_scroll.setFrameShape(QFrame.NoFrame)
+        # 卡片内滚动区保持透明，主题刷新时不要刷成页面底色
+        self.installed_scroll.setProperty("pymclTransparentScroll", True)
+        self.installed_scroll.setStyleSheet(
+            "ScrollArea { background: transparent; border: none; }")
+        self.installed_scroll.setMaximumHeight(240)
+        inst_host = QWidget()
+        inst_host.setStyleSheet("background: transparent;")
+        self.installed_area = QVBoxLayout(inst_host)
+        self.installed_area.setContentsMargins(0, 0, 0, 0)
         self.installed_area.setSpacing(6)
-        ic_layout.addLayout(self.installed_area)
-        root.addWidget(installed_card, 1)
+        self.installed_area.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
+        self.installed_scroll.setWidget(inst_host)
+        ic_layout.addWidget(self.installed_scroll)
+        root.addWidget(installed_card)
 
         self.search.textChanged.connect(self._on_filter_changed)
         self.pivot.currentItemChanged.connect(self._on_filter_changed)
@@ -237,6 +266,7 @@ class VersionPage(QWidget):
         while self.grid.count():
             item = self.grid.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
 
         text = self.search.text().strip().lower()
@@ -255,6 +285,8 @@ class VersionPage(QWidget):
         if not rows:
             self.grid.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的版本")), 0, 0)
             self._cols = 1
+            # 空态占满整个滚动区居中，而不是被上一轮的尾列 stretch 挤扁
+            anchor_grid(self.grid, 0, 0)
             return
         cols = grid_columns(self.scroll, self, 240)
         self._cols = cols
@@ -262,20 +294,25 @@ class VersionPage(QWidget):
         for i, v in enumerate(shown):
             self.grid.addWidget(VersionCard(v, self._install, on_notes=self._show_notes),
                                 i // cols, i % cols)
+        last_row = (len(shown) - 1) // cols
         if len(rows) > self._limit:
-            more = PushButton(f"加载更多（还有 {len(rows) - self._limit}）")
+            more = PushButton(tr("加载更多（还有 {0}）").format(len(rows) - self._limit))
             more.clicked.connect(self._more)
-            self.grid.addWidget(more, (len(shown) + cols - 1) // cols, 0, 1, cols)
+            last_row = (len(shown) + cols - 1) // cols
+            self.grid.addWidget(more, last_row, 0, 1, cols)
+        anchor_grid(self.grid, cols, last_row + 1)
 
     def _reload_installed(self):
         while self.installed_area.count():
             item = self.installed_area.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
             elif item.layout():
                 while item.layout().count():
                     sub = item.layout().takeAt(0)
                     if sub.widget():
+                        sub.widget().hide()
                         sub.widget().deleteLater()
 
         self._installed_checks = []
@@ -285,6 +322,10 @@ class VersionPage(QWidget):
         except Exception:
             stats = {}
         ids = self.backend.get_installed_versions(instance, include_hidden=self._show_hidden)
+        if not ids:
+            hint = CaptionLabel(tr("还没有安装版本，从上方选择一个版本开始"))
+            self.installed_area.addWidget(hint)
+            return
         # HMCL 游戏列表同款：最近玩过的排前面；没玩过的保持原（字母）顺序垫底
         ids = sorted(ids, key=lambda vid: -(stats.get(vid, {}).get("last") or 0))
         for v in ids:
@@ -416,7 +457,9 @@ class VersionPage(QWidget):
         except Exception as e:
             MessageBox(tr("创建失败"), str(e), self).exec()
             return
-        MessageBox(tr("已创建"), f"桌面快捷方式：\n{path}\n\n双击即可直接启动该版本。", self).exec()
+        MessageBox(tr("已创建"),
+                   tr("桌面快捷方式：\n{0}\n\n双击即可直接启动该版本。").format(path),
+                   self).exec()
 
     def _open_folder(self, instance, version, which):
         try:
@@ -519,7 +562,8 @@ class VersionPage(QWidget):
             return
         box = MessageBox(
             tr("确认卸载"),
-            f"将卸载 {len(selected)} 个版本：\n" + "\n".join(selected)
+            tr("将卸载 {0} 个版本：").format(len(selected))
+            + "\n" + "\n".join(selected)
             + "\n" + tr("（会尽量移入系统回收站，可找回）"), self)
         if box.exec():
             for spec in selected:
@@ -544,7 +588,7 @@ class VersionPage(QWidget):
             inst, vid = spec.split(" / ", 1) if " / " in spec else (
                 self.instance_box.currentText() or "default", spec)
             self.backend.repair_version(inst, vid)
-        InfoBar.success(tr("已开始修复"), f"{len(selected)} 个版本", parent=self,
+        InfoBar.success(tr("已开始修复"), tr("{0} 个版本").format(len(selected)), parent=self,
                         position=InfoBarPosition.TOP, duration=2500)
 
     def resizeEvent(self, event):
@@ -555,3 +599,16 @@ class VersionPage(QWidget):
         if cols == self._cols:
             return
         self._resize_timer.start(120)
+
+    def showEvent(self, event):
+        """页面在懒构造时只有 100px 宽，列数按那个宽度算出来是 1，
+        整页版本卡挤成居中一条。首次真正显示后布局才有真实宽度，
+        这里补一次列数校验，避免「压扁单列」闪现或滞留。"""
+        super().showEvent(event)
+        QTimer.singleShot(0, self._recheck_cols)
+
+    def _recheck_cols(self):
+        if not self._all_versions:
+            return
+        if grid_columns(self.scroll, self, 240) != self._cols:
+            self._refill()

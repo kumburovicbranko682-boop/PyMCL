@@ -17,7 +17,7 @@ class InstallWizardDialog(MessageBoxBase):
         self.mc_version = mc_version
         self.instance = instance
         self._dismissed = False
-        self.viewLayout.addWidget(SubtitleLabel(f"安装 {mc_version}", self))
+        self.viewLayout.addWidget(SubtitleLabel(tr("安装 {0}").format(mc_version), self))
         hint = BodyLabel(tr("主加载器只能选一个。Forge 可同时勾选 OptiFine（放入 mods）。"), self)
         hint.setWordWrap(True)
         self.viewLayout.addWidget(hint)

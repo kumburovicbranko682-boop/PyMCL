@@ -47,7 +47,8 @@ class FeedbackPage(QWidget):
         row1 = QHBoxLayout()
         self._cat_keys = [k for k, _ in CATEGORIES]
         self.cat = ComboBox(form)
-        self.cat.addItems([label for _, label in CATEGORIES])
+        # 分类名是 feedback_defaults 里的中文原文，展示时过 tr
+        self.cat.addItems([tr(label) for _, label in CATEGORIES])
         self.cat.setFixedWidth(160)
         self.contact = LineEdit(form)
         self.contact.setPlaceholderText(tr("联系方式（QQ / 邮箱，可选）"))
@@ -125,10 +126,15 @@ class FeedbackPage(QWidget):
             except Exception:
                 rows = []
         for art in rows:
-            btn = TransparentPushButton(art.get("title") or art.get("id") or "?", self)
+            btn = TransparentPushButton(tr(art.get("title") or art.get("id") or "?"), self)
             btn.setProperty("article_id", art.get("id") or "")
             btn.clicked.connect(lambda _=False, a=art: self._show_help(a))
-            self._help_host.addWidget(btn)
+            # 按钮不铺满整行：直接加进 VBox 会拉满宽、文字居中，
+            # 一列 FAQ 像悬在卡片中间的浮动按钮
+            row = QHBoxLayout()
+            row.addWidget(btn)
+            row.addStretch(1)
+            self._help_host.addLayout(row)
 
     def _show_help(self, art: dict):
         from qfluentwidgets import MessageBox
@@ -140,7 +146,7 @@ class FeedbackPage(QWidget):
                 full = getter(aid) or {}
                 body = full.get("body") or ""
                 art = {**art, **full}
-        MessageBox(art.get("title") or tr("帮助"), body or tr("暂无内容"), self).exec()
+        MessageBox(tr(art.get("title") or "帮助"), tr(body or "暂无内容"), self).exec()
 
     def prefill(self, category="bug", title="", body=""):
         if category in self._cat_keys:
@@ -162,7 +168,7 @@ class FeedbackPage(QWidget):
             self._reload_history()
 
         def err(exc):
-            self.spec.setPlainText(f"采集失败：{exc}")
+            self.spec.setPlainText(tr("采集失败：{0}").format(exc))
 
         self.backend.call_async(work, ok, err)
 
@@ -173,7 +179,7 @@ class FeedbackPage(QWidget):
             return
         lines = []
         for row in rows[:8]:
-            label = fb_mod.category_label(row.get("category") or "")
+            label = tr(fb_mod.category_label(row.get("category") or ""))
             lines.append(f"{label}  {row.get('title') or ''}  ({row.get('id') or ''})")
         self.hist.setText("\n".join(lines))
 
@@ -209,7 +215,7 @@ class FeedbackPage(QWidget):
             self.title_edit.setText("")
             self._reload_history()
             fid = (data or {}).get("id") or ""
-            InfoBar.success(tr("已发送"), f"开发者会实时看到这条反馈 {fid}".strip(),
+            InfoBar.success(tr("已发送"), tr("开发者会实时看到这条反馈 {0}").format(fid).strip(),
                             parent=self, position=InfoBarPosition.TOP, duration=3500)
 
         def err(exc):

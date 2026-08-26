@@ -12,7 +12,7 @@ from qfluentwidgets import (
 )
 
 from ..pcl_chrome import Theme, chip_qss, ghost_btn_qss, row_qss, _icon
-from ..widgets import EmptyState, IconTile, InputDialog, ThumbnailTile
+from ..widgets import EmptyState, IconTile, InputDialog, ThumbnailTile, fmt_downloads
 from mclauncher.i18n import tr
 
 _HEART = getattr(FIF, "HEART", FIF.TAG)
@@ -24,19 +24,6 @@ except ImportError:
         @staticmethod
         def get(key, default=None):
             return default
-
-
-def fmt_downloads(n) -> str:
-    try:
-        n = int(n or 0)
-    except (TypeError, ValueError):
-        return "—"
-    if n >= 100_000_000:
-        s = f" {n / 100_000_000:.1f}亿"
-        return s.replace(".0", "").strip()
-    if n >= 10_000:
-        return f"{n / 10_000:.0f}万"
-    return str(n) if n else "—"
 
 
 class PclCard(QFrame):
@@ -132,16 +119,24 @@ class PclResultRow(QFrame):
             info.addWidget(d)
         meta = QHBoxLayout()
         meta.setSpacing(14)
-        meta.addWidget(_meta_chip(FIF.GAME, str(ver)))
-        meta.addWidget(_meta_chip(FIF.DOWNLOAD, fmt_downloads(item.get("downloads"))))
-        meta.addWidget(_meta_chip(FIF.UP, str(updated)))
-        meta.addWidget(_meta_chip(FIF.GLOBE, _src_label(item.get("source"))))
+        # 缺的数据直接不摆：精选推荐没有下载数/更新时间，
+        # 一排「图标 + —」是纯噪声
+        for fif, text in (
+            (FIF.GAME, str(ver)),
+            (FIF.DOWNLOAD, fmt_downloads(item.get("downloads"))),
+            (FIF.UP, str(updated)),
+            (FIF.GLOBE, _src_label(item.get("source"))),
+        ):
+            if text != "—":
+                meta.addWidget(_meta_chip(fif, text))
         meta.addStretch(1)
         info.addLayout(meta)
         layout.addLayout(info, 1)
 
         btn = PushButton(tr("选择版本"))
-        btn.setFixedSize(88, 30)
+        # 定高不定宽：英文 “Select Version” 在 88px 里两头被裁成 “elect Versio”
+        btn.setFixedHeight(30)
+        btn.setMinimumWidth(88)
         btn.setStyleSheet(ghost_btn_qss())
         btn.clicked.connect(lambda: on_install(item, btn))
         layout.addWidget(btn)
@@ -376,11 +371,14 @@ class PclCatalogPage(QWidget):
 
         btns = QHBoxLayout()
         btns.addStretch(1)
+        # 同「选择版本」：定高不定宽，否则英文 “Reset conditions” 被裁成 “et conditi”
         self.search_btn = PushButton(tr("搜索"))
-        self.search_btn.setFixedSize(88, 32)
+        self.search_btn.setFixedHeight(32)
+        self.search_btn.setMinimumWidth(88)
         self.search_btn.setStyleSheet(ghost_btn_qss())
         self.reset_btn = PushButton(tr("重置条件"))
-        self.reset_btn.setFixedSize(88, 32)
+        self.reset_btn.setFixedHeight(32)
+        self.reset_btn.setMinimumWidth(88)
         btns.addWidget(self.search_btn)
         btns.addSpacing(12)
         btns.addWidget(self.reset_btn)
@@ -451,7 +449,8 @@ class PclCatalogPage(QWidget):
         lab = QLabel(text)
         lab.setStyleSheet(f"color: {Theme.muted}; font-size: 12px; background: transparent;")
         lab.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        lab.setFixedWidth(40)
+        # 最小宽保持两列表单对齐；定宽会把英文 “Version” 裁成 “ersion”
+        lab.setMinimumWidth(40)
         return lab
 
     def _current_instance(self) -> str:
@@ -495,8 +494,12 @@ class PclCatalogPage(QWidget):
     def _clear_list(self):
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w is not None:
+                # 先 hide 再 deleteLater：出了布局的控件在延迟删除前仍按旧几何
+                # 绘制，搜索时「正在搜索…」会和旧的空态/结果行叠在一起。
+                w.hide()
+                w.deleteLater()
 
     def _show_idle(self):
         self._search_token += 1
@@ -559,7 +562,8 @@ class PclCatalogPage(QWidget):
         if token != self._search_token:
             return
         self._clear_list()
-        self.list_layout.addWidget(EmptyState(self.spec["icon"], f"搜索失败: {err}"))
+        self.list_layout.addWidget(
+            EmptyState(self.spec["icon"], tr("搜索失败: {0}").format(err)))
         self.list_layout.addStretch(1)
 
     def _on_search_ok(self, token, results, append=False, browsing=False):
@@ -782,7 +786,7 @@ class PclCatalogPage(QWidget):
             )
             box.yesButton.setText(tr("删除"))
         elif fn:
-            box = MessageBox(tr("删除确认"), f"将删除「{filename}」。", self)
+            box = MessageBox(tr("删除确认"), tr("将删除「{0}」。").format(filename), self)
             box.yesButton.setText(tr("删除"))
         else:
             box = None

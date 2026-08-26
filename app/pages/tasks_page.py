@@ -209,7 +209,7 @@ class DownloadDock(SimpleCardWidget):
         self._active[task_id] = title
         self._current = task_id
         n = len(self._active)
-        self.title.setText(f"下载任务（{n}）")
+        self.title.setText(tr("下载任务（{0}）").format(n))
         self.status.setText(title)
         self.progress.setValue(0)
         self.speed.setText("")
@@ -234,7 +234,7 @@ class DownloadDock(SimpleCardWidget):
         status, speed = split_progress_message(message)
         title = self._active.get(task_id, "")
         n = len(self._active)
-        self.title.setText(f"下载任务（{n}）")
+        self.title.setText(tr("下载任务（{0}）").format(n))
         self.status.setText(status or title or tr("处理中…"))
         self.speed.setText(speed)
 
@@ -260,7 +260,7 @@ class DownloadDock(SimpleCardWidget):
             else:
                 self.hide()
             return
-        self.title.setText(f"下载任务（{n}）")
+        self.title.setText(tr("下载任务（{0}）").format(n))
         self._current = next(iter(self._active))
         self.status.setText(self._active[self._current])
 

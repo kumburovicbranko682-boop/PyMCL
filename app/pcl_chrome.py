@@ -162,7 +162,9 @@ def paint_theme_surfaces(root, allow_transparent: bool = True) -> None:
     保持实底，不透出主窗背景图。
     """
     from PySide6.QtGui import QPalette
-    from PySide6.QtWidgets import QAbstractScrollArea, QFormLayout, QFrame, QLabel, QWidget
+    from PySide6.QtWidgets import (
+        QAbstractScrollArea, QFormLayout, QFrame, QLabel, QPlainTextEdit, QTextEdit, QWidget,
+    )
 
     if root is None:
         return
@@ -232,6 +234,13 @@ def paint_theme_surfaces(root, allow_transparent: bool = True) -> None:
     _paint_one(root, hint="pymclPage")
 
     for scroll in root.findChildren(QAbstractScrollArea):
+        if isinstance(scroll, (QPlainTextEdit, QTextEdit)):
+            # 文本编辑框也继承 QAbstractScrollArea，但它们不是页面表面：
+            # Fluent 给它们配了完整皮肤（底色/边框/文字色/占位符）。
+            # 当表面刷会把那份 QSS 整个换成 #id{background}——深色下
+            # 变成黑字压黑底、占位符 1.4:1 隐形（实时日志/反馈正文/便签
+            # 全中招）。
+            continue
         if scroll.property("pymclTransparentScroll"):
             # 透明滚动区（布局卡片内部）：保持透明，别刷成页面底色
             # 在卡片 (Theme.card) 上出色块。
@@ -644,6 +653,11 @@ class PclSideBar(QFrame):
             line.setStyleSheet(f"background: {Theme.line}; border: none;")
         for btn in self._buttons.values():
             btn.restyle()
+        # edit_btn 不在 _buttons 里，漏掉的话切深色后它还是浅色字
+        # （深底配深字，「编辑布局」直接隐身）。
+        edit_btn = getattr(self, "edit_btn", None)
+        if edit_btn is not None:
+            edit_btn.restyle()
         for info in self._groups.values():
             info["btn"].restyle()
             info["chevron"].setStyleSheet(
