@@ -28,6 +28,7 @@ def local_ips() -> list:
 
 
 def lan_hint(port: int = 25565) -> str:
+    from .i18n import _
     ips = local_ips()
     lines = [f"{ip}:{port}" for ip in ips]
-    return "房主在游戏里「对局域网开放」后，把下面地址发给好友：\n" + "\n".join(lines)
+    return _("房主在游戏里「对局域网开放」后，把下面地址发给好友：") + "\n" + "\n".join(lines)
