@@ -357,12 +357,6 @@ def extract_natives(instance, resolved, version_id, skip_glfw=False, skip_openal
     _purge_natives(natives_dir, skip_names)
     return natives_dir
 
-NEOFORGE_MC_MAP = {
-    "1.20.1": "47.1", "1.20.2": "20.2", "1.20.3": "20.3", "1.20.4": "20.4",
-    "1.20.5": "20.5", "1.20.6": "20.6", "1.21": "21.0", "1.21.1": "21.1",
-}
-
-
 class Installer:
     def __init__(self, instance: Instance, dm: DownloadManager = None,
                  on_progress=None, cancel=None):
@@ -1295,16 +1289,12 @@ class Installer:
                     self.on_progress(f"NeoForge {version} 不可用，改用最新版", 0, 1)
                 version = None
         if not version:
-            mc_tuple = self._mc_tuple(mc_version)
-            if mc_tuple >= (1, 20, 2):
-                # 新版本号方案：1.20.4 -> 20.4.x
-                prefix = ".".join(mc_version.split(".")[1:])
-                mapped = [v for v in versions if v.startswith(prefix + ".")]
-            else:
+            from .neoforge_meta import neoforge_version_prefix
+            prefix = neoforge_version_prefix(mc_version)
+            mapped = [v for v in versions if prefix and v.startswith(prefix + ".")]
+            if not mapped:
+                # 早期 1.20.1 时代的 "1.20.1-47.1.x" 命名
                 mapped = [v for v in versions if v.startswith(mc_version + "-")]
-                if not mapped:
-                    prefix = NEOFORGE_MC_MAP.get(mc_version)
-                    mapped = [v for v in versions if prefix and v.startswith(prefix + ".")]
             if not mapped:
                 raise InstallError(f"NeoForge 没有支持 Minecraft {mc_version} 的版本")
             full = mapped[-1]

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -30,11 +31,21 @@ _strings: dict[str, dict[str, str]] = {}
 _loaded = False
 
 
+def _locales_dir() -> Path:
+    """Bundled JSON catalogs: next to this module, or PyInstaller _MEIPASS."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = Path(meipass) / "mclauncher" / "locales"
+        if bundled.is_dir():
+            return bundled
+    return Path(__file__).resolve().parent / "locales"
+
+
 def _load_strings():
     global _strings, _loaded
     _strings = {}
     # 加载内置翻译
-    base = Path(__file__).resolve().parent / "locales"
+    base = _locales_dir()
     if base.is_dir():
         for f in sorted(base.glob("*.json")):
             lang = f.stem
@@ -132,7 +143,10 @@ def save_translations(lang: str):
     _ensure()
     if lang not in _strings:
         return
-    base = Path(__file__).resolve().parent / "locales"
+    if getattr(sys, "frozen", False):
+        base = utils.ROOT / "locales"
+    else:
+        base = _locales_dir()
     base.mkdir(parents=True, exist_ok=True)
     path = base / f"{lang}.json"
     utils.write_json(path, _strings[lang])

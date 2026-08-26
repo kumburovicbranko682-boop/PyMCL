@@ -1,6 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Slim onefile spec: Fluent UI + terracotta + AI, drop unused Qt stacks."""
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+
+_ICON = "icon.ico" if Path("icon.ico").is_file() else None
+_VERSION = "pack/file_version_info.txt" if Path("pack/file_version_info.txt").is_file() else None
 
 _SKIP_SUBSTR = (
     "multimedia", "webengine", "image_utils",
@@ -29,6 +34,10 @@ def _datas(pkg):
 datas = _datas("qfluentwidgets") + _datas("qframelesswindow")
 # 语言包是 JSON 数据文件，collect_submodules 带不进来
 datas += [("mclauncher/locales", "mclauncher/locales")]
+try:
+    datas += collect_data_files("certifi")
+except Exception:
+    pass
 hiddenimports = (
     _hidden("app")
     + _hidden("mclauncher")
@@ -37,7 +46,9 @@ hiddenimports = (
     + ["mclauncher.terracotta", "app.pages.multiplayer_page", "app.pages.ai_page",
        "mclauncher.feedback", "mclauncher.feedback_defaults", "mclauncher.sysinfo",
        "app.pages.feedback_page", "app.ui_alive", "app.pages.file_pick",
-       "app.pages.install_wizard", "app.pages.first_run", "app.pages.global_mods_dialog"]
+       "app.pages.install_wizard", "app.pages.first_run", "app.pages.global_mods_dialog",
+       "keyring", "keyring.backends.Windows", "keyring.backends.fail",
+       "keyring.backends.null", "keyring.backends.chainer"]
 )
 
 excludes = [
@@ -118,4 +129,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=_ICON,
+    version=_VERSION,
 )

@@ -59,6 +59,10 @@ bash build_exe.sh
 - **杀毒软件误报**：PyInstaller 单文件 exe 偶尔被误报，加白名单即可；介意的话把 `build_exe.bat` 里的 `--onefile` 改成 `--onedir`（文件夹版，误报更少，需整个文件夹一起拷贝）；
 - 打包机与运行机无需同版本 Python，目标电脑**不需要安装 Python**。
 
+### 从 GitHub Actions 下载现成 exe
+
+仓库已配置 **Build Windows EXE** 工作流（Windows 托管机 + PyInstaller）。打开 GitHub 的 **Actions** 页，选一次成功运行，在 Artifacts 里下载 `PyMCL-windows-x64`（内含 `PyMCL.exe` 与 `PyMCL-CLI.exe`）。也可以在该工作流页手动点 **Run workflow**。
+
 ## 🚀 快速开始
 
 ### 图形界面
@@ -171,7 +175,8 @@ PyMCL/                      ← 启动器主目录（可用环境变量 PYMCL_HO
 | --- | --- |
 | ≤ 1.16 | Java 8（远古版本在 Windows 上使用 32 位 Java 8） |
 | 1.17 ~ 1.20.4 | Java 17 |
-| 1.20.5+ | Java 21（Mojang 官方运行时，精确匹配） |
+| 1.20.5 ~ 1.21.11 | Java 21（Mojang 官方运行时，精确匹配） |
+| 26.1+（年式版本号） | Java 25 |
 | 快照 | 按 version JSON 的 component 自动选择 |
 
 优先使用 Mojang 官方运行时（与官方启动器完全一致），失败时回退 Adoptium Temurin；也可在“Java”页手动下载或在“启动”页手动指定。

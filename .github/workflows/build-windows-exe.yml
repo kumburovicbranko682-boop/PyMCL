@@ -1,0 +1,92 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-exe-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: PyInstaller (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-build.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-build.txt
+
+      - name: Build GUI exe
+        run: python -m PyInstaller --noconfirm --clean PyMCL.spec
+
+      - name: Stash GUI exe
+        run: |
+          New-Item -ItemType Directory -Force -Path dist_keep | Out-Null
+          Copy-Item dist\PyMCL.exe dist_keep\PyMCL.exe
+
+      - name: Build CLI exe
+        run: python -m PyInstaller --noconfirm --clean PyMCL-CLI.spec
+
+      - name: Restore GUI exe
+        run: Copy-Item dist_keep\PyMCL.exe dist\PyMCL.exe -Force
+
+      - name: Verify outputs
+        run: |
+          $gui = Get-Item dist\PyMCL.exe
+          $cli = Get-Item dist\PyMCL-CLI.exe
+          $guiMb = [math]::Round($gui.Length / 1MB, 1)
+          $cliMb = [math]::Round($cli.Length / 1MB, 1)
+          Write-Host "GUI $guiMb MB"
+          Write-Host "CLI $cliMb MB"
+          $guiMagic = [System.IO.File]::ReadAllBytes($gui.FullName)[0..1]
+          $cliMagic = [System.IO.File]::ReadAllBytes($cli.FullName)[0..1]
+          if (-not ($guiMagic[0] -eq 0x4D -and $guiMagic[1] -eq 0x5A)) {
+            throw "PyMCL.exe is not a Windows PE (missing MZ header)"
+          }
+          if (-not ($cliMagic[0] -eq 0x4D -and $cliMagic[1] -eq 0x5A)) {
+            throw "PyMCL-CLI.exe is not a Windows PE (missing MZ header)"
+          }
+          if ($gui.Length -lt 5MB) { throw "PyMCL.exe looks too small ($($gui.Length) bytes)" }
+          if ($cli.Length -lt 1MB) { throw "PyMCL-CLI.exe looks too small ($($cli.Length) bytes)" }
+          @"
+          ## PyMCL Windows packages
+
+          | File | Size |
+          | --- | --- |
+          | ``PyMCL.exe`` | $guiMb MB |
+          | ``PyMCL-CLI.exe`` | $cliMb MB |
+
+          Download the **PyMCL-windows-x64** artifact from this run.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyMCL-windows-x64
+          path: |
+            dist/PyMCL.exe
+            dist/PyMCL-CLI.exe
+          if-no-files-found: error
+          retention-days: 14

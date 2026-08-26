@@ -12,11 +12,7 @@ from .installer import (
     bmcl_forge_artifacts, forge_sort_key, parse_maven_versions,
     split_forge_artifact,
 )
-
-NEOFORGE_MC_MAP = {
-    "1.20.1": "47.1", "1.20.2": "20.2", "1.20.3": "20.3", "1.20.4": "20.4",
-    "1.20.5": "20.5", "1.20.6": "20.6", "1.21": "21.0", "1.21.1": "21.1",
-}
+from .neoforge_meta import neoforge_version_prefix
 
 FORGE_PROMOS_URL = ("https://files.minecraftforge.net"
                     "/net/minecraftforge/forge/promotions_slim.json")
@@ -153,7 +149,7 @@ def _forge(dm, mc):
 
 
 def _neoforge(dm, mc):
-    prefix = NEOFORGE_MC_MAP.get(mc)
+    prefix = neoforge_version_prefix(mc)
     rows = []
     try:
         xml = dm.fetch_text(f"{NEOFORGE_MAVEN}/maven-metadata.xml", timeout=30, expand=False)
@@ -161,7 +157,10 @@ def _neoforge(dm, mc):
     except Exception:
         vers = []
     if prefix:
-        vers = [v for v in vers if str(v).startswith(str(prefix))]
+        vers = [v for v in vers if str(v).startswith(prefix + ".")]
+    else:
+        # 早期 "1.20.1-47.1.x" 命名；没有前缀说明该 MC 版本没有 NeoForge
+        vers = [v for v in vers if str(v).startswith(str(mc) + "-")]
     vers = list(reversed(vers[-80:])) if vers else []
     for v in vers:
         rows.append({"id": v, "label": v, "stable": "beta" not in str(v).lower()})

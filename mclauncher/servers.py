@@ -314,11 +314,13 @@ def import_servers_json(instance: Instance, data: list[dict]) -> int:
     for item in data:
         if not isinstance(item, dict):
             continue
-        host = str(item.get("ip") or "").strip()
-        if not host:
+        raw = str(item.get("ip") or item.get("address") or "").strip()
+        if not raw:
             continue
+        # ip 里内嵌端口（"host:25566"）时拆开，避免叠成 "host:25566:25565"
+        host, port_from_ip = _split_ip(raw)
         try:
-            port = int(item.get("port") or 25565)
+            port = int(item.get("port") or port_from_ip or 25565)
         except (TypeError, ValueError):
             port = 25565
         key = _addr_key(host, port)

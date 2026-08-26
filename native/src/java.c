@@ -212,7 +212,8 @@ static int adoptium_major(int m) {
     if (m <= 8) return 8;
     if (m <= 11) return 11;
     if (m <= 17) return 17;
-    return 21;
+    if (m <= 21) return 21;
+    return 25; /* MC 26.1+ 需要 Java 25 */
 }
 
 char *java_pick(cJSON *vjson, const char *prefer) {

@@ -30,12 +30,14 @@ cJSON *manifest_get(int force) {
             if (d) return d;
         }
     }
+    /* 顺序对齐 mclauncher/source.py version_manifest_urls()：以前 BMCLAPI
+     * 永远排第一，「仅官方」照样先打镜像、海外自动模式也被拖慢。
+     * fetch_json_mirrors 会经 expand_urls 按 download_source 补镜像。 */
     const char *urls[] = {
-        BMCLAPI "/mc/game/version_manifest_v2.json",
         "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
         "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
     };
-    cJSON *data = fetch_json_mirrors(urls, 3, 60);
+    cJSON *data = fetch_json_mirrors(urls, 2, 60);
     if (data) {
         pymcl_write_json(mf, data);
         cJSON *mm = cJSON_CreateObject();

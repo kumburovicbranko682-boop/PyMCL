@@ -37,12 +37,15 @@ public partial class DownloadPage : UserControl
             var inst = InstanceBox.SelectedItem as string ?? "default";
             var ver = VersionBox.Text?.Trim() ?? "";
             var loader = (LoaderBox.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "vanilla";
+            // 后端没有 download_version 这个方法；真实入口是 install_game，
+            // 且它把 "vanilla" 当未知加载器，原版要传空串。
+            if (string.Equals(loader, "vanilla", StringComparison.OrdinalIgnoreCase)) loader = "";
             if (string.IsNullOrEmpty(ver)) { MessageBox.Show("请填写版本"); return; }
-            var tid = await AppServices.Client.StartTaskAsync("download_version", new
+            var tid = await AppServices.Client.StartTaskAsync("install_game", new
             {
-                instance = inst,
                 version = ver,
                 loader,
+                instance = inst,
             });
             Hint.Text = "任务已排队: " + tid;
         }
