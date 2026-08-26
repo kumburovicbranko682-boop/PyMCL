@@ -1048,6 +1048,9 @@ class MainWindow(FluentWindowBase):
         dock = getattr(self, "download_dock", None)
         if not dock:
             return
+        # 「界面动画」关闭时直接到终态，不播滑入/滑出
+        from .motion_prefs import ui_motion_ok
+        animate = animate and ui_motion_ok()
         hide_on = {"settings", "instance", "tasks", "feedback"}
         want = bool(getattr(dock, "_active", None)) and self._visible_key() not in hide_on
         g = self.stackedWidget.geometry()
@@ -1123,6 +1126,11 @@ class MainWindow(FluentWindowBase):
 
     def fly_to_tasks(self, source, text: str, color: str | None = None):
         if source is None:
+            return
+        # 「界面动画」总开关关闭时全部瞬时（设置页的承诺），
+        # 单独的「下载飞入动画」开关在其之下再细分。
+        from .motion_prefs import ui_motion_ok
+        if not ui_motion_ok():
             return
         if not self.backend.get_setting("ui_fly_animation", True):
             return
