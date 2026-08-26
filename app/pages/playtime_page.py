@@ -191,8 +191,8 @@ class PlaytimePage(QWidget):
             h = s // 3600
             m = (s % 3600) // 60
             if h > 0:
-                return f"{h} 小时 {m} 分钟"
-            return f"{m} 分钟"
+                return tr("{0} 小时 {1} 分钟").format(h, m)
+            return tr("{0} 分钟").format(m)
 
     def _on_clear(self):
         from qfluentwidgets import MessageBox

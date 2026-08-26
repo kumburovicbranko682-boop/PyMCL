@@ -661,9 +661,9 @@ class AiPage(QWidget):
         s = self.backend.get_settings()
         mode = s.get("ai_mode") or "public"
         if mode == "custom":
-            label = f"自定义 · {s.get('ai_model') or DEFAULT_MODEL}"
+            label = tr("自定义") + f" · {s.get('ai_model') or DEFAULT_MODEL}"
         else:
-            label = f"公益接口 · {DEFAULT_MODEL}"
+            label = tr("公益接口") + f" · {DEFAULT_MODEL}"
         self.status.setText(label)
 
     def _perm_level(self) -> str:

@@ -162,7 +162,7 @@ class FeedbackPage(QWidget):
             self._reload_history()
 
         def err(exc):
-            self.spec.setPlainText(f"采集失败：{exc}")
+            self.spec.setPlainText(tr("采集失败：{0}").format(exc))
 
         self.backend.call_async(work, ok, err)
 

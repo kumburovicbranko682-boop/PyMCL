@@ -138,6 +138,29 @@ class VisibleStringsEnglishTests(unittest.TestCase):
         install = i18n.tr("安装模组 {0}").format("sodium.jar")
         self.assertTrue(BackendAPI.is_download_title(install))
 
+    def test_playtime_and_misc_english(self):
+        """游玩时长、AI 状态、反馈采集失败、崩溃框日志行都不许冒中文。"""
+        from mclauncher.playtime import format_duration
+
+        for seconds, expect in [(3900, "1 h 5 min"), (150, "2 min 30 s"),
+                                (42, "42 s")]:
+            text = format_duration(seconds)
+            self.assertIsNone(_CJK.search(text),
+                              f"英文界面下时长冒中文: {seconds} -> {text!r}")
+            self.assertEqual(text, expect)
+
+        for key, arg in [("采集失败：{0}", "boom"), ("完整日志：{0}", "/tmp/x.log")]:
+            text = i18n.tr(key).format(arg)
+            self.assertIsNone(_CJK.search(text), f"{key!r} -> {text!r}")
+            self.assertIn(str(arg), text)
+        self.assertIsNone(_CJK.search(i18n.tr("自定义")))
+        self.assertIsNone(_CJK.search(i18n.tr("公益接口")))
+
+        # 中文界面保持原样
+        i18n.set_language("zh_CN")
+        self.assertEqual(format_duration(3900), "1 小时 5 分钟")
+        i18n.set_language("en")
+
     def test_download_counts_follow_language(self):
         """下载量单位跟随语言：英文用 K/M/B，中文保留 万/亿。"""
         from app.widgets import fmt_downloads

@@ -113,17 +113,18 @@ def get_total_playtime() -> int:
 
 
 def format_duration(seconds: int) -> str:
-    """将秒数格式化为人类可读的时长。"""
+    """将秒数格式化为人类可读的时长（跟随界面语言）。"""
+    from .i18n import tr
     if seconds < 0:
         seconds = 0
     hours = seconds // 3600
     mins = (seconds % 3600) // 60
     secs = seconds % 60
     if hours > 0:
-        return f"{hours} 小时 {mins} 分钟"
+        return tr("{0} 小时 {1} 分钟").format(hours, mins)
     if mins > 0:
-        return f"{mins} 分钟 {secs} 秒"
-    return f"{secs} 秒"
+        return tr("{0} 分钟 {1} 秒").format(mins, secs)
+    return tr("{0} 秒").format(secs)
 
 
 def clear_playtime(instance_name: str = "", version_id: str = ""):
