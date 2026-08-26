@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""「界面动画」总开关必须说到做到：关闭后飞入动画不播、悬浮球瞬移。
+"""「界面动画」总开关必须说到做到：关闭后飞入动画不播、悬浮球瞬移、
+下载/更多分类条的指示条直接落位。
 
 设置卡文案写着「关闭则全部瞬时」，此前 fly_to_tasks 只看
-ui_fly_animation 子开关、下载悬浮球的位移动画根本不看开关。
+ui_fly_animation 子开关、下载悬浮球的位移动画和分类条指示条
+根本不看开关。
 """
 from __future__ import annotations
 
@@ -89,6 +91,44 @@ class MasterSwitchTests(unittest.TestCase):
         self.assertEqual((lbl.x(), lbl.y()), (50, 60), "应直接到终态")
         self.assertEqual(hits, [1], "完成回调应立即触发")
         lbl.deleteLater()
+
+    def _make_cat_bar(self):
+        from PySide6.QtWidgets import QWidget
+        from app.pages.download_hub import DownloadCatBar
+
+        bar = DownloadCatBar()
+        bar.resize(600, 48)
+        bar.show()
+        _app.processEvents()
+        pages = [QWidget(), QWidget()]
+        bar.add_item("原版游戏", pages[0])
+        bar.add_item("Mod", pages[1])
+        _app.processEvents()
+        bar.select_page(pages[0], animate=False)
+        _app.processEvents()
+        return bar, pages
+
+    def test_cat_indicator_jumps_when_motion_off(self):
+        from PySide6.QtCore import QAbstractAnimation
+
+        CONFIG.set("ui_motion", False)
+        bar, pages = self._make_cat_bar()
+        bar.select_page(pages[1])
+        self.assertNotEqual(bar._ind_anim.state(), QAbstractAnimation.Running,
+                            "总开关关闭时指示条不许播动画")
+        target = bar._indicator_rect(bar._buttons[id(pages[1])][0])
+        self.assertEqual(bar._indicator.geometry(), target, "指示条应直接落位")
+        bar.deleteLater()
+
+    def test_cat_indicator_animates_when_motion_on(self):
+        from PySide6.QtCore import QAbstractAnimation
+
+        bar, pages = self._make_cat_bar()
+        bar.select_page(pages[1])
+        self.assertEqual(bar._ind_anim.state(), QAbstractAnimation.Running,
+                         "动效全开时指示条应有补间")
+        bar._ind_anim.stop()
+        bar.deleteLater()
 
 
 if __name__ == "__main__":

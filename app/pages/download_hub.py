@@ -315,10 +315,13 @@ class DownloadCatBar(QFrame):
     def _move_indicator(self, btn, animate: bool = True):
         if btn is None:
             return
+        from ..motion_prefs import ui_motion_ok
         target = self._indicator_rect(btn)
         self._indicator.show()
         self._indicator.raise_()
-        if (not animate) or (not self._indicator.geometry().isValid()) or self._indicator.width() < 4:
+        if ((not animate) or (not ui_motion_ok())
+                or (not self._indicator.geometry().isValid())
+                or self._indicator.width() < 4):
             self._ind_anim.stop()
             self._indicator.setGeometry(target)
             return
