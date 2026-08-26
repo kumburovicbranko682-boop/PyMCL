@@ -910,14 +910,36 @@ char *install_neoforge(const char *instance, const char *mc, const char *ver, py
         for (int i = 0; i < nv; i++) if (strcmp(vers[i], ver) == 0) snprintf(full, sizeof(full), "%s", ver);
     }
     if (!full[0]) {
-        int a, b, c; mc_version_tuple(mc, &a, &b, &c);
-        char prefix[32];
-        if (a > 1 || (a == 1 && (b > 20 || (b == 20 && c >= 2))))
-            snprintf(prefix, sizeof(prefix), "%d.%d.", b, c);
-        else
-            snprintf(prefix, sizeof(prefix), "%s-", mc);
-        for (int i = 0; i < nv; i++)
-            if (pymcl_startswith(vers[i], prefix)) snprintf(full, sizeof(full), "%s", vers[i]);
+        /* 前缀推导对齐 mclauncher/neoforge_meta.neoforge_version_prefix：
+         * 1.20.1 -> "47.1."（历史特例）；1.20.2–1.21.x -> 去掉开头 "1."
+         * （1.21 -> "21.0."）；年式 26.x -> 核心段原样（"26.1."）。
+         * 旧逻辑对年式版本算成 "%minor.%patch."——26.1 变成 "1.0."，
+         * 在纯 C 桥上 NeoForge + 26.x 一律报「没有支持的版本」。 */
+        int a, b, c;
+        char prefix[64] = {0};
+        if (strcmp(mc, "1.20.1") == 0)
+            snprintf(prefix, sizeof(prefix), "47.1.");
+        else if (mc_version_tuple(mc, &a, &b, &c) == 0) {
+            if (a == 1 && (b > 20 || (b == 20 && c >= 2)))
+                snprintf(prefix, sizeof(prefix), "%d.%d.", b, c);
+            else if (a >= 20) {
+                char core[48];
+                snprintf(core, sizeof(core), "%s", mc);
+                char *cut = strpbrk(core, "-+");
+                if (cut) *cut = 0;
+                snprintf(prefix, sizeof(prefix), "%s.", core);
+            }
+        }
+        if (prefix[0])
+            for (int i = 0; i < nv; i++)
+                if (pymcl_startswith(vers[i], prefix)) snprintf(full, sizeof(full), "%s", vers[i]);
+        if (!full[0]) {
+            /* 早期 1.20.1 时代的 "1.20.1-47.1.x" 命名（Python 同款兜底）。 */
+            char legacy[64];
+            snprintf(legacy, sizeof(legacy), "%s-", mc);
+            for (int i = 0; i < nv; i++)
+                if (pymcl_startswith(vers[i], legacy)) snprintf(full, sizeof(full), "%s", vers[i]);
+        }
     }
     for (int i = 0; i < nv; i++) free(vers[i]);
     free(vers);
