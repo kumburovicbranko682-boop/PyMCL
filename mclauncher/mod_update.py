@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""已装模组更新：按 sha1 查 Modrinth，比出版本。支持忽略（PCL2 同款）。"""
+"""已装模组更新：按 sha1 查 Modrinth，比出版本。支持忽略与整包锁定（PCL2 同款）。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,6 +14,29 @@ API = "https://api.modrinth.com/v2"
 
 # 更新忽略表：{project_id: "*"（永不提醒）或 具体 latest 版本串（只忽略这个版本）}
 IGNORE_FILE = "pymcl_mod_ignores.json"
+
+# 实例级「禁止更新 Mod」开关（PCL 2.10.7 同款：防整合包玩家误更新拆包）。
+# PyMCL 的模组更新作用在实例共享 mods 上，所以锁也挂在实例 meta 里。
+LOCK_KEY = "lock_mod_updates"
+
+
+class UpdateLockedError(Exception):
+    """实例开启了 Mod 更新锁定时，检查/应用更新都拒绝执行。"""
+
+
+def is_locked(instance: Instance) -> bool:
+    return bool(instance.meta().get(LOCK_KEY))
+
+
+def set_locked(instance: Instance, locked: bool) -> bool:
+    instance.set_meta(LOCK_KEY, bool(locked))
+    return bool(locked)
+
+
+def _ensure_unlocked(instance: Instance):
+    if is_locked(instance):
+        raise UpdateLockedError(
+            "该实例已锁定 Mod 更新（整合包保护）。如确需更新，请先在模组管理页解除锁定。")
 
 
 def _game_mods(instance: Instance, mods_path: Path | None = None) -> Path:
@@ -60,6 +83,7 @@ def is_ignored(row: dict, ignore_map: dict) -> bool:
 def check_updates(instance: Instance, dm: DownloadManager | None = None,
                   mods_path: Path | None = None, mc_version: str = "",
                   loader: str = "", include_ignored: bool = False) -> list:
+    _ensure_unlocked(instance)
     dm = dm or DownloadManager(threads=4)
     rows = []
     folder = _game_mods(instance, mods_path)
@@ -191,6 +215,7 @@ def _entries(folder: Path) -> list:
 
 def apply_update(instance: Instance, row: dict, dm: DownloadManager | None = None,
                  mods_path: Path | None = None) -> str:
+    _ensure_unlocked(instance)
     dm = dm or DownloadManager(threads=2)
     folder = _game_mods(instance, mods_path)
     url = row.get("url")

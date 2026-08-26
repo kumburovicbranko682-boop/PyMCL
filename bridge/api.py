@@ -1511,6 +1511,15 @@ class BackendAPI:
         self._bus.emit("ui_changed", {})
         return name
 
+    def get_mod_update_lock(self, instance: str) -> bool:
+        """实例是否锁定了 Mod 更新（PCL 2.10.7「禁止更新 Mod」同款，整合包保护）。"""
+        from mclauncher import mod_update
+        return mod_update.is_locked(self._instance(instance))
+
+    def set_mod_update_lock(self, instance: str, locked: bool) -> bool:
+        from mclauncher import mod_update
+        return mod_update.set_locked(self._instance(instance), locked)
+
     def list_mod_update_ignores(self, instance: str) -> dict:
         """更新忽略表：{project: "*"（不再提醒）或 具体版本串（忽略此版本）}。"""
         from mclauncher import mod_update

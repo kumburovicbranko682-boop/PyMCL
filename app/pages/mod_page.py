@@ -429,6 +429,10 @@ class ModManagerPage(QWidget):
         self.folder_btn = TransparentPushButton(FIF.FOLDER, tr("打开 mods 文件夹"))
         self.import_btn = TransparentPushButton(FIF.ADD, tr("导入 jar"))
         self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
+        self.lock_btn = TransparentTogglePushButton(
+            getattr(FIF, "LOCK", getattr(FIF, "PIN", FIF.SETTING)), tr("锁定更新"))
+        self.lock_btn.setToolTip(
+            tr("禁止本实例检查/更新 Mod（PCL 同款整合包保护，防误更新拆包）"))
         self.conflict_btn = TransparentPushButton(FIF.SEARCH, tr("冲突扫描"))
         self.export_btn = TransparentPushButton(
             getattr(FIF, "SAVE_AS", FIF.SAVE), tr("导出清单"))
@@ -436,8 +440,8 @@ class ModManagerPage(QWidget):
         self.batch_btn = TransparentTogglePushButton(
             getattr(FIF, "CHECKBOX", FIF.EDIT), tr("批量管理"))
         self.batch_btn.setToolTip(tr("勾选多个模组批量启用/禁用/删除"))
-        for b in (self.folder_btn, self.import_btn, self.update_btn, self.conflict_btn,
-                  self.export_btn, self.batch_btn):
+        for b in (self.folder_btn, self.import_btn, self.update_btn, self.lock_btn,
+                  self.conflict_btn, self.export_btn, self.batch_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
         cv.addLayout(bar)
@@ -492,6 +496,7 @@ class ModManagerPage(QWidget):
         self.folder_btn.clicked.connect(self._open_folder)
         self.import_btn.clicked.connect(self._import_local)
         self.update_btn.clicked.connect(self._check_updates)
+        self.lock_btn.toggled.connect(self._toggle_update_lock)
         self.conflict_btn.clicked.connect(self._scan_conflicts)
         self.export_btn.clicked.connect(self._export_list)
         self.batch_btn.toggled.connect(self._toggle_batch)
@@ -550,7 +555,36 @@ class ModManagerPage(QWidget):
         if 0 <= cur_idx < len(rows):
             self.target_box.setCurrentIndex(cur_idx)
         self.target_box.blockSignals(False)
+        self._sync_update_lock()
         self.reload_list()
+
+    def _sync_update_lock(self):
+        """按当前实例刷新「锁定更新」按钮状态（不触发写回）。"""
+        try:
+            locked = bool(self.backend.get_mod_update_lock(self._current_instance()))
+        except Exception:
+            locked = False
+        self.lock_btn.blockSignals(True)
+        self.lock_btn.setChecked(locked)
+        self.lock_btn.blockSignals(False)
+
+    def _toggle_update_lock(self, checked: bool):
+        inst = self._current_instance()
+        try:
+            self.backend.set_mod_update_lock(inst, bool(checked))
+        except Exception as e:
+            InfoBar.error(tr("操作失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+            self._sync_update_lock()
+            return
+        if checked:
+            InfoBar.info(tr("已锁定 Mod 更新"),
+                         tr("实例「{inst}」将不再检查/更新 Mod，防止整合包被误更新拆坏。").format(inst=inst),
+                         parent=self, position=InfoBarPosition.TOP, duration=4000)
+        else:
+            InfoBar.success(tr("已解除锁定"),
+                            tr("实例「{inst}」恢复 Mod 更新功能。").format(inst=inst),
+                            parent=self, position=InfoBarPosition.TOP, duration=3000)
 
     # ------------------------------------------------------------------
     def reload(self):
@@ -783,8 +817,21 @@ class ModManagerPage(QWidget):
             self._install_jars(paths)
 
     def _check_updates(self):
+        inst = self._current_instance()
         try:
-            ModUpdateDialog(self, self._current_instance()).exec()
+            if self.backend.get_mod_update_lock(inst):
+                box = MessageBox(
+                    tr("已锁定 Mod 更新"),
+                    tr("实例「{inst}」开启了 Mod 更新锁定（整合包保护）。\n"
+                       "要解除锁定并继续检查更新吗？").format(inst=inst),
+                    self)
+                box.yesButton.setText(tr("解除锁定并检查"))
+                box.cancelButton.setText(tr("取消"))
+                if not box.exec():
+                    return
+                self.backend.set_mod_update_lock(inst, False)
+                self._sync_update_lock()
+            ModUpdateDialog(self, inst).exec()
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
