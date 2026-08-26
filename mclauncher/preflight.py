@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import java as java_mod
 from . import utils
+from .i18n import _ as tr
 from .instances import Instance
 
 # 预检扫库/资源时的上限，避免大整合包卡死 UI
@@ -29,7 +30,7 @@ def check_launch(instance, version: str, *, memory_mb: int = 0, java_exe: str = 
     root = Path(inst.path)
 
     if not root.is_dir():
-        items.append(_item("error", "no_instance", "实例目录不存在", str(root)))
+        items.append(_item("error", "no_instance", tr("实例目录不存在"), str(root)))
         return {"ok": False, "items": items}
 
     try:
@@ -37,15 +38,17 @@ def check_launch(instance, version: str, *, memory_mb: int = 0, java_exe: str = 
         probe.write_text("ok", encoding="utf-8")
         probe.unlink(missing_ok=True)
     except OSError as exc:
-        items.append(_item("error", "not_writable", "实例目录不可写", str(exc)))
+        items.append(_item("error", "not_writable", tr("实例目录不可写"), str(exc)))
 
     resolved = None
     if not version:
-        items.append(_item("error", "no_version", "未选择版本", "请先到「下载 → 原版游戏」安装版本"))
+        items.append(_item("error", "no_version", tr("未选择版本"),
+                           tr("请先到「下载 → 原版游戏」安装版本")))
     else:
         vjson = inst.version_json(version)
         if not vjson:
-            items.append(_item("error", "no_version_json", "版本未安装", f"找不到 {version} 的版本 JSON"))
+            items.append(_item("error", "no_version_json", tr("版本未安装"),
+                               tr("找不到 {0} 的版本 JSON").format(version)))
         else:
             jar = root / "versions" / version / f"{version}.jar"
             if hasattr(inst, "versions_dir"):
@@ -54,8 +57,8 @@ def check_launch(instance, version: str, *, memory_mb: int = 0, java_exe: str = 
                 except Exception:
                     pass
             if not Path(jar).is_file():
-                items.append(_item("warn", "no_client_jar", "客户端 jar 未直接找到",
-                                   f"{jar}（若为继承版本，启动时会解析父版本）"))
+                items.append(_item("warn", "no_client_jar", tr("客户端 jar 未直接找到"),
+                                   tr("{0}（若为继承版本，启动时会解析父版本）").format(jar)))
             try:
                 from . import manifest as manifest_mod
                 resolved = manifest_mod.resolve_inherits(
@@ -67,11 +70,11 @@ def check_launch(instance, version: str, *, memory_mb: int = 0, java_exe: str = 
         usage = shutil.disk_usage(str(root))
         free_mb = usage.free // (1024 * 1024)
         if free_mb < 512:
-            items.append(_item("error", "disk_low", "磁盘空间不足",
-                               f"实例所在盘仅剩约 {free_mb} MB，至少需要 512 MB"))
+            items.append(_item("error", "disk_low", tr("磁盘空间不足"),
+                               tr("实例所在盘仅剩约 {0} MB，至少需要 512 MB").format(free_mb)))
         elif free_mb < 2048:
-            items.append(_item("warn", "disk_warn", "磁盘空间偏低",
-                               f"实例所在盘剩余约 {free_mb} MB，建议清理后再装大整合包"))
+            items.append(_item("warn", "disk_warn", tr("磁盘空间偏低"),
+                               tr("实例所在盘剩余约 {0} MB，建议清理后再装大整合包").format(free_mb)))
     except OSError:
         pass
 
@@ -81,15 +84,17 @@ def check_launch(instance, version: str, *, memory_mb: int = 0, java_exe: str = 
                     if p.is_dir() and not p.name.startswith(".")]
         if unzipped:
             items.append(_item(
-                "error", "mod_unzipped", "Mods 被解压成了文件夹",
-                "直接放整个 .jar/.zip 即可。请删掉这些文件夹：\n - " + "\n - ".join(unzipped[:12])))
+                "error", "mod_unzipped", tr("Mods 被解压成了文件夹"),
+                tr("直接放整个 .jar/.zip 即可。请删掉这些文件夹：")
+                + "\n - " + "\n - ".join(unzipped[:12])))
         jars = [p.name for p in mods_path.iterdir() if p.suffix.lower() == ".jar"]
         looks_loader = any(tok in version.lower() for tok in (
             "forge", "fabric", "quilt", "neoforge", "optifine", "liteloader"))
         if jars and version and not looks_loader:
             items.append(_item(
-                "warn", "vanilla_mods", "原版版本不会加载模组",
-                f"mods 里有 {len(jars)} 个 jar，但当前版本名像原版。请安装 Fabric/Forge 等加载器。"))
+                "warn", "vanilla_mods", tr("原版版本不会加载模组"),
+                tr("mods 里有 {0} 个 jar，但当前版本名像原版。请安装 Fabric/Forge 等加载器。")
+                .format(len(jars))))
 
     if resolved and version:
         _check_libraries(inst, resolved, items)
@@ -102,15 +107,15 @@ def check_launch(instance, version: str, *, memory_mb: int = 0, java_exe: str = 
     if java_exe and java_exe not in ("自动选择", "auto", "default", ""):
         p = Path(java_exe)
         if not p.is_file():
-            items.append(_item("error", "java_missing", "指定的 Java 不存在", java_exe))
+            items.append(_item("error", "java_missing", tr("指定的 Java 不存在"), java_exe))
         elif version:
             need_src = resolved or inst.version_json(version) or {}
             need = java_mod.required_java_major(need_src)
             got = java_mod.get_java_major(str(p))
             if need and got and int(got) < int(need):
                 items.append(_item(
-                    "error", "java_too_old", f"Java 版本过低（需要 {need}+）",
-                    f"当前是 Java {got}：{p}"))
+                    "error", "java_too_old", tr("Java 版本过低（需要 {0}+）").format(need),
+                    tr("当前是 Java {0}：{1}").format(got, p)))
 
     mem = int(memory_mb or 0)
     if mem > 0:
@@ -135,14 +140,15 @@ def check_launch(instance, version: str, *, memory_mb: int = 0, java_exe: str = 
                     avail_mb = int(stat.ullAvailPhys // (1024 * 1024))
                     if mem + 1024 > avail_mb:
                         items.append(_item(
-                            "warn", "memory_high", "分配内存接近可用物理内存",
-                            f"游戏 {mem} MB，系统当前可用约 {avail_mb} MB，可能触发交换卡顿"))
+                            "warn", "memory_high", tr("分配内存接近可用物理内存"),
+                            tr("游戏 {0} MB，系统当前可用约 {1} MB，可能触发交换卡顿")
+                            .format(mem, avail_mb)))
         except Exception:
             pass
 
     ok = not any(i["level"] == "error" for i in items)
     if not items:
-        items.append(_item("ok", "ready", "预检通过", "未发现阻塞问题"))
+        items.append(_item("ok", "ready", tr("预检通过"), tr("未发现阻塞问题")))
     return {"ok": ok, "items": items}
 
 
@@ -207,17 +213,18 @@ def _check_libraries(inst: Instance, resolved: dict, items: list[dict]) -> None:
 
     if missing:
         sample = "\n - ".join(missing[:10])
-        more = f"\n…共缺 {len(missing)} 个" if len(missing) > 10 else ""
+        more = "\n" + tr("…共缺 {0} 个").format(len(missing)) if len(missing) > 10 else ""
         level = "error" if len(missing) >= 3 else "warn"
         items.append(_item(
-            level, "libs_missing", "依赖库缺失",
-            "缺少以下库文件，请到「下载 → 原版游戏」的「已安装版本」"
-            f"选中该版本后点修复：\n - {sample}{more}"))
+            level, "libs_missing", tr("依赖库缺失"),
+            tr("缺少以下库文件，请到「下载 → 原版游戏」的「已安装版本」选中该版本后点修复：")
+            + f"\n - {sample}{more}"))
     if bad_hash:
         sample = "\n - ".join(bad_hash[:8])
         items.append(_item(
-            "warn", "libs_hash", "依赖库校验不一致",
-            f"以下库 sha1/大小与清单不符，可能损坏：\n - {sample}\n建议修复该版本。"))
+            "warn", "libs_hash", tr("依赖库校验不一致"),
+            tr("以下库 sha1/大小与清单不符，可能损坏：")
+            + f"\n - {sample}\n" + tr("建议修复该版本。")))
 
 
 def _check_assets(inst: Instance, resolved: dict, items: list[dict]) -> None:
@@ -229,19 +236,19 @@ def _check_assets(inst: Instance, resolved: dict, items: list[dict]) -> None:
     index_file = assets_dir / "indexes" / f"{index_id}.json"
     if not index_file.is_file():
         items.append(_item(
-            "error", "assets_index_missing", "资源索引缺失",
-            f"找不到 assets/indexes/{index_id}.json，请修复该版本。"))
+            "error", "assets_index_missing", tr("资源索引缺失"),
+            tr("找不到 assets/indexes/{0}.json，请修复该版本。").format(index_id)))
         return
     if idx.get("sha1") and not utils.file_matches(index_file, idx.get("sha1"), idx.get("size")):
         items.append(_item(
-            "warn", "assets_index_hash", "资源索引校验失败",
-            f"{index_id}.json 与清单不符，建议修复该版本。"))
+            "warn", "assets_index_hash", tr("资源索引校验失败"),
+            tr("{0}.json 与清单不符，建议修复该版本。").format(index_id)))
     index = utils.read_json(index_file, None) or {}
     objects = index.get("objects") or {}
     if not objects:
         items.append(_item(
-            "warn", "assets_index_empty", "资源索引为空",
-            f"{index_id}.json 没有 objects，游戏可能缺材质/音效。"))
+            "warn", "assets_index_empty", tr("资源索引为空"),
+            tr("{0}.json 没有 objects，游戏可能缺材质/音效。").format(index_id)))
         return
     # 抽样检查：按 hash 字典序取前 N 个，统计缺失比例再外推
     keys = sorted(objects.keys())
@@ -261,12 +268,14 @@ def _check_assets(inst: Instance, resolved: dict, items: list[dict]) -> None:
     est = int(round(ratio * len(objects)))
     if ratio >= 0.25 or miss >= 8:
         items.append(_item(
-            "error", "assets_missing", "游戏资源大量缺失",
-            f"抽样 {len(sample)} 个资源缺 {miss} 个（约估全量缺 {est}/{len(objects)}）。请修复该版本。"))
+            "error", "assets_missing", tr("游戏资源大量缺失"),
+            tr("抽样 {0} 个资源缺 {1} 个（约估全量缺 {2}/{3}）。请修复该版本。")
+            .format(len(sample), miss, est, len(objects))))
     else:
         items.append(_item(
-            "warn", "assets_partial", "部分游戏资源缺失",
-            f"抽样 {len(sample)} 个资源缺 {miss} 个（约估全量缺 {est}/{len(objects)}）。可先启动，异常再修复。"))
+            "warn", "assets_partial", tr("部分游戏资源缺失"),
+            tr("抽样 {0} 个资源缺 {1} 个（约估全量缺 {2}/{3}）。可先启动，异常再修复。")
+            .format(len(sample), miss, est, len(objects))))
 
 
 def _check_natives(inst: Instance, version: str, resolved: dict, items: list[dict]) -> None:
@@ -287,8 +296,8 @@ def _check_natives(inst: Instance, version: str, resolved: dict, items: list[dic
         return
     if not natives_present(ndir):
         items.append(_item(
-            "warn", "natives_missing", "本地库（natives）可能未解压",
-            f"{ndir} 为空或不完整。启动时会尝试再解压；若仍黑屏请修复该版本。"))
+            "warn", "natives_missing", tr("本地库（natives）可能未解压"),
+            tr("{0} 为空或不完整。启动时会尝试再解压；若仍黑屏请修复该版本。").format(ndir)))
 
 
 def _check_mod_conflicts(inst: Instance, mods_path: Path, items: list[dict]) -> None:
@@ -326,8 +335,8 @@ def _check_mod_conflicts(inst: Instance, mods_path: Path, items: list[dict]) -> 
             dups.append(f"{mid} ×{len(group)}（" + ", ".join(g.get("file") or "?" for g in group[:3]) + "）")
     if dups:
         items.append(_item(
-            "error", "mod_duplicate", "重复安装同一模组",
-            "同 id 装了多份会导致启动失败：\n - " + "\n - ".join(dups[:8])))
+            "error", "mod_duplicate", tr("重复安装同一模组"),
+            tr("同 id 装了多份会导致启动失败：") + "\n - " + "\n - ".join(dups[:8])))
 
     present = set(by_id)
     breaks = []
@@ -347,25 +356,28 @@ def _check_mod_conflicts(inst: Instance, mods_path: Path, items: list[dict]) -> 
                 continue
             if did in ("fabric-api", "fabricapi", "fabric"):
                 if "fabric-api" not in present and "fabricapi" not in present:
-                    missing_deps.append(f"{m.get('name') or m.get('file')} 需要 Fabric API")
+                    missing_deps.append(
+                        tr("{0} 需要 Fabric API").format(m.get("name") or m.get("file")))
                 continue
             if did not in present:
-                missing_deps.append(f"{m.get('name') or m.get('file')} 缺少 {did}")
+                missing_deps.append(
+                    tr("{0} 缺少 {1}").format(m.get("name") or m.get("file"), did))
     if breaks:
         items.append(_item(
-            "error", "mod_breaks", "模组互相冲突",
-            "元数据声明不兼容：\n - " + "\n - ".join(breaks[:8])))
+            "error", "mod_breaks", tr("模组互相冲突"),
+            tr("元数据声明不兼容：") + "\n - " + "\n - ".join(breaks[:8])))
     # 缺依赖很多时只 warn（用户可能靠全局 mods），明确 fabric-api 则 error
     fab = [x for x in missing_deps if "Fabric API" in x]
     other = [x for x in missing_deps if x not in fab]
     if fab:
         items.append(_item(
-            "error", "mod_missing_fabric_api", "缺少 Fabric API",
+            "error", "mod_missing_fabric_api", tr("缺少 Fabric API"),
             "\n - ".join(list(dict.fromkeys(fab))[:6])))
     if other:
         items.append(_item(
-            "warn", "mod_missing_dep", "可能缺少模组依赖",
-            "\n - ".join(list(dict.fromkeys(other))[:8]) + "\n（若实际由其它 jar 提供可忽略）"))
+            "warn", "mod_missing_dep", tr("可能缺少模组依赖"),
+            "\n - ".join(list(dict.fromkeys(other))[:8])
+            + "\n" + tr("（若实际由其它 jar 提供可忽略）")))
 
 
 def _item(level: str, code: str, title: str, detail: str) -> dict:
