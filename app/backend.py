@@ -2627,6 +2627,8 @@ class BackendAPI(QObject):
                 "proc": proc, "instance": inst.name, "version": version,
                 "account": self._account_label(account, username),
                 "started_at": proc.started_at,
+                # 导出运行栈时优先用同一个 Java 的诊断工具
+                "java": str(java_exe or ""),
             }
         self.game_started.emit()
         if prep.get("show_log"):
@@ -3136,6 +3138,31 @@ class BackendAPI(QObject):
             self.cancel_task(tid)
             n += 1
         return n
+
+    def dump_game_stack(self, task_id: str = "", dest: str = "") -> str:
+        """导出运行中游戏的线程转储（HMCL「导出游戏运行栈」同款）。
+
+        游戏卡死时用：不打断游戏进程，把 jstack 转储写成文件并返回路径。
+        task_id 留空取最近启动的游戏；dest 留空写到启动器数据目录。
+        """
+        with self._game_lock:
+            if task_id:
+                entries = [self._game_procs.get(task_id) or {}]
+            else:
+                # dict 按插入序：最近启动的排最后
+                entries = [dict(e) for e in self._game_procs.values()][::-1]
+        entry = next((e for e in entries
+                      if e.get("proc") is not None
+                      and e["proc"].poll() is None), None)
+        if entry is None:
+            raise LaunchError(tr("游戏未在运行，无法导出运行栈"))
+        pid = int(getattr(entry["proc"].proc, "pid", 0) or 0)
+        from mclauncher import stack_dump
+        try:
+            return stack_dump.export_dump(
+                pid, java_exe=entry.get("java") or None, dest=dest or None)
+        except stack_dump.StackDumpError as e:
+            raise LaunchError(str(e)) from e
 
     def allow_multi_instance(self) -> bool:
         return bool(CONFIG.get("allow_multi_instance", False))

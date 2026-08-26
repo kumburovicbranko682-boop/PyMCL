@@ -2,11 +2,13 @@
 """游戏实时日志窗口（HMCL「显示日志」同款）：级别高亮 / 筛选 / 搜索 / 导出。"""
 import html
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, CheckBox, LineEdit, PushButton, TextEdit,
+    CaptionLabel, CheckBox, LineEdit, MessageBox, PushButton, TextEdit,
     TransparentTogglePushButton, FluentIcon as FIF, InfoBar, InfoBarPosition,
 )
 
@@ -75,6 +77,15 @@ class GameLogWindow(QWidget):
         self.export_btn = PushButton(FIF.SAVE, tr("导出"))
         self.export_btn.clicked.connect(self._export)
         bar.addWidget(self.export_btn)
+        # HMCL 日志窗口同款：游戏卡死时导出线程转储 / 直接结束进程
+        self.dump_btn = PushButton(FIF.CODE, tr("导出运行栈"))
+        self.dump_btn.setToolTip(
+            tr("游戏卡死时点这里：不打断游戏，导出 jstack 线程转储用于定位卡顿"))
+        self.dump_btn.clicked.connect(self._dump_stack)
+        bar.addWidget(self.dump_btn)
+        self.kill_btn = PushButton(FIF.CLOSE, tr("结束游戏进程"))
+        self.kill_btn.clicked.connect(self._kill)
+        bar.addWidget(self.kill_btn)
         root.addLayout(bar)
 
         self.view = TextEdit(self)
@@ -131,6 +142,9 @@ class GameLogWindow(QWidget):
             self._update_labels()
         if not out.get("running"):
             self._timer.stop()
+            # 进程没了，运行栈导不出来、也没得结束（HMCL 同款置灰）
+            self.dump_btn.setEnabled(False)
+            self.kill_btn.setEnabled(False)
             self.status.setText(tr("游戏已退出，日志共 {n} 行").format(n=self._since))
         elif lines:
             self.status.setText(tr("日志共 {n} 行").format(n=self._since))
@@ -188,6 +202,48 @@ class GameLogWindow(QWidget):
             return
         InfoBar.success(tr("已导出"), path, parent=self,
                         position=InfoBarPosition.TOP, duration=3000)
+
+    # ---------------- 运行栈 / 结束进程 ----------------
+
+    def _dump_stack(self):
+        """游戏卡死时导出线程转储（HMCL「导出游戏运行栈」同款）。"""
+        self.dump_btn.setEnabled(False)
+        job = lambda: self.backend.dump_game_stack(self.task_id)
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(job, self._on_dump_ok, self._on_dump_fail)
+            return
+        try:
+            self._on_dump_ok(job())
+        except Exception as e:
+            self._on_dump_fail(str(e))
+
+    def _on_dump_ok(self, path):
+        self.dump_btn.setEnabled(self._timer.isActive())
+        InfoBar.success(tr("已导出运行栈"), str(path), parent=self,
+                        position=InfoBarPosition.TOP, duration=5000)
+        from mclauncher.crash import open_path
+        open_path(Path(str(path)).parent)
+
+    def _on_dump_fail(self, message):
+        self.dump_btn.setEnabled(self._timer.isActive())
+        InfoBar.error(tr("导出运行栈失败"), str(message), parent=self,
+                      position=InfoBarPosition.TOP, duration=6000)
+
+    def _kill(self):
+        box = MessageBox(
+            tr("结束游戏进程"),
+            tr("结束这局游戏？未保存的游戏进度可能丢失。"),
+            self.window())
+        box.yesButton.setText(tr("结束"))
+        box.cancelButton.setText(tr("取消"))
+        if not box.exec():
+            return
+        try:
+            self.backend.kill_game(self.task_id)
+        except Exception as e:
+            InfoBar.error(tr("操作失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
 
     def closeEvent(self, event):
         self._timer.stop()

@@ -708,7 +708,7 @@
   "联机网络检测": "Multiplayer network check",
   "通过公共 STUN 服务器探测 NAT 类型；类型越「锥形」，P2P 联机越顺。": "Probes your NAT type via public STUN servers; the more \"cone-like\", the smoother P2P multiplayer works.",
   "正在检测…（约 3-10 秒）": "Checking… (takes about 3-10 seconds)",
-  "重新检测": "Check again",
+  "重新检测": "Recheck",
   "NAT 类型：{label}": "NAT type: {label}",
   "公网出口：{addr}": "Public endpoint: {addr}",
   "IPv6：可用（{addr}）": "IPv6: available ({addr})",
@@ -1152,7 +1152,6 @@
   "重复安装": "Duplicate",
   "重新启动": "Relaunch",
   "重新启动内核": "Restart runtime",
-  "重新检测": "Recheck",
   "重新采集": "Recollect",
   "重置为默认": "Reset to default",
   "重置": "Reset",
@@ -1322,5 +1321,14 @@
   "无法打开种子地图": "Could not open seed map",
   "存档不存在：{0}": "World not found: {0}",
   "复制全局游戏设置": "Copy global game settings",
-  "把设置页的全局默认值（内存 / Java / JVM / 窗口等）填进本页，保存后生效": "Fill this page with the global defaults from Settings (memory / Java / JVM / window, etc.); takes effect after saving"
+  "把设置页的全局默认值（内存 / Java / JVM / 窗口等）填进本页，保存后生效": "Fill this page with the global defaults from Settings (memory / Java / JVM / window, etc.); takes effect after saving",
+  "导出运行栈": "Export thread dump",
+  "游戏卡死时点这里：不打断游戏，导出 jstack 线程转储用于定位卡顿": "Click when the game freezes: exports a jstack thread dump without interrupting the game",
+  "已导出运行栈": "Thread dump exported",
+  "导出运行栈失败": "Failed to export thread dump",
+  "结束这局游戏？未保存的游戏进度可能丢失。": "End this game? Unsaved progress may be lost.",
+  "游戏未在运行，无法导出运行栈": "Game is not running; cannot export thread dump",
+  "游戏进程号无效": "Invalid game process id",
+  "没有找到 jstack / jcmd 诊断工具（JRE 不自带）。请安装一个 JDK，或在 Java 管理页添加一个 JDK 后重试。": "No jstack / jcmd diagnostic tool found (JREs do not ship them). Install a JDK, or add one on the Java management page, then retry.",
+  "导出游戏运行栈失败：所有诊断工具都无法连接游戏进程。": "Failed to export the game thread dump: no diagnostic tool could attach to the game process."
 }
