@@ -212,6 +212,9 @@ class LaunchPage(QWidget):
         self.instance_box.addItems(names)
         if cur_inst in names:
             self.instance_box.setCurrentText(cur_inst)
+        elif CONFIG.get("last_instance") in names:
+            # 重启后回到上次启动的实例，而不是永远回默认实例
+            self.instance_box.setCurrentText(CONFIG.get("last_instance"))
         elif CONFIG.get("default_instance") in names:
             self.instance_box.setCurrentText(CONFIG.get("default_instance"))
         self.instance_box.blockSignals(False)
@@ -345,6 +348,10 @@ class LaunchPage(QWidget):
         self.version_box.addItems(ids)
         if cur in ids:
             self.version_box.setCurrentText(cur)
+        elif (instance == CONFIG.get("last_instance")
+                and CONFIG.get("last_version") in ids):
+            # 重启后回到上次启动的版本，多版本用户不用每次重选
+            self.version_box.setCurrentText(CONFIG.get("last_version"))
         self.version_box.blockSignals(False)
         self._sync_banner()
 
@@ -433,9 +440,16 @@ class LaunchPage(QWidget):
             if not box.exec():
                 return
 
+        # 记住这次启动的选择：下次打开直接回到上次玩的实例/版本/名字
         username = self.username_edit.text().strip()
-        if username and username != CONFIG.get("last_username"):
-            CONFIG.set("last_username", username)
+        dirty = False
+        for key, value in (("last_username", username),
+                           ("last_instance", instance),
+                           ("last_version", version)):
+            if value and value != CONFIG.get(key):
+                CONFIG.set(key, value)
+                dirty = True
+        if dirty:
             CONFIG.save()
 
         self.log_edit.clear()
