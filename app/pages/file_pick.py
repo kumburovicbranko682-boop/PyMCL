@@ -227,7 +227,7 @@ class FilePickDialog(MessageBoxBase):
         title.setStyleSheet(f"color: {Theme.title}; font-weight: 700; font-size: 13px; background: transparent;")
         meta = QLabel(
             f"{', '.join((row.get('game_versions') or [])[:4]) or '—'}  ·  "
-            f"{', '.join(row.get('loaders') or []) or '任意'}  ·  "
+            f"{', '.join(row.get('loaders') or []) or tr('任意')}  ·  "
             f"{row.get('date') or '—'}  ·  {fmt_downloads(row.get('downloads'))}  ·  "
             f"{row.get('release_type') or 'release'}"
         )

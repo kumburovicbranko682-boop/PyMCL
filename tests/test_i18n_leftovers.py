@@ -1,0 +1,97 @@
+# -*- coding: utf-8 -*-
+"""英文界面不再夹生中文：剩余硬编码文案全部走 tr()。
+
+钉住的行为：
+- 底部下载条的「下载任务（N）」计数标题走翻译（之前是 f-string，
+  切英文后还是中文）；
+- 模组删除确认、设置页主目录/主题包提示、文件选择器的「任意」
+  不再以硬编码形式存在；
+- 新增的键在 en / zh_CN 两份语言文件里都有。
+
+全程 offscreen，信号手动触发，不联网。
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("PYMCL_HOME", tempfile.mkdtemp(prefix="pymcl_test_i18n_"))
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from mclauncher import feedback as _fb  # noqa: E402
+
+_fb.start_heartbeat = lambda *a, **k: None
+_fb.stop_heartbeat = lambda *a, **k: None
+
+from mclauncher.i18n import tr  # noqa: E402
+
+_app = None
+
+
+def setUpModule():
+    global _app
+    from PySide6.QtWidgets import QApplication
+    _app = QApplication.instance() or QApplication([])
+
+
+class I18nLeftoverTests(unittest.TestCase):
+    def test_locale_keys_exist(self):
+        keys = [
+            "下载任务（{0}）",
+            "将删除模组文件「{0}」，不可恢复。",
+            "启动器主目录: {0}",
+            "主题包「{0}」已保存",
+            "主题包「{0}」已应用",
+            "主题包「{0}」已删除",
+            "任意",
+            "实例 {0} → exports/",
+            "导入任务已启动: {0}",
+            "内存已设为 {0} MB，保存设置后生效",
+        ]
+        for loc in ("en.json", "zh_CN.json"):
+            data = json.loads((ROOT / "mclauncher" / "locales" / loc).read_text(encoding="utf-8"))
+            for k in keys:
+                self.assertIn(k, data, f"{loc} 缺少键：{k}")
+
+    def test_hardcoded_forms_gone(self):
+        cases = [
+            ("app/pages/tasks_page.py", 'f"下载任务（'),
+            ("app/pages/mod_page.py", 'f"将删除模组文件'),
+            ("app/pages/settings_page.py", 'f"启动器主目录'),
+            ("app/pages/settings_page.py", 'f"主题包「'),
+            ("app/pages/settings_page.py", 'f"实例 {name}'),
+            ("app/pages/settings_page.py", 'f"发现官方启动器目录'),
+            ("app/pages/settings_page.py", 'f"导入任务已启动'),
+            ("app/pages/settings_page.py", 'f"你的系统'),
+            ("app/pages/settings_page.py", 'f"内存已设为'),
+            ("app/pages/file_pick.py", "or '任意'"),
+        ]
+        for rel, needle in cases:
+            src = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertNotIn(needle, src,
+                             f"{rel} 里 {needle!r} 又变回硬编码了")
+
+    def test_dock_count_title_translated(self):
+        from app.backend import BackendAPI
+        from app.pages.tasks_page import DownloadDock
+        backend = BackendAPI()
+        dock = DownloadDock(backend)
+        self.addCleanup(dock.deleteLater)
+        backend.task_added.emit("t1", "下载 Java 17")
+        _app.processEvents()
+        self.assertEqual(dock.title.text(), tr("下载任务（{0}）").format(1),
+                         "下载条计数标题应经 tr() 渲染")
+        backend.finished.emit("t1", True, "done")
+        _app.processEvents()
+        self.assertEqual(dock.title.text(), tr("下载任务"))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
