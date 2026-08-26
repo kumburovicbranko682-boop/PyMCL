@@ -5,8 +5,9 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action, BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
-    MessageBox, Pivot, PushButton, CheckBox, RoundMenu, ScrollArea, SearchLineEdit,
-    SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentToolButton,
+    MessageBox, MessageBoxBase, Pivot, PushButton, CheckBox, RoundMenu, ScrollArea,
+    SearchLineEdit, SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TextEdit,
+    TransparentToolButton,
 )
 
 from mclauncher.config import CONFIG
@@ -15,7 +16,7 @@ from mclauncher.i18n import tr
 
 
 class VersionCard(SimpleCardWidget):
-    def __init__(self, info: dict, on_install, parent=None):
+    def __init__(self, info: dict, on_install, parent=None, on_notes=None):
         super().__init__(parent)
         self.info = info
         self.setFixedSize(216, 132)
@@ -34,12 +35,48 @@ class VersionCard(SimpleCardWidget):
         layout.addStretch(1)
 
         row = QHBoxLayout()
+        if on_notes is not None:
+            notes_btn = TransparentToolButton(FIF.INFO)
+            notes_btn.setToolTip(tr("查看官方更新内容"))
+            notes_btn.clicked.connect(lambda: on_notes(info))
+            row.addWidget(notes_btn)
         row.addStretch(1)
         install_btn = PushButton(FIF.DOWNLOAD, tr("安装"))
         install_btn.setFixedHeight(30)
         install_btn.clicked.connect(lambda: on_install(info, self))
         row.addWidget(install_btn)
         layout.addLayout(row)
+
+
+class PatchNotesDialog(MessageBoxBase):
+    """某个 MC 版本的官方更新说明（Mojang patch notes 转纯文本）。"""
+
+    def __init__(self, version: str, parent=None):
+        super().__init__(parent)
+        self.title_label = SubtitleLabel(tr("{v} 更新内容").format(v=version), self)
+        self.viewLayout.addWidget(self.title_label)
+        self.meta_label = CaptionLabel(tr("加载中…"), self)
+        self.viewLayout.addWidget(self.meta_label)
+        self.body = TextEdit(self)
+        self.body.setReadOnly(True)
+        self.body.setMinimumHeight(320)
+        self.viewLayout.addWidget(self.body)
+        self.yesButton.setText(tr("关闭"))
+        self.cancelButton.hide()
+        self.widget.setMinimumWidth(600)
+
+    def set_note(self, note: dict):
+        title = str(note.get("title") or "").strip()
+        if title:
+            self.title_label.setText(title)
+        bits = [b for b in (note.get("date") or "", note.get("type") or "") if b]
+        self.meta_label.setText(" · ".join(bits))
+        body = str(note.get("body") or "").strip()
+        self.body.setPlainText(body or tr("这个版本没有官方更新说明。"))
+
+    def set_error(self, message: str):
+        self.meta_label.setText("")
+        self.body.setPlainText(tr("加载失败：{err}").format(err=message))
 
 
 class VersionPage(QWidget):
@@ -219,7 +256,8 @@ class VersionPage(QWidget):
         self._cols = cols
         shown = rows[: self._limit]
         for i, v in enumerate(shown):
-            self.grid.addWidget(VersionCard(v, self._install), i // cols, i % cols)
+            self.grid.addWidget(VersionCard(v, self._install, on_notes=self._show_notes),
+                                i // cols, i % cols)
         if len(rows) > self._limit:
             more = PushButton(f"加载更多（还有 {len(rows) - self._limit}）")
             more.clicked.connect(self._more)
@@ -304,6 +342,27 @@ class VersionPage(QWidget):
         CONFIG.set("show_hidden_versions", self._show_hidden)
         CONFIG.save()
         self._reload_installed()
+
+    def _show_notes(self, info: dict):
+        """官方版本更新说明（HMCL 版本公告同款）：异步拉取后弹窗。"""
+        version = str(info.get("version") or "")
+        dlg = PatchNotesDialog(version, parent=self.window())
+
+        def done(note):
+            try:
+                dlg.set_note(note or {})
+            except RuntimeError:
+                pass
+
+        def failed(err):
+            try:
+                dlg.set_error(str(err or tr("未知错误")))
+            except RuntimeError:
+                pass
+
+        self.backend.call_async(
+            lambda: self.backend.game_patch_note(version), done, failed)
+        dlg.exec()
 
     def _install(self, info: dict, source=None):
         instance = self.instance_box.currentText() or "default"

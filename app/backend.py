@@ -1575,6 +1575,11 @@ class BackendAPI(QObject):
         from mclauncher import news as news_mod
         return news_mod.load_cached()
 
+    def game_patch_note(self, version: str) -> dict:
+        """某个 MC 版本的官方更新说明（HMCL 版本公告同款），带缓存。"""
+        from mclauncher import news as news_mod
+        return news_mod.patch_note(version)
+
     def skin_urls(self, account_name: str = "") -> dict:
         from mclauncher import skin as skin_mod
         if not account_name or account_name == tr("离线模式"):
