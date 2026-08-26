@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
-"""首次运行向导：游戏目录 / 下载源 / 内存 / 隔离。"""
+"""首次运行向导：只确认游戏目录和下载源。
+
+内存、隔离等有可靠默认值的选项不在这里问——第一次打开的人还没有
+任何版本，无法回答「新版本默认隔离」这种问题；这些都在 设置 页可改。
+"""
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, ComboBox, LineEdit, MessageBoxBase, SpinBox, SubtitleLabel
+from qfluentwidgets import BodyLabel, ComboBox, LineEdit, MessageBoxBase, SubtitleLabel
 
 from mclauncher.config import CONFIG
 from mclauncher.i18n import tr
@@ -34,17 +38,6 @@ class FirstRunDialog(MessageBoxBase):
         self.viewLayout.addWidget(BodyLabel(tr("文件下载源"), self))
         self.viewLayout.addWidget(self.src)
 
-        self.memory = SpinBox()
-        self.memory.setRange(512, 32768)
-        self.memory.setValue(int(CONFIG.get("memory_mb") or 4096))
-        self.viewLayout.addWidget(BodyLabel(tr("默认内存 (MB)"), self))
-        self.viewLayout.addWidget(self.memory)
-
-        self.iso = ComboBox()
-        self.iso.addItems([tr("关闭（共用实例目录）"), tr("隔离存档"), tr("隔离 Mod 与配置"), tr("隔离全部")])
-        self.viewLayout.addWidget(BodyLabel(tr("新版本默认隔离"), self))
-        self.viewLayout.addWidget(self.iso)
-
         self.yesButton.setText(tr("开始使用"))
         self.cancelButton.setText(tr("以后再说"))
         self.widget.setMinimumWidth(480)
@@ -56,17 +49,9 @@ class FirstRunDialog(MessageBoxBase):
 
     def apply(self):
         src = {tr("自动（官方慢则 BMCLAPI）"): "auto", tr("仅官方"): "official", tr("仅 BMCLAPI"): "bmclapi"}
-        iso = {
-            tr("关闭（共用实例目录）"): "none",
-            tr("隔离存档"): "saves",
-            tr("隔离 Mod 与配置"): "mods",
-            tr("隔离全部"): "all",
-        }
         data = self.backend.get_settings()
         data.update({
             "download_source": src.get(self.src.currentText(), "auto"),
-            "default_memory_mb": self.memory.value(),
-            "default_isolation": iso.get(self.iso.currentText(), "none"),
             "first_run": False,
         })
         self.backend.save_settings(data)
