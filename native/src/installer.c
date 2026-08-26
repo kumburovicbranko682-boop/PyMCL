@@ -232,14 +232,12 @@ static int install_assets(const char *inst, cJSON *resolved, pymcl_ctx *ctx) {
         long long sz = cJSON_IsNumber(cJSON_GetObjectItem(obj, "size"))
             ? (long long)cJSON_GetObjectItem(obj, "size")->valuedouble : -1;
         if (pymcl_file_matches(dest, h, sz)) continue;
-        char u1[256], u2[256];
-        snprintf(u1, sizeof(u1), BMCLAPI "/assets/%s/%s", sub, h);
-        snprintf(u2, sizeof(u2), "https://resources.download.minecraft.net/%s/%s", sub, h);
+        /* 只给官方地址：download_file 里 expand_urls 会按 download_source
+         * 决定 BMCLAPI /assets/ 镜像的有无和先后（以前固定镜像在前）。 */
+        char u[256];
+        snprintf(u, sizeof(u), "https://resources.download.minecraft.net/%s/%s", sub, h);
         cJSON *t = cJSON_CreateObject();
-        cJSON *urls = cJSON_CreateArray();
-        cJSON_AddItemToArray(urls, cJSON_CreateString(u1));
-        cJSON_AddItemToArray(urls, cJSON_CreateString(u2));
-        cJSON_AddItemToObject(t, "urls", urls);
+        cJSON_AddStringToObject(t, "url", u);
         cJSON_AddStringToObject(t, "dest", dest);
         cJSON_AddStringToObject(t, "sha1", h);
         if (sz >= 0) cJSON_AddNumberToObject(t, "size", (double)sz);
@@ -427,9 +425,13 @@ int extract_natives(const char *instance, cJSON *resolved, const char *vid, char
 }
 
 char *install_fabric(const char *instance, const char *mc, const char *loader, pymcl_ctx *ctx) {
+    /* fetch_json_mirrors 经 expand_urls 补 BMCLAPI /fabric-meta/ 镜像
+     * （按 download_source 排序）。以前只打官方 meta.fabricmc：
+     * 官方不可达时装 Fabric 在 C 桥必失败，Python 桥却能装。 */
     char url[512];
+    const char *urls1[] = { url };
     snprintf(url, sizeof(url), FABRIC_META "/versions/loader/%s", mc);
-    cJSON *data = http_get_json(url, 45);
+    cJSON *data = fetch_json_mirrors(urls1, 1, 45);
     if (!cJSON_IsArray(data) || cJSON_GetArraySize(data) == 0) {
         cJSON_Delete(data);
         pymcl_set_error("Fabric 不支持 Minecraft %s", mc);
@@ -452,8 +454,9 @@ char *install_fabric(const char *instance, const char *mc, const char *loader, p
     if (!chosen) { cJSON_Delete(data); pymcl_set_error("找不到 Fabric Loader"); return NULL; }
     const char *lv = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(chosen, "loader"), "version"));
     char purl[512];
+    const char *purls[] = { purl };
     snprintf(purl, sizeof(purl), FABRIC_META "/versions/loader/%s/%s/profile/json", mc, lv);
-    cJSON *profile = http_get_json(purl, 45);
+    cJSON *profile = fetch_json_mirrors(purls, 1, 45);
     cJSON_Delete(data);
     if (!profile) return NULL;
     const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(profile, "id"));
@@ -466,9 +469,11 @@ char *install_fabric(const char *instance, const char *mc, const char *loader, p
 }
 
 char *install_quilt(const char *instance, const char *mc, const char *loader, pymcl_ctx *ctx) {
+    /* 同 install_fabric：BMCLAPI /quilt-meta/ 镜像按 download_source 兜底。 */
     char url[512];
+    const char *urls1[] = { url };
     snprintf(url, sizeof(url), QUILT_META "/versions/loader/%s", mc);
-    cJSON *data = http_get_json(url, 45);
+    cJSON *data = fetch_json_mirrors(urls1, 1, 45);
     if (!cJSON_IsArray(data) || cJSON_GetArraySize(data) == 0) {
         cJSON_Delete(data);
         pymcl_set_error("Quilt 不支持 Minecraft %s", mc);
@@ -484,8 +489,9 @@ char *install_quilt(const char *instance, const char *mc, const char *loader, py
     }
     const char *lv = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(chosen, "loader"), "version"));
     char purl[512];
+    const char *purls[] = { purl };
     snprintf(purl, sizeof(purl), QUILT_META "/versions/loader/%s/%s/profile/json", mc, lv);
-    cJSON *profile = http_get_json(purl, 45);
+    cJSON *profile = fetch_json_mirrors(purls, 1, 45);
     cJSON_Delete(data);
     if (!profile) return NULL;
     const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(profile, "id"));
@@ -535,12 +541,14 @@ static char *forge_guess(const char *mc, const char *fv, int idx) {
 }
 
 static int download_forge_installer(const char *full, const char *mc, const char *dest, pymcl_ctx *ctx) {
-    char u1[512], u2[512], u3[512];
+    /* 官方 maven 的 BMCLAPI 镜像由 expand_urls 按 download_source 补齐；
+     * /forge/download 专有接口只在非「仅官方」时兜底。 */
+    char u1[512], u3[512];
     snprintf(u1, sizeof(u1), "%s/%s/forge-%s-installer.jar", FORGE_MAVEN, full, full);
-    snprintf(u2, sizeof(u2), BMCLAPI "/maven/net/minecraftforge/forge/%s/forge-%s-installer.jar", full, full);
     snprintf(u3, sizeof(u3), BMCLAPI "/forge/download?mcversion=%s&version=%s&category=installer&format=jar", mc, full);
-    const char *ex[] = { u2, u3 };
-    if (download_file(u1, ex, 2, dest, ctx, NULL, -1, NULL) != 0) return -1;
+    const char *ex[1]; int ne = 0;
+    if (!file_official_only()) ex[ne++] = u3;
+    if (download_file(u1, ex, ne, dest, ctx, NULL, -1, NULL) != 0) return -1;
     if (!is_forge_installer(dest)) { pymcl_remove_tree(dest); pymcl_set_error("Forge 安装器无效"); return -1; }
     return 0;
 }
@@ -863,20 +871,24 @@ char *install_forge(const char *instance, const char *mc, const char *forge, pym
         dest[0] = 0;
     }
     if (!full) {
-        char url[256];
-        snprintf(url, sizeof(url), BMCLAPI "/forge/minecraft/%s", mc);
-        cJSON *list = http_get_json(url, 60);
         char best[128] = {0};
-        if (cJSON_IsArray(list) && cJSON_GetArraySize(list) > 0) {
-            cJSON *last = cJSON_GetArrayItem(list, cJSON_GetArraySize(list) - 1);
-            const char *ver = cJSON_GetStringValue(cJSON_GetObjectItem(last, "version"));
-            const char *imc = cJSON_GetStringValue(cJSON_GetObjectItem(last, "mcversion")) ?: mc;
-            if (ver) snprintf(best, sizeof(best), "%s-%s", imc, ver);
+        /* BMCLAPI /forge/minecraft 专有接口没有官方对应，仅官方模式跳过 */
+        if (!file_official_only()) {
+            char url[256];
+            snprintf(url, sizeof(url), BMCLAPI "/forge/minecraft/%s", mc);
+            cJSON *list = http_get_json(url, 60);
+            if (cJSON_IsArray(list) && cJSON_GetArraySize(list) > 0) {
+                cJSON *last = cJSON_GetArrayItem(list, cJSON_GetArraySize(list) - 1);
+                const char *ver = cJSON_GetStringValue(cJSON_GetObjectItem(last, "version"));
+                const char *imc = cJSON_GetStringValue(cJSON_GetObjectItem(last, "mcversion")) ?: mc;
+                if (ver) snprintf(best, sizeof(best), "%s-%s", imc, ver);
+            }
+            cJSON_Delete(list);
         }
-        cJSON_Delete(list);
         if (!best[0]) {
-            const char *xmlu[] = { FORGE_MAVEN "/maven-metadata.xml", BMCLAPI "/maven/net/minecraftforge/forge/maven-metadata.xml" };
-            char *xml = fetch_text_mirrors(xmlu, 2, 90);
+            /* expand_urls 会按 download_source 补 BMCLAPI /maven/ 镜像 */
+            const char *xmlu[] = { FORGE_MAVEN "/maven-metadata.xml" };
+            char *xml = fetch_text_mirrors(xmlu, 1, 90);
             char **vers = NULL; int nv = 0;
             parse_maven_versions(xml, &vers, &nv);
             free(xml);

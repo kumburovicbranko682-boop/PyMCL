@@ -206,6 +206,44 @@ static int is_github(const char *u) {
     return u && (strstr(u, "github.com") || strstr(u, "githubusercontent.com"));
 }
 
+/* ---- download_source（官方 / BMCLAPI / 自动测速）对齐 mclauncher/source.py。
+ * 以前 C 桥完全无视这个设置：镜像永远排在官方前面，选「仅官方」的用户
+ * 每个文件都先等 BMCLAPI；海外用户在自动模式下也被固定走慢镜像。 ---- */
+
+static int dl_mode(void) { /* 0=auto 1=official 2=bmclapi */
+    const char *m = config_str("download_source", "auto");
+    if (pymcl_ieq(m, "official")) return 1;
+    if (pymcl_ieq(m, "bmclapi")) return 2;
+    return 0;
+}
+
+/* 官方握手 <4s 为快（与 PCL「优先官方，缓慢改镜像」相同），结果缓存 10 分钟。
+ * 静态缓存读写有竞态也只是多探测一次，无需加锁。 */
+static int official_fast(void) {
+    static int cached = -1;
+    static ULONGLONG at;
+    ULONGLONG now = GetTickCount64();
+    if (cached >= 0 && now - at < 600000) return cached;
+    http_resp r;
+    ULONGLONG t0 = GetTickCount64();
+    int ok = http_get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+                      &r, NULL, 4) == 0;
+    http_resp_free(&r);
+    int fast = ok && GetTickCount64() - t0 < 4000;
+    cached = fast;
+    at = GetTickCount64();
+    return fast;
+}
+
+int file_official_only(void) { return dl_mode() == 1; }
+
+int file_mirror_first(void) {
+    int m = dl_mode();
+    if (m == 1) return 0;
+    if (m == 2) return 1;
+    return !official_fast();
+}
+
 int expand_urls(const char *url, char ***out, int *n) {
     *out = NULL; *n = 0;
     if (!url || !url[0]) return 0;
@@ -216,29 +254,48 @@ int expand_urls(const char *url, char ***out, int *n) {
             "https://ghfast.top/", "https://gh.llkk.cc/", "https://ghproxy.vip/",
             "https://gh-proxy.com/", "https://v6.gh-proxy.org/", "https://cdn.gh-proxy.com/",
         };
-        for (int i = 0; i < 6; i++) {
-            snprintf(tmp[c], sizeof(tmp[c]), "%s%s", px[i], url);
-            c++;
+        if (!file_official_only()) {
+            for (int i = 0; i < 6; i++) {
+                snprintf(tmp[c], sizeof(tmp[c]), "%s%s", px[i], url);
+                c++;
+            }
         }
         snprintf(tmp[c++], sizeof(tmp[0]), "%s", url);
     } else {
+        /* 镜像映射对齐 mclauncher/source.py _FILE_MIRRORS */
         struct { const char *off, *mir; } mv[] = {
+            {"https://piston-meta.mojang.com/", BMCLAPI "/"},
+            {"https://launchermeta.mojang.com/", BMCLAPI "/"},
+            {"https://piston-data.mojang.com/", BMCLAPI "/"},
+            {"https://resources.download.minecraft.net/", BMCLAPI "/assets/"},
+            {"https://libraries.minecraft.net/", BMCLAPI "/maven/"},
             {"https://maven.minecraftforge.net/", BMCLAPI "/maven/"},
             {"https://files.minecraftforge.net/maven/", BMCLAPI "/maven/"},
             {"https://maven.neoforged.net/releases/", BMCLAPI "/maven/"},
-            {"https://libraries.minecraft.net/", BMCLAPI "/maven/"},
+            {"https://maven.fabricmc.net/", BMCLAPI "/maven/"},
+            {"https://maven.quiltmc.org/repository/release/", BMCLAPI "/maven/"},
+            {"https://maven.quiltmc.org/", BMCLAPI "/maven/"},
+            {"https://meta.fabricmc.net/", BMCLAPI "/fabric-meta/"},
+            {"https://meta.quiltmc.org/", BMCLAPI "/quilt-meta/"},
         };
-        int hit = 0;
-        for (int i = 0; i < 4; i++) {
+        char mir[PYMCL_PATH];
+        mir[0] = 0;
+        for (size_t i = 0; i < sizeof(mv) / sizeof(mv[0]); i++) {
             size_t L = strlen(mv[i].off);
             if (strncmp(url, mv[i].off, L) == 0) {
-                snprintf(tmp[c++], sizeof(tmp[0]), "%s%s", mv[i].mir, url + L);
-                snprintf(tmp[c++], sizeof(tmp[0]), "%s", url);
-                hit = 1;
+                snprintf(mir, sizeof(mir), "%s%s", mv[i].mir, url + L);
                 break;
             }
         }
-        if (!hit) snprintf(tmp[c++], sizeof(tmp[0]), "%s", url);
+        if (!mir[0] || file_official_only()) {
+            snprintf(tmp[c++], sizeof(tmp[0]), "%s", url);
+        } else if (file_mirror_first()) {
+            snprintf(tmp[c++], sizeof(tmp[0]), "%s", mir);
+            snprintf(tmp[c++], sizeof(tmp[0]), "%s", url);
+        } else {
+            snprintf(tmp[c++], sizeof(tmp[0]), "%s", url);
+            snprintf(tmp[c++], sizeof(tmp[0]), "%s", mir);
+        }
     }
     *out = (char **)calloc((size_t)c, sizeof(char *));
     for (int i = 0; i < c; i++) (*out)[i] = pymcl_strdup(tmp[i]);

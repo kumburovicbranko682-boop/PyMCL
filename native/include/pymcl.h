@@ -162,6 +162,8 @@ cJSON *http_get_json(const char *url, int timeout);
 cJSON *http_get_json_hdr(const char *url, const char *extra_hdr, int timeout);
 int http_download_one(const char *url, const char *dest, pymcl_ctx *ctx,
                       const char *sha1, long long size, const char *sha512, int timeout);
+int file_official_only(void);
+int file_mirror_first(void);
 int expand_urls(const char *url, char ***out, int *n);
 void free_urls(char **u, int n);
 int download_file(const char *url, const char **extra, int nextra, const char *dest,
