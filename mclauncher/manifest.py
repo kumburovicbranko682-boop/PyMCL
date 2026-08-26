@@ -277,8 +277,51 @@ def is_legacy_version(version_json: dict) -> bool:
     return False
 
 
+# 年式版本号（2026 起）：正式版 26.2 / 26.1.1，预发布 26.3-snapshot-10 / 26.2-rc-2 / 26.2-pre-1
+_YEAR_RELEASE_RE = re.compile(r"^\d{2}\.\d+(\.\d+)?$")
+_YEAR_PRE_RE = re.compile(r"^\d{2}\.\d+(\.\d+)?-(snapshot|rc|pre)-?\d*$", re.I)
+_WEEK_SNAPSHOT_RE = re.compile(r"^\d{2}w\d{2}[a-z]$", re.I)
+
+
 def is_vanilla_id(version_id: str) -> bool:
     """粗略判断版本 ID 是否来自官方清单。"""
     if version_id in ("release", "snapshot"):
         return False
-    return "-" not in version_id or version_id.startswith(("1.", "0.", "c0.", "inf-", "rd-", "a1.", "b1."))
+    s = str(version_id)
+    if _WEEK_SNAPSHOT_RE.match(s):
+        return True
+    if _YEAR_RELEASE_RE.match(s) or _YEAR_PRE_RE.match(s):
+        return True
+    return "-" not in s or s.startswith(("1.", "0.", "c0.", "inf-", "rd-", "a1.", "b1."))
+
+
+# 目录页版本筛选保底的经典版本
+CLASSIC_CATALOG_VERSIONS = ("1.20.1", "1.19.2", "1.18.2", "1.16.5", "1.12.2")
+
+
+def catalog_release_ids(manifest, limit: int = 8) -> list[str]:
+    """从版本清单挑正式版 id 作筛选项：最新在前，经典版本保底。
+
+    manifest 可以是完整清单 dict（含 versions），也可以是
+    [{"version"/"id", "type"}] 行列表（backend.get_version_list 的返回值）。
+    """
+    if isinstance(manifest, dict):
+        entries = manifest.get("versions") or []
+    else:
+        entries = manifest or []
+    releases = []
+    for v in entries:
+        if not isinstance(v, dict) or v.get("type") != "release":
+            continue
+        vid = v.get("id") or v.get("version")
+        if vid:
+            releases.append(str(vid))
+    out = []
+    for vid in releases[:max(int(limit), 0)]:
+        if vid not in out:
+            out.append(vid)
+    known = set(releases)
+    for classic in CLASSIC_CATALOG_VERSIONS:
+        if classic in known and classic not in out:
+            out.append(classic)
+    return out

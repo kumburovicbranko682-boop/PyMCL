@@ -335,18 +335,51 @@ def detect_loader(instance: Instance):
     return None
 
 
+# 年式版本号（2026 起）：26.1 / 26.1.2；主版本 20+ 才算年式，3–19 视为模组/整合包自身版本。
+_MC_YEAR_CORE = r"(?:2\d|[3-9]\d)\.\d+(?:\.\d+)?"
+_MC_YEAR_PRE = rf"{_MC_YEAR_CORE}-(?:snapshot|rc|pre)-?\d*"
+
+
 def _mc_version_from_text(text):
+    """从文本里提取 Minecraft 版本号。
+
+    识别老式 1.x(.y)、年式 26.x(.y) 及其预发布后缀（-snapshot-N / -rc-N / -pre-N）。
+    模组自身版本（如 5.2.1，主版本 3–19）不会被当成 MC 版本。
+    """
     if not text:
         return None
     s = str(text).strip()
-    if re.fullmatch(r"1\.\d+(\.\d+)?", s):
+    if re.fullmatch(r"1\.\d+(\.\d+)?", s) or re.fullmatch(_MC_YEAR_CORE, s):
         return s
-    m = re.search(r"(1\.\d+(?:\.\d+)?)", s)
+    if re.fullmatch(_MC_YEAR_PRE, s, re.I):
+        return s
+    # 老式优先：避免 "1.21.11-forge" 被年式分支截成 "21.11"；
+    # 负向后顾避免把 "26.1.2" 中间的 "1.2" 当版本
+    m = re.search(r"(?<![\d.])(1\.\d+(?:\.\d+)?)", s)
+    if m:
+        return m.group(1)
+    m = re.search(rf"(?<![\d.])({_MC_YEAR_PRE})", s, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(rf"(?<![\d.])({_MC_YEAR_CORE})", s)
     return m.group(1) if m else None
 
 
+def _mc_sort_key(ver: str) -> tuple:
+    """版本排序键：年式 26.x 数值上天然高于 1.21.x。"""
+    core = str(ver or "").split("-")[0]
+    nums = []
+    for p in core.split("."):
+        if not p.isdigit():
+            break
+        nums.append(int(p))
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums[:3])
+
+
 def detect_mc_version(instance: Instance):
-    """优先用实例/整合包元数据，再取已装版本里最高的 1.x。"""
+    """优先用实例/整合包元数据，再取已装版本里最高的 MC 版本（年式 26.x 高于 1.x）。"""
     meta = instance.meta() or {}
     pack = meta.get("modpack") if isinstance(meta.get("modpack"), dict) else {}
     for cand in (pack.get("mc_version"), meta.get("mc_version")):
@@ -358,8 +391,7 @@ def detect_mc_version(instance: Instance):
         hit = _mc_version_from_text(vid)
         if not hit:
             continue
-        parts = tuple(int(x) for x in hit.split("."))
-        found.append((parts, hit))
+        found.append((_mc_sort_key(hit), hit))
     if found:
         found.sort()
         return found[-1][1]

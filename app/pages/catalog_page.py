@@ -281,6 +281,26 @@ WORLD_SPEC = {
 }
 
 
+def _version_filter_items(backend) -> list[str]:
+    """版本筛选项：读缓存清单生成 release 列表（最新在前），缓存空则联网，再退经典版本。"""
+    try:
+        from mclauncher.manifest import CLASSIC_CATALOG_VERSIONS, catalog_release_ids
+    except ImportError:
+        return ["1.20.1", "1.19.2", "1.18.2", "1.16.5", "1.12.2"]
+    rows = []
+    try:
+        rows = backend.get_version_list() or []
+    except Exception:
+        rows = []
+    ids = catalog_release_ids(rows)
+    if not ids:
+        try:
+            ids = catalog_release_ids(backend.fetch_version_list() or [])
+        except Exception:
+            ids = []
+    return ids or list(CLASSIC_CATALOG_VERSIONS)
+
+
 class PclCatalogPage(QWidget):
     def __init__(self, backend, spec: dict, parent=None):
         super().__init__(parent)
@@ -320,7 +340,7 @@ class PclCatalogPage(QWidget):
         self.source_box = ComboBox()
         self.source_box.addItems([tr("全部"), "Modrinth", "CurseForge"])
         self.version_box = EditableComboBox()
-        self.version_box.addItems([tr("全部 (也可自行输入)"), "1.21.1", "1.20.1", "1.19.2", "1.18.2", "1.16.5", "1.12.2"])
+        self.version_box.addItems([tr("全部 (也可自行输入)")] + _version_filter_items(backend))
         self.version_box.setCurrentIndex(0)
         self.type_box = ComboBox()
         self.type_box.addItems(spec.get("types") or [tr("全部")])
