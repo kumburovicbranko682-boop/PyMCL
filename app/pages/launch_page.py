@@ -361,10 +361,12 @@ class LaunchPage(QWidget):
                 pack_mc = row.get("mc_version") or ""
                 break
         if pack_name:
-            bits = [b for b in (pack_ver, f"Minecraft {pack_mc}" if pack_mc else "", f"实例 {instance}") if b]
+            bits = [b for b in (pack_ver, f"Minecraft {pack_mc}" if pack_mc else "",
+                                tr("实例 {0}").format(instance)) if b]
             self.banner.set_info(pack_name, " · ".join(bits) or version)
         else:
-            self.banner.set_info(version, f"实例 {instance} · 点击「启动游戏」进入世界")
+            self.banner.set_info(
+                version, tr("实例 {0} · 点击「启动游戏」进入世界").format(instance))
 
     def _on_launch(self):
         from qfluentwidgets import MessageBox
@@ -409,9 +411,11 @@ class LaunchPage(QWidget):
             self.log_edit.appendPlainText(
                 f"[预检:warn] {w.get('title')}: {w.get('detail')}")
         self.progress.setValue(0)
+        self.progress.setVisible(True)
         self.status_label.setText(tr("准备启动…"))
         self.launch_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+        self.stop_btn.setVisible(True)
         self._crash_shown = False
         extra = []
         server = self.server_edit.text().strip()
@@ -534,6 +538,8 @@ class LaunchPage(QWidget):
             return
         self.launch_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
+        self.progress.setVisible(False)
         self.status_label.setText(message)
         if success:
             self.progress.setValue(100)

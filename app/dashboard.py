@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel, MessageBoxBase, PrimaryPushButton, PushButton, StrongBodyLabel,
-    SubtitleLabel, ToolButton,
+    SubtitleLabel, ToolButton, TransparentToolButton,
 )
 from qfluentwidgets import FluentIcon as FIF
 
@@ -55,7 +55,8 @@ class CardSpec:
                  make_body: Callable[["DashboardCard", LayoutItem], Optional[QWidget]],
                  single: bool = False, chrome: bool = True,
                  on_settings: Callable | None = None,
-                 on_removed: Callable[[QWidget, LayoutItem], None] | None = None):
+                 on_removed: Callable[[QWidget, LayoutItem], None] | None = None,
+                 header_action: tuple | None = None):
         self.key = key
         self.title = title
         self.icon = icon
@@ -65,6 +66,9 @@ class CardSpec:
         self.chrome = chrome          # 是否常驻卡片标题栏（False 仅编辑时显示）
         self.on_settings = on_settings
         self.on_removed = on_removed
+        # 常驻标题栏动作 (icon, tooltip, callback)：查看模式也显示，
+        # 让「刷新新闻」这类与卡片强相关的操作住在卡片自己头上
+        self.header_action = header_action
 
 
 class _Shield(QWidget):
@@ -156,6 +160,14 @@ class DashboardCard(QFrame):
         self.title_label = StrongBodyLabel(spec.title(), self.header)
         hl.addWidget(self.icon_label, 0, Qt.AlignVCenter)
         hl.addWidget(self.title_label, 1)
+        self.action_btn = None
+        if spec.header_action is not None:
+            act_icon, act_tip, act_cb = spec.header_action
+            self.action_btn = TransparentToolButton(act_icon, self.header)
+            self.action_btn.setFixedSize(26, 26)
+            self.action_btn.setToolTip(act_tip)
+            self.action_btn.clicked.connect(act_cb)
+            hl.addWidget(self.action_btn, 0, Qt.AlignVCenter)
         self.settings_btn = ToolButton(FIF.SETTING, self.header)
         self.settings_btn.setFixedSize(26, 26)
         self.settings_btn.setToolTip(tr("卡片设置"))

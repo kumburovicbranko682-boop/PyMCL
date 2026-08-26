@@ -618,6 +618,11 @@ class PclSideBar(QFrame):
             line.setStyleSheet(f"background: {Theme.line}; border: none;")
         for btn in self._buttons.values():
             btn.restyle()
+        # edit_btn 不在 _buttons 里，漏掉的话切深色后它还是浅色字
+        # （深底配深字，「编辑布局」直接隐身）。
+        edit_btn = getattr(self, "edit_btn", None)
+        if edit_btn is not None:
+            edit_btn.restyle()
         for info in self._groups.values():
             info["btn"].restyle()
             info["chevron"].setStyleSheet(

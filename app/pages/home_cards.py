@@ -14,10 +14,10 @@ from PySide6.QtWidgets import (
     QFormLayout, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF, LineEdit,
-    MessageBoxBase, PlainTextEdit, PrimaryPushButton, ProgressBar, PushButton,
-    Slider, SpinBox, StrongBodyLabel, SubtitleLabel, TransparentPushButton,
-    setFont,
+    BodyLabel, CaptionLabel, CheckBox, ComboBox, CompactSpinBox,
+    FluentIcon as FIF, LineEdit, MessageBoxBase, PlainTextEdit,
+    PrimaryPushButton, PushButton, Slider, StrongBodyLabel, SubtitleLabel,
+    TransparentPushButton, setFont,
 )
 
 from mclauncher.config import CONFIG
@@ -103,6 +103,10 @@ class BannerBody(QWidget):
         page.stop_btn = PushButton(FIF.CLOSE, tr("停止"))
         page.stop_btn.setFixedSize(170, 30)
         page.stop_btn.setEnabled(False)
+        # 渐进披露：空闲时不摆一个灰色大按钮和一条 0% 进度条
+        # （压扁的空进度条叠在渐变底上看着就是一条脏线）。
+        # 启动开始时由 LaunchPage 显示、结束后再收起。
+        page.stop_btn.setVisible(False)
         page.banner.right_area.addStretch(1)
         page.banner.right_area.addWidget(page.launch_btn, 0, Qt.AlignRight)
         page.banner.right_area.addWidget(page.stop_btn, 0, Qt.AlignRight)
@@ -111,6 +115,7 @@ class BannerBody(QWidget):
         page.progress = SmoothProgressBar(self)
         page.progress.setRange(0, 100)
         page.progress.setValue(0)
+        page.progress.setVisible(False)
         page.status_label = CaptionLabel(tr("就绪"))
 
         root.addWidget(page.banner, 1)
@@ -133,12 +138,15 @@ class ConfigBody(QWidget):
         self.page = page
         self.card = card
         root = QVBoxLayout(self)
-        root.setContentsMargins(2, 2, 2, 2)
+        root.setContentsMargins(0, 0, 0, 0)
         host = QWidget(self)
         cfg = QFormLayout(host)
-        cfg.setContentsMargins(14, 12, 14, 12)
-        cfg.setSpacing(10)
+        cfg.setContentsMargins(8, 8, 8, 8)
+        cfg.setVerticalSpacing(10)
+        cfg.setHorizontalSpacing(8)
         cfg.setLabelAlignment(Qt.AlignLeft)
+        # 放不下的行把标签折到字段上方，而不是冒出横向滚动条
+        cfg.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
         cfg.addRow(StrongBodyLabel(tr("启动配置")))
 
         page.instance_box = ComboBox()
@@ -159,10 +167,13 @@ class ConfigBody(QWidget):
         mem_row.addWidget(page.memory_slider, 1)
         mem_row.addWidget(page.memory_label)
 
-        page.width_spin = SpinBox()
+        # CompactSpinBox（82px）替代 SpinBox（136px）：默认布局下配置卡
+        # 只有 ~350px 宽，两个大号 SpinBox 一排直接把卡片撑出横向滚动条，
+        # 分辨率行、服务器输入框全被裁掉。
+        page.width_spin = CompactSpinBox()
         page.width_spin.setRange(320, 7680)
         page.width_spin.setValue(int(CONFIG.get("width", 854)))
-        page.height_spin = SpinBox()
+        page.height_spin = CompactSpinBox()
         page.height_spin.setRange(240, 4320)
         page.height_spin.setValue(int(CONFIG.get("height", 480)))
         res_row = QHBoxLayout()
@@ -183,15 +194,21 @@ class ConfigBody(QWidget):
         page.server_edit = LineEdit()
         page.server_edit.setPlaceholderText(tr("直连服务器 host 或 host:port"))
         cfg.addRow(form_label(tr("服务器")), page.server_edit)
+        # 动作行通栏靠左（原来塞在表单字段列里，看起来像悬在半空的
+        # 居中按钮）。「刷新新闻」搬去了新闻卡标题栏——它管的是新闻卡，
+        # 不是启动配置。
         setup_btn = TransparentPushButton(FIF.SETTING, tr("此版本设置…"))
         setup_btn.clicked.connect(page._version_setup)
-        news_btn = TransparentPushButton(FIF.SYNC, tr("刷新新闻"))
-        news_btn.clicked.connect(page._load_news)
-        cfg.addRow("", setup_btn)
-        cfg.addRow("", news_btn)
+        setup_row = QHBoxLayout()
+        setup_row.addWidget(setup_btn)
+        setup_row.addStretch(1)
+        cfg.addRow(setup_row)
         ms_btn = TransparentPushButton(FIF.PEOPLE, tr("使用微软账户登录…"))
         ms_btn.clicked.connect(page._login)
-        cfg.addRow("", ms_btn)
+        ms_row = QHBoxLayout()
+        ms_row.addWidget(ms_btn)
+        ms_row.addStretch(1)
+        cfg.addRow(ms_row)
 
         root.addWidget(host)
         root.addStretch(1)
@@ -453,7 +470,8 @@ def build_registry(page) -> dict[str, CardSpec]:
             "news", lambda: tr("主页"), FIF.SYNC,
             lambda: tr("主页 — Minecraft 新闻 / 自定义主页"),
             single_maker(NewsBody), single=True,
-            on_removed=_keep),
+            on_removed=_keep,
+            header_action=(FIF.SYNC, tr("刷新新闻"), page._load_news)),
         "quick": CardSpec(
             "quick", lambda: tr("快捷入口"), FIF.TILES,
             lambda: tr("快捷入口 — 一键跳转到常用页面，可配置显示哪些"),
