@@ -969,5 +969,7 @@
   "{0} 个版本": "{0} version(s)",
   "还没有安装版本，从上方选择一个版本开始": "No versions installed yet — pick one above to get started",
   "确定删除实例「{0}」？其中的存档与配置将一并移除。": "Delete instance \"{0}\"? Its saves and settings will be removed as well.",
-  "实例「{0}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。": "Java used when launching instance \"{0}\". Auto-select matches the game version (17 for 1.19+, 8 for legacy)."
+  "实例「{0}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。": "Java used when launching instance \"{0}\". Auto-select matches the game version (17 for 1.19+, 8 for legacy).",
+  "添加账号": "Add account",
+  "官方正版账号，在浏览器 / 设备码里完成登录": "Official Microsoft account — sign in via browser or device code"
 }
