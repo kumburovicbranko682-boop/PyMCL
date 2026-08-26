@@ -1644,7 +1644,8 @@ class BackendAPI(QObject):
         self._instance(name).set_java_pref(self.normalize_java_pref(java))
 
     def java_combo_options(self, instance: str, scan_system: bool = False) -> list[dict]:
-        opts = [{"label": JAVA_AUTO, "value": JAVA_AUTO}]
+        # label 是给人看的（跟界面语言走），value 是内部哨兵 JAVA_AUTO
+        opts = [{"label": tr("自动选择"), "value": JAVA_AUTO}]
         seen = set()
         for j in self.get_java_list(scan_system=scan_system):
             exe = j.get("path") or ""
@@ -1662,12 +1663,12 @@ class BackendAPI(QObject):
         for o in options or self.java_combo_options(instance):
             if o["value"] == stored:
                 return o["label"]
-        return JAVA_AUTO
+        return tr("自动选择")
 
     def instance_java_label(self, name: str) -> str:
         stored = self.get_instance_java(name)
         if stored == JAVA_AUTO:
-            return JAVA_AUTO
+            return tr("自动选择")
         # 只读缓存（后台预热灌满）：绝不在 UI 线程触发系统扫描。
         for j in java_mod.cached_all_javas():
             if j.get("exe") == stored:

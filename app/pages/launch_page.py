@@ -331,7 +331,10 @@ class LaunchPage(QWidget):
             self.java_box.clear()
             self.java_box.addItems(labels)
             want = self.backend.java_combo_label_for(instance, self._java_opts)
-            self.java_box.setCurrentText(want if want in labels else JAVA_AUTO)
+            if want not in labels:
+                # 回退到第一项（自动选择的翻译标签），别塞内部哨兵
+                want = labels[0] if labels else tr("自动选择")
+            self.java_box.setCurrentText(want)
             self.java_box.blockSignals(False)
         finally:
             self._syncing_java = False
