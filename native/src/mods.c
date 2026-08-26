@@ -56,21 +56,22 @@ static void mirror_mr(const char *url, char *out, size_t n) {
     snprintf(out, n, "%s", url);
 }
 
-static cJSON *mr_search(const char *query, const char *ptype, int limit) {
-    char q[1024];
-    char facets[128];
-    snprintf(facets, sizeof(facets), "[[\"project_type:%s\"]]", ptype);
-    /* curl-escape roughly */
-    char enc[512] = {0};
-    const char *s = query ? query : "";
+/* percent-encode a query-string value (unreserved chars pass through) */
+static void urlenc(const char *s, char *enc, size_t n) {
     size_t o = 0;
-    for (; *s && o + 4 < sizeof(enc); s++) {
+    enc[0] = 0;
+    for (s = s ? s : ""; *s && o + 4 < n; s++) {
         unsigned char c = (unsigned char)*s;
-        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_')
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~')
             enc[o++] = (char)c;
-        else { snprintf(enc + o, sizeof(enc) - o, "%%%02X", c); o = strlen(enc); }
+        else { snprintf(enc + o, n - o, "%%%02X", c); o = strlen(enc); }
     }
-    snprintf(q, sizeof(q), "query=%s&facets=%s&limit=%d&index=relevance", enc[0] ? enc : "%20", facets, limit);
+    enc[o] = 0;
+}
+
+static cJSON *mr_search(const char *query, const char *ptype, int limit) {
+    char enc[512];
+    urlenc(query, enc, sizeof(enc));
     /* encode facets brackets */
     char url1[1024], url2[1024];
     snprintf(url1, sizeof(url1), MODRINTH_API "/search?query=%s&limit=%d&index=relevance&facets=%%5B%%5B%%22project_type%%3A%s%%22%%5D%%5D",
@@ -135,6 +136,10 @@ cJSON *search_mods(const char *query, const char *source) {
     cJSON *out = cJSON_CreateArray();
     char slug[128] = {0}; long long cf = 0; char title[128] = {0};
     catalog_lookup_mod(q, slug, sizeof(slug), &cf, title, sizeof(title));
+    /* 别名只有 title（如 OptiFine 不在 Modrinth，catalog.json 故意不给 slug）：
+     * 对齐 mclauncher/mods.py 的 fallback_q——拿 title 当全文搜索关键词。
+     * 以前 C 桥继续用中文原词全文搜索，"高清修复/考古/经验书" 一律空结果。 */
+    const char *ftq = (title[0] && !slug[0] && !cf) ? title : q;
     if (slug[0] && want_mr) {
         char url[256]; snprintf(url, sizeof(url), MODRINTH_API "/project/%s", slug);
         cJSON *p = http_get_json(url, 30);
@@ -158,16 +163,18 @@ cJSON *search_mods(const char *query, const char *source) {
     }
     if (cJSON_GetArraySize(out) > 0) return out;
     if (want_mr) {
-        cJSON *j = mr_search(q, "mod", 30);
+        cJSON *j = mr_search(ftq, "mod", 30);
         cJSON *hits = j ? cJSON_GetObjectItem(j, "hits") : NULL;
         cJSON *h;
         cJSON_ArrayForEach(h, hits) cJSON_AddItemToArray(out, row_from_mr_hit(h));
         cJSON_Delete(j);
     }
     if (want_cf) {
-        char queryp[512];
+        /* searchFilter 必须编码：裸空格/中文会让请求行非法，CF 全文直接失败 */
+        char enc[512], queryp[1024];
+        urlenc(ftq, enc, sizeof(enc));
         snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=30&index=0&searchFilter=%s",
-                 CF_CLASS_MOD, q);
+                 CF_CLASS_MOD, enc);
         cJSON *d = cf_get("/mods/search", queryp);
         cJSON *items = cf_items(d);
         cJSON *m;
@@ -186,6 +193,8 @@ cJSON *search_modpacks(const char *query, const char *source) {
     cJSON *out = cJSON_CreateArray();
     char slug[128] = {0}; long long cf = 0; char title[128] = {0};
     catalog_lookup_pack(q, slug, sizeof(slug), &cf, title, sizeof(title));
+    /* slug/cf 都缺的别名：title 顶上做全文搜索（对齐 mclauncher/modpack.py）。 */
+    const char *ftq = (title[0] && !slug[0] && !cf) ? title : q;
     if (cf && want_cf) {
         char path[64]; snprintf(path, sizeof(path), "/mods/%lld", cf);
         cJSON *d = cf_get(path, NULL);
@@ -208,16 +217,17 @@ cJSON *search_modpacks(const char *query, const char *source) {
     }
     if (cJSON_GetArraySize(out) > 0) return out;
     if (want_mr) {
-        cJSON *j = mr_search(q, "modpack", 25);
+        cJSON *j = mr_search(ftq, "modpack", 25);
         cJSON *hits = j ? cJSON_GetObjectItem(j, "hits") : NULL;
         cJSON *h;
         cJSON_ArrayForEach(h, hits) cJSON_AddItemToArray(out, row_from_mr_hit(h));
         cJSON_Delete(j);
     }
     if (want_cf) {
-        char queryp[512];
+        char enc[512], queryp[1024];
+        urlenc(ftq, enc, sizeof(enc));
         snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=25&index=0&searchFilter=%s",
-                 CF_CLASS_MODPACK, q);
+                 CF_CLASS_MODPACK, enc);
         cJSON *d = cf_get("/mods/search", queryp);
         cJSON *items = cf_items(d);
         cJSON *m;
@@ -245,9 +255,10 @@ cJSON *search_content(const char *kind, const char *query, const char *source) {
         cJSON_Delete(j);
     }
     if (want_cf) {
-        char queryp[512];
+        char enc[512], queryp[1024];
+        urlenc(query, enc, sizeof(enc));
         snprintf(queryp, sizeof(queryp), "gameId=432&classId=%d&sortField=2&pageSize=30&index=0%s%s",
-                 cf, (query && query[0]) ? "&searchFilter=" : "", query ? query : "");
+                 cf, enc[0] ? "&searchFilter=" : "", enc);
         cJSON *d = cf_get("/mods/search", queryp);
         cJSON *items = cf_items(d);
         cJSON *m;
