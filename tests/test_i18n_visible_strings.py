@@ -248,6 +248,24 @@ class VisibleStringsEnglishTests(unittest.TestCase):
                           f"英文界面下发送成功提示冒中文: {text!r}")
         self.assertIn("fb-1", text)
 
+    def test_task_result_messages_english(self):
+        """任务完成后的「✔ message」在任务卡/下载条/任务摘要上都可见，必须翻译。"""
+        cases = {
+            ("已备份到 {0}", "b1"): "b1",
+            ("已安装 {0}", "1.21.1"): "1.21.1",
+            ("已登录 {0}", "Alice"): "Alice",
+            ("已更新 {0} 个模组", 3): "3",
+            ("已安装世界 {0}", "w.zip"): "w.zip",
+            ("Java {0}（{1}）安装完成", (17, "adoptium")): "17",
+            ("已导入 {0} 个版本", 4): "4",
+        }
+        for (key, arg), must_contain in cases.items():
+            args = arg if isinstance(arg, tuple) else (arg,)
+            text = i18n.tr(key).format(*args)
+            self.assertIsNone(_CJK.search(text),
+                              f"英文界面下任务结果冒中文: {key!r} -> {text!r}")
+            self.assertIn(str(must_contain), text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

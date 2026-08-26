@@ -1109,5 +1109,12 @@
   "已取消隐藏 {0}": "{0} is no longer hidden",
   "将卸载 {0} 个版本：": "This will uninstall {0} version(s):",
   "[预检:{0}] {1}: {2}": "[Preflight:{0}] {1}: {2}",
-  "LiteLoader 没有 {0} 的构建，只支持 1.7–1.12": "LiteLoader has no build for {0}; it only supports 1.7–1.12"
+  "LiteLoader 没有 {0} 的构建，只支持 1.7–1.12": "LiteLoader has no build for {0}; it only supports 1.7–1.12",
+  "已备份到 {0}": "Backed up to {0}",
+  "已安装 {0}": "{0} installed",
+  "已登录 {0}": "Signed in as {0}",
+  "已更新 {0} 个模组": "Updated {0} mod(s)",
+  "已安装世界 {0}": "World installed: {0}",
+  "Java {0}（{1}）安装完成": "Java {0} ({1}) installed",
+  "已导入 {0} 个版本": "Imported {0} version(s)"
 }
