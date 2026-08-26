@@ -475,9 +475,10 @@ class BannerWidget(QFrame):
 
 
 class EmptyState(QWidget):
-    """空状态提示。"""
+    """空状态提示。可选 action：给「现在该点哪里」一个真按钮。"""
 
-    def __init__(self, icon, text: str, parent=None):
+    def __init__(self, icon, text: str, parent=None,
+                 action_text: str = "", on_action=None):
         super().__init__(parent)
         self._icon = icon
         self._text = text
@@ -492,6 +493,13 @@ class EmptyState(QWidget):
         layout.addWidget(self._icon_label)
         layout.addSpacing(10)
         layout.addWidget(self._text_label)
+        self.action_btn = None
+        if action_text and callable(on_action):
+            from qfluentwidgets import PushButton
+            self.action_btn = PushButton(action_text)
+            self.action_btn.clicked.connect(on_action)
+            layout.addSpacing(12)
+            layout.addWidget(self.action_btn, 0, Qt.AlignHCenter)
         layout.addStretch(1)
         self._apply_style()
 

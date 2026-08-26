@@ -297,7 +297,11 @@ class TasksPage(QWidget):
         scroll.setWidget(host)
         root.addWidget(scroll, 1)
 
-        self.empty = EmptyState(FIF.DOWNLOAD, tr("暂无任务 —— 到「下载」里的 原版游戏 / Mod / 整合包 / 光影包 / 资源包 / Java 发起安装"))
+        self.empty = EmptyState(
+            FIF.DOWNLOAD,
+            tr("暂无任务 —— 到「下载」里的 原版游戏 / Mod / 整合包 / 光影包 / 资源包 / Java 发起安装"),
+            action_text=tr("去下载 → 原版游戏"),
+            on_action=self._goto_download)
         self.list_layout.addWidget(self.empty)
         self.list_layout.addStretch(1)
 
@@ -305,6 +309,11 @@ class TasksPage(QWidget):
         backend.progress.connect(self._progress)
         backend.log.connect(self._log)
         backend.finished.connect(self._finished)
+
+    def _goto_download(self):
+        win = self.window()
+        if win is not None and hasattr(win, "switchTo"):
+            win.switchTo("version")
 
     def _add(self, task_id, title):
         if not _is_download_title(title):
