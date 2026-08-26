@@ -16,9 +16,10 @@ from PySide6.QtWidgets import (
 )
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF, InfoBar,
-    InfoBarPosition, LineEdit, MessageBoxBase, PlainTextEdit, PrimaryPushButton,
-    ProgressBar, PushButton, RadioButton, ScrollArea, SettingCard, SubtitleLabel,
-    SwitchButton, TransparentPushButton, TransparentToolButton,
+    InfoBarPosition, LineEdit, MessageBox, MessageBoxBase, PlainTextEdit,
+    PrimaryPushButton, ProgressBar, PushButton, RadioButton, ScrollArea,
+    SettingCard, SubtitleLabel, SwitchButton, TransparentPushButton,
+    TransparentToolButton,
 )
 
 from mclauncher.ai.agent import AgentCancelled, run_agent
@@ -772,8 +773,21 @@ class AiPage(QWidget):
         self._reload_list()
 
     def _delete_chat(self):
-        self._stop(wait=True)
         cid = self._store.get("active_id")
+        # 一键抹掉整段聊天记录且不可恢复——别处删模组/存档都先问，
+        # 这里不能例外。空对话删了不损失什么，就不多问一步。
+        if self._history:
+            chat = chat_store.get_chat(self._store, cid or "") or {}
+            title = chat.get("title") or tr("对话")
+            box = MessageBox(
+                tr("删除对话"),
+                tr("将删除对话「{0}」及全部聊天记录，不可恢复。").format(title),
+                self.window() or self)
+            box.yesButton.setText(tr("删除"))
+            box.cancelButton.setText(tr("取消"))
+            if not box.exec():
+                return
+        self._stop(wait=True)
         chat_store.delete_chat(self._store, cid)
         self._load_active()
         self._reload_list()

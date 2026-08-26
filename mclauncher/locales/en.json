@@ -167,6 +167,7 @@
   "删除存档": "Delete World",
   "删除实例": "Delete Instance",
   "删除对话": "Delete Conversation",
+  "将删除对话「{0}」及全部聊天记录，不可恢复。": "This deletes the conversation \"{0}\" and its entire chat history. This cannot be undone.",
   "删除整合包实例": "Delete Modpack Instance",
   "删除确认": "Confirm deletion",
   "删除账号": "Delete account",
