@@ -480,6 +480,7 @@
   "搜索中…": "Searching…",
   "搜索光影包": "Search shaders",
   "搜索光影，回车搜索…": "Search shaders, press Enter…",
+  "搜索失败：{0}\n多为网络波动，可直接重试": "Search failed: {0}\nUsually a network hiccup — just retry",
   "搜索数据包": "Search datapacks",
   "搜索整合包": "SearchModpack",
   "搜索整合包，回车搜索…（机械动力 = 黄铜协奏曲 CBC 1.20.1）": "Search modpacks, press Enter… (Create = Create: Copycats+ CBC 1.20.1)",
