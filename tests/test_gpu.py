@@ -222,15 +222,70 @@ class ListGpusTests(unittest.TestCase):
             self.assertEqual(gpu.list_gpus(), [])
 
 
+class RendererTests(unittest.TestCase):
+    def test_normalize(self):
+        self.assertEqual(gpu.normalize_renderer("LLVMPIPE "), "llvmpipe")
+        self.assertEqual(gpu.normalize_renderer("zink"), "zink")
+        for bad in ("", None, "d3d12", 5):
+            self.assertEqual(gpu.normalize_renderer(bad), "auto")
+
+    def test_renderer_env(self):
+        env = gpu.renderer_env("llvmpipe")
+        self.assertEqual(env["LIBGL_ALWAYS_SOFTWARE"], "1")
+        self.assertEqual(env["GALLIUM_DRIVER"], "llvmpipe")
+        self.assertEqual(env["__GLX_VENDOR_LIBRARY_NAME"], "mesa")
+        env = gpu.renderer_env("zink")
+        self.assertEqual(env["MESA_LOADER_DRIVER_OVERRIDE"], "zink")
+        self.assertEqual(env["GALLIUM_DRIVER"], "zink")
+        self.assertEqual(gpu.renderer_env("auto"), {})
+
+    def test_resolve_renderer_priority(self):
+        from mclauncher.config import CONFIG
+        with patch.object(CONFIG, "get", return_value="llvmpipe"):
+            self.assertEqual(gpu.resolve_renderer({"renderer": "zink"}), "zink")
+            self.assertEqual(gpu.resolve_renderer({}), "llvmpipe")
+            # 版本设置显式 auto 时覆盖全局
+            self.assertEqual(gpu.resolve_renderer({"renderer": "auto"}), "auto")
+
+    def test_launch_env_linux_renderer_only(self):
+        with patch.object(gpu.utils, "IS_WINDOWS", False), \
+                patch.object(gpu.utils, "IS_MAC", False):
+            env, note = gpu.launch_env("auto", "/usr/bin/java", "llvmpipe")
+        self.assertEqual(env["GALLIUM_DRIVER"], "llvmpipe")
+        self.assertIn("LLVMpipe", note)
+
+    def test_renderer_overrides_nvidia_offload(self):
+        """显式选软渲染时，__GLX_VENDOR_LIBRARY_NAME 必须落在 mesa。"""
+        with patch.object(gpu.utils, "IS_WINDOWS", False), \
+                patch.object(gpu.utils, "IS_MAC", False), \
+                patch.object(gpu, "list_gpus", return_value=OffloadEnvTests.NV):
+            env, note = gpu.launch_env("discrete", "/usr/bin/java", "zink")
+        self.assertEqual(env["__GLX_VENDOR_LIBRARY_NAME"], "mesa")
+        self.assertEqual(env["__NV_PRIME_RENDER_OFFLOAD"], "1")
+        self.assertIn("渲染器", note)
+        self.assertIn("显卡偏好", note)
+
+    def test_renderer_ignored_on_windows(self):
+        with patch.object(gpu.utils, "IS_WINDOWS", True):
+            env, note = gpu.launch_env("auto", "C:/java.exe", "llvmpipe")
+        self.assertEqual(env, {})
+        self.assertIn("仅 Linux", note)
+
+    def test_all_auto_is_empty(self):
+        self.assertEqual(gpu.launch_env("auto", None, "auto"), ({}, ""))
+
+
 class WiringTests(unittest.TestCase):
     def test_version_settings_default(self):
         from mclauncher import version_settings
         self.assertIn("gpu", version_settings.DEFAULTS)
         self.assertEqual(version_settings.DEFAULTS["gpu"], "")
+        self.assertEqual(version_settings.DEFAULTS["renderer"], "")
 
     def test_config_default(self):
         from mclauncher.config import DEFAULT_CONFIG
         self.assertEqual(DEFAULT_CONFIG.get("gpu_mode"), "auto")
+        self.assertEqual(DEFAULT_CONFIG.get("renderer"), "auto")
 
     def test_launch_flow_carries_gpu_mode(self):
         import inspect
@@ -238,6 +293,7 @@ class WiringTests(unittest.TestCase):
         src = inspect.getsource(launch_flow.prepare)
         self.assertIn("gpu_mode", src)
         self.assertIn("resolve_mode", src)
+        self.assertIn("resolve_renderer", src)
 
     def test_facades_inject_launch_env(self):
         root = Path(__file__).resolve().parents[1]

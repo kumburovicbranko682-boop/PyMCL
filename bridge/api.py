@@ -938,6 +938,7 @@ class BackendAPI:
             "launcher_visibility": CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": CONFIG.get("gc_preset") or "auto",
             "gpu_mode": CONFIG.get("gpu_mode") or "auto",
+            "renderer": CONFIG.get("renderer") or "auto",
             "download_limit_kbps": int(CONFIG.get("download_limit_kbps") or 0),
             "auto_check_update": bool(CONFIG.get("auto_check_update", True)),
             "custom_homepage": CONFIG.get("custom_homepage") or "",
@@ -1021,9 +1022,9 @@ class BackendAPI:
             patch["proxy_user"] = str(data.get("proxy_user") or "")
         if "proxy_pass" in data:
             patch["proxy_pass"] = str(data.get("proxy_pass") or "")
-        for key in ("launcher_visibility", "gc_preset", "gpu_mode", "custom_homepage",
-                    "homepage_mode", "window_mode", "offline_skin", "instances_dir",
-                    "default_java", "game_lang"):
+        for key in ("launcher_visibility", "gc_preset", "gpu_mode", "renderer",
+                    "custom_homepage", "homepage_mode", "window_mode", "offline_skin",
+                    "instances_dir", "default_java", "game_lang"):
             if key in data:
                 patch[key] = data.get(key)
         if "download_limit_kbps" in data:
@@ -2192,9 +2193,10 @@ class BackendAPI:
             cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
             log(f"包装器命令: {prep['wrapper']}")
         from mclauncher import gpu as gpu_mod
-        gpu_env, gpu_note = gpu_mod.launch_env(prep.get("gpu_mode"), java_exe)
-        if gpu_note:
-            log(gpu_note)
+        gpu_env, gpu_note = gpu_mod.launch_env(
+            prep.get("gpu_mode"), java_exe, prep.get("renderer"))
+        for line in (gpu_note or "").splitlines():
+            log(line)
         env = None
         if gpu_env:
             env = os.environ.copy()

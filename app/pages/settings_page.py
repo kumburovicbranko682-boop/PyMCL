@@ -370,6 +370,18 @@ class SettingsPage(QWidget):
             tr("双显卡设备可强制游戏走独显。Windows 写注册表偏好；Linux 注入 PRIME offload。版本设置可覆盖。"),
             list(gpu_map.values()),
             gpu_map.get(settings.get("gpu_mode") or "auto", gpu_map["auto"]))
+        # 渲染器（HMCL 同款，仅 Linux/Mesa 生效）
+        rnd_map = {
+            "auto": tr("默认（硬件 OpenGL）"),
+            "llvmpipe": tr("LLVMpipe（CPU 软渲染）"),
+            "zink": tr("Zink（OpenGL over Vulkan）"),
+        }
+        self._rnd_keys = {v: k for k, v in rnd_map.items()}
+        self.rnd_card, self.rnd_box = _combo_card(
+            FIF.BRUSH if hasattr(FIF, "BRUSH") else FIF.DEVELOPER_TOOLS, tr("渲染器"),
+            tr("驱动异常时可换 LLVMpipe 软渲染或 Zink。仅 Linux（Mesa）生效。版本设置可覆盖。"),
+            list(rnd_map.values()),
+            rnd_map.get(settings.get("renderer") or "auto", rnd_map["auto"]))
         self.limit_card, self.limit_spin = _spin_card(
             FIF.CLOUD_DOWNLOAD, tr("下载限速 (KB/s)"), tr("0 表示不限制"),
             0, 102400, int(settings.get("download_limit_kbps") or 0))
@@ -438,6 +450,7 @@ class SettingsPage(QWidget):
         perf_group.addSettingCard(self.auto_mem_card)
         perf_group.addSettingCard(self.gc_card)
         perf_group.addSettingCard(self.gpu_card)
+        perf_group.addSettingCard(self.rnd_card)
         perf_group.addSettingCard(self.limit_card)
 
         self.jvm_card, self.jvm_edit = _line_card(
@@ -1350,6 +1363,7 @@ class SettingsPage(QWidget):
             "launcher_visibility": self._vis_keys.get(self.vis_box.currentText(), "keep"),
             "gc_preset": self._gc_keys.get(self.gc_box.currentText(), "auto"),
             "gpu_mode": self._gpu_keys.get(self.gpu_box.currentText(), "auto"),
+            "renderer": self._rnd_keys.get(self.rnd_box.currentText(), "auto"),
             "download_limit_kbps": self.limit_spin.value(),
             "auto_check_update": self.auto_upd.isChecked(),
             "ui_motion": self.motion_sw.isChecked(),

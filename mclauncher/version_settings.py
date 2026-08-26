@@ -44,6 +44,7 @@ DEFAULTS = {
     "nide8_id": "",
     "gc": "",
     "gpu": "",
+    "renderer": "",
     "window_title": "",
     "window_mode": "window",
     "window_width": None,

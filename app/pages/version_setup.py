@@ -83,6 +83,18 @@ class VersionSetupDialog(MessageBoxBase):
         if gpuk in self._gpu_labels:
             self.gpu.setCurrentText(self._gpu_labels[gpuk])
 
+        # 渲染器（HMCL 同款，仅 Linux/Mesa 生效），空 = 跟随全局
+        self._rnd_labels = {
+            "auto": tr("默认（硬件 OpenGL）"),
+            "llvmpipe": tr("LLVMpipe（CPU 软渲染）"),
+            "zink": tr("Zink（OpenGL over Vulkan）"),
+        }
+        self.renderer = ComboBox()
+        self.renderer.addItems([tr("跟随全局")] + list(self._rnd_labels.values()))
+        rndk = data.get("renderer") or ""
+        if rndk in self._rnd_labels:
+            self.renderer.setCurrentText(self._rnd_labels[rndk])
+
         self.game = LineEdit()
         self.game.setPlaceholderText(tr("附加游戏参数"))
         self.game.setText(data.get("game_args") or "")
@@ -149,6 +161,7 @@ class VersionSetupDialog(MessageBoxBase):
         form.addRow(form_label("Java"), self.java)
         form.addRow(form_label("GC"), self.gc)
         form.addRow(form_label(tr("显卡")), self.gpu)
+        form.addRow(form_label(tr("渲染器")), self.renderer)
         form.addRow(form_label(tr("JVM 参数")), self.jvm)
         form.addRow(form_label(tr("游戏参数")), self.game)
         form.addRow(form_label(tr("绑定账号")), self.login)
@@ -221,6 +234,8 @@ class VersionSetupDialog(MessageBoxBase):
             "gc": gc_inv.get(self.gc.currentText(), ""),
             "gpu": {v: k for k, v in self._gpu_labels.items()}.get(
                 self.gpu.currentText(), ""),
+            "renderer": {v: k for k, v in self._rnd_labels.items()}.get(
+                self.renderer.currentText(), ""),
             "window_title": self.title.text().strip(),
             "window_mode": "maximize" if self.win_mode.currentText() == tr("全屏") else "window",
             "window_width": size_of(self.win_w),

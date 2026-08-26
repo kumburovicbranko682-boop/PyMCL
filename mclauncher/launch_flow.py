@@ -85,6 +85,7 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "wrapper": str(settings.get("wrapper") or "").strip(),
         "game_lang": game_lang,
         "gpu_mode": gpu.resolve_mode(settings),
+        "renderer": gpu.resolve_renderer(settings),
     }
 
 

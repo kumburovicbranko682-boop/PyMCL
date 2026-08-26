@@ -36,6 +36,27 @@ _NV_OFFLOAD = {
     "__VK_LAYER_NV_optimus": "NVIDIA_only",
 }
 
+# OpenGL 渲染器（HMCL「渲染器」设置同款，仅 Linux/Mesa 生效）：
+# llvmpipe = CPU 软渲染兜底；zink = OpenGL over Vulkan。
+RENDERERS = ("auto", "llvmpipe", "zink")
+RENDERER_LABELS = {
+    "auto": "默认（硬件 OpenGL）",
+    "llvmpipe": "LLVMpipe（CPU 软渲染）",
+    "zink": "Zink（OpenGL over Vulkan）",
+}
+_RENDERER_ENV = {
+    "llvmpipe": {
+        "LIBGL_ALWAYS_SOFTWARE": "1",
+        "GALLIUM_DRIVER": "llvmpipe",
+        "__GLX_VENDOR_LIBRARY_NAME": "mesa",
+    },
+    "zink": {
+        "MESA_LOADER_DRIVER_OVERRIDE": "zink",
+        "GALLIUM_DRIVER": "zink",
+        "__GLX_VENDOR_LIBRARY_NAME": "mesa",
+    },
+}
+
 
 def normalize_mode(mode) -> str:
     m = str(mode or "auto").strip().lower()
@@ -47,6 +68,23 @@ def resolve_mode(settings: dict | None) -> str:
     from .config import CONFIG
     m = (settings or {}).get("gpu") or CONFIG.get("gpu_mode") or "auto"
     return normalize_mode(m)
+
+
+def normalize_renderer(renderer) -> str:
+    r = str(renderer or "auto").strip().lower()
+    return r if r in RENDERERS else "auto"
+
+
+def resolve_renderer(settings: dict | None) -> str:
+    """渲染器：版本设置优先，其次全局配置，都空则 auto。"""
+    from .config import CONFIG
+    r = (settings or {}).get("renderer") or CONFIG.get("renderer") or "auto"
+    return normalize_renderer(r)
+
+
+def renderer_env(renderer) -> dict:
+    """Linux/Mesa 下按渲染器给出环境变量增量。auto 返回空。"""
+    return dict(_RENDERER_ENV.get(normalize_renderer(renderer)) or {})
 
 
 def classify(name) -> str:
@@ -124,18 +162,39 @@ def apply_windows_preference(java_exe, mode: str) -> str:
         return f"显卡偏好写入失败（不影响启动）: {e}"
 
 
-def launch_env(mode, java_exe=None) -> tuple[dict, str]:
-    """按模式给出 (环境变量增量, 日志说明)。auto 或不支持的平台返回空。"""
+def launch_env(mode, java_exe=None, renderer="auto") -> tuple[dict, str]:
+    """按显卡模式 + 渲染器给出 (环境变量增量, 日志说明)。
+
+    渲染器（llvmpipe/zink）强制走 Mesa，会覆盖独显 offload 里的
+    __GLX_VENDOR_LIBRARY_NAME=nvidia —— 用户显式选软渲染时以渲染器为准。
+    auto + auto 或不支持的平台返回空。"""
     mode = normalize_mode(mode)
-    if mode == "auto":
-        return {}, ""
-    if utils.IS_WINDOWS:
-        return {}, apply_windows_preference(java_exe, mode)
-    if utils.IS_MAC:
-        return {}, "显卡偏好: macOS 由系统自动切换，此设置无效"
-    env = offload_env(mode)
-    if not env:
-        return {}, ""
-    pairs = " ".join(f"{k}={v}" for k, v in sorted(env.items()))
-    label = "独显" if mode == "discrete" else "核显"
-    return env, f"显卡偏好: 强制{label}（{pairs}）"
+    renderer = normalize_renderer(renderer)
+    notes = []
+    if mode != "auto":
+        if utils.IS_WINDOWS:
+            note = apply_windows_preference(java_exe, mode)
+            if note:
+                notes.append(note)
+            mode_env = {}
+        elif utils.IS_MAC:
+            notes.append("显卡偏好: macOS 由系统自动切换，此设置无效")
+            mode_env = {}
+        else:
+            mode_env = offload_env(mode)
+            if mode_env:
+                pairs = " ".join(f"{k}={v}" for k, v in sorted(mode_env.items()))
+                label = "独显" if mode == "discrete" else "核显"
+                notes.append(f"显卡偏好: 强制{label}（{pairs}）")
+    else:
+        mode_env = {}
+    env = dict(mode_env)
+    if renderer != "auto":
+        if utils.IS_WINDOWS or utils.IS_MAC:
+            notes.append("渲染器: 仅 Linux（Mesa）生效，此设置已忽略")
+        else:
+            r_env = renderer_env(renderer)
+            env.update(r_env)
+            pairs = " ".join(f"{k}={v}" for k, v in sorted(r_env.items()))
+            notes.append(f"渲染器: {RENDERER_LABELS.get(renderer, renderer)}（{pairs}）")
+    return env, "\n".join(notes)
