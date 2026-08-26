@@ -1103,5 +1103,6 @@
   "Java 已安装: {0}": "Java installed: {0}",
   "正在从 {0} 迁移…": "Migrating from {0}…",
   "发现 {0} 个版本": "Found {0} version(s)",
-  "导入 {0} 个版本": "Importing {0} version(s)"
+  "导入 {0} 个版本": "Importing {0} version(s)",
+  "在线账号使用账号自己的名字；用户名仅离线模式生效": "Online accounts use their own name; the username only applies in offline mode"
 }

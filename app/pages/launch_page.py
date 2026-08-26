@@ -42,6 +42,8 @@ class LaunchPage(QWidget):
         self.instance_box.currentTextChanged.connect(self._on_instance_changed)
         self.java_box.currentTextChanged.connect(self._on_java_changed)
         self.version_box.currentTextChanged.connect(self._sync_banner)
+        # 在线账号用自己的名字，用户名框只对离线模式生效——别留一个假输入框
+        self.account_box.currentTextChanged.connect(self._sync_username_enabled)
         # 记住「上次从 CONFIG 同步过来的值」，reload() 靠它区分
         # 「用户在本页手改过」和「一直是配置里的默认值」。
         self._cfg_snapshot = (
@@ -234,6 +236,7 @@ class LaunchPage(QWidget):
             self.account_box.setCurrentText(cur_acc)
         elif active in accounts:
             self.account_box.setCurrentText(active)
+        self._sync_username_enabled()
 
         self._sync_from_config()
         self._reload_versions()
@@ -296,6 +299,13 @@ class LaunchPage(QWidget):
     def _on_instance_changed(self):
         self._reload_versions()
         self._reload_java_box()
+
+    def _sync_username_enabled(self, *_):
+        """用户名只在离线模式下生效；选了在线账号就禁用输入框，不留假控件。"""
+        offline = self.account_box.currentText() in ("", tr("离线模式"))
+        self.username_edit.setEnabled(offline)
+        self.username_edit.setToolTip(
+            "" if offline else tr("在线账号使用账号自己的名字；用户名仅离线模式生效"))
 
     def _reload_java_box(self):
         instance = self.instance_box.currentText() or "default"
