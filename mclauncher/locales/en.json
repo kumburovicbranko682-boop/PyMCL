@@ -1095,5 +1095,6 @@
   "游玩时长记录已全部清空": "All playtime records have been cleared",
   "缺少账号信息": "Missing account details",
   "请填写邮箱 / 用户名和密码": "Enter your email / username and password",
-  "请填写用户名和密码": "Enter your username and password"
+  "请填写用户名和密码": "Enter your username and password",
+  "还没有账号。用下方任意方式登录，或填一个离线角色名保存。": "No accounts yet. Sign in with any option below, or type an offline player name and save it."
 }
