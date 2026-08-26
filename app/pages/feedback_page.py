@@ -47,7 +47,8 @@ class FeedbackPage(QWidget):
         row1 = QHBoxLayout()
         self._cat_keys = [k for k, _ in CATEGORIES]
         self.cat = ComboBox(form)
-        self.cat.addItems([label for _, label in CATEGORIES])
+        # CATEGORIES 的 label 是中文常量，进界面前必须过翻译
+        self.cat.addItems([tr(label) for _, label in CATEGORIES])
         self.cat.setFixedWidth(160)
         self.contact = LineEdit(form)
         self.contact.setPlaceholderText(tr("联系方式（QQ / 邮箱，可选）"))
@@ -173,7 +174,7 @@ class FeedbackPage(QWidget):
             return
         lines = []
         for row in rows[:8]:
-            label = fb_mod.category_label(row.get("category") or "")
+            label = tr(fb_mod.category_label(row.get("category") or ""))
             lines.append(f"{label}  {row.get('title') or ''}  ({row.get('id') or ''})")
         self.hist.setText("\n".join(lines))
 
@@ -209,8 +210,10 @@ class FeedbackPage(QWidget):
             self.title_edit.setText("")
             self._reload_history()
             fid = (data or {}).get("id") or ""
-            InfoBar.success(tr("已发送"), f"开发者会实时看到这条反馈 {fid}".strip(),
-                            parent=self, position=InfoBarPosition.TOP, duration=3500)
+            msg = (tr("开发者会实时看到这条反馈（编号 {0}）").format(fid)
+                   if fid else tr("开发者会实时看到这条反馈"))
+            InfoBar.success(tr("已发送"), msg, parent=self,
+                            position=InfoBarPosition.TOP, duration=3500)
 
         def err(exc):
             self.send_btn.setEnabled(True)

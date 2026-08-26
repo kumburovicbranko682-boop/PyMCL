@@ -1096,5 +1096,12 @@
   "缺少账号信息": "Missing account details",
   "请填写邮箱 / 用户名和密码": "Enter your email / username and password",
   "请填写用户名和密码": "Enter your username and password",
-  "还没有账号。用下方任意方式登录，或填一个离线角色名保存。": "No accounts yet. Sign in with any option below, or type an offline player name and save it."
+  "还没有账号。用下方任意方式登录，或填一个离线角色名保存。": "No accounts yet. Sign in with any option below, or type an offline player name and save it.",
+  "功能异常": "Broken feature",
+  "崩溃闪退": "Crash",
+  "下载问题": "Download issue",
+  "界面体验": "UI / UX",
+  "建议": "Suggestion",
+  "开发者会实时看到这条反馈（编号 {0}）": "The developers will see this feedback right away (ref {0})",
+  "开发者会实时看到这条反馈": "The developers will see this feedback right away"
 }

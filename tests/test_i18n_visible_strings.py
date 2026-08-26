@@ -224,6 +224,28 @@ class VisibleStringsEnglishTests(unittest.TestCase):
         dock.deleteLater()
         _app.processEvents()
 
+    def test_feedback_categories_english(self):
+        """反馈分类下拉的 label 是中文常量，进界面前必须过翻译。"""
+        from app.backend import BackendAPI
+        from app.pages.feedback_page import FeedbackPage
+
+        page = FeedbackPage(BackendAPI(None))
+        try:
+            self.assertGreater(page.cat.count(), 0)
+            for idx in range(page.cat.count()):
+                text = page.cat.itemText(idx)
+                self.assertIsNone(_CJK.search(text),
+                                  f"英文界面下反馈分类仍是中文: {text!r}")
+        finally:
+            page.deleteLater()
+            _app.processEvents()
+
+    def test_feedback_sent_toast_english(self):
+        text = i18n.tr("开发者会实时看到这条反馈（编号 {0}）").format("fb-1")
+        self.assertIsNone(_CJK.search(text),
+                          f"英文界面下发送成功提示冒中文: {text!r}")
+        self.assertIn("fb-1", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
