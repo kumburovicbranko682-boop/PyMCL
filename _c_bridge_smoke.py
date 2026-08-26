@@ -29,6 +29,7 @@ methods = [
     "preflight_launch", "ai_list_chats", "terracotta_snapshot", "help_articles",
     "format_playtime", "add_offline_account",
     "get_total_playtime", "feedback_history", "export_servers", "import_servers",
+    "collect_sysinfo", "get_smart_recommendation",
 ]
 ok = 0
 fail = []

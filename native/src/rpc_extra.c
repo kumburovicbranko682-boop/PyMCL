@@ -325,6 +325,351 @@ static void format_playtime(long long sec, char *out, size_t n) {
 }
 
 /* Prefer native; on failure or complexity, Python. */
+/* ---------- sysinfo（对齐 mclauncher/sysinfo.py 的字段形状） ---------- */
+
+static void si_reg_str(const char *path, const char *name, char *out, size_t n) {
+    out[0] = 0;
+    HKEY k;
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, path, 0, KEY_READ, &k) != ERROR_SUCCESS) return;
+    DWORD type = 0, cb = (DWORD)(n - 1);
+    if (RegQueryValueExA(k, name, NULL, &type, (LPBYTE)out, &cb) == ERROR_SUCCESS
+        && (type == REG_SZ || type == REG_EXPAND_SZ)) {
+        if (cb >= n) cb = (DWORD)(n - 1);
+        out[cb] = 0;
+    } else {
+        out[0] = 0;
+    }
+    RegCloseKey(k);
+}
+
+static DWORD si_reg_dword(const char *path, const char *name) {
+    HKEY k;
+    DWORD val = 0, type = 0, cb = sizeof(val);
+    if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, path, 0, KEY_READ, &k) != ERROR_SUCCESS) return 0;
+    if (RegQueryValueExA(k, name, NULL, &type, (LPBYTE)&val, &cb) != ERROR_SUCCESS
+        || type != REG_DWORD)
+        val = 0;
+    RegCloseKey(k);
+    return val;
+}
+
+/* " ".join(name.split())：ProcessorNameString 常带连串空格 */
+static void si_collapse_spaces(char *s) {
+    char *w = s;
+    int in_space = 1;
+    for (char *r = s; *r; r++) {
+        if (*r == ' ' || *r == '\t' || *r == '\r' || *r == '\n') {
+            if (!in_space) { *w++ = ' '; in_space = 1; }
+        } else {
+            *w++ = *r;
+            in_space = 0;
+        }
+    }
+    while (w > s && w[-1] == ' ') w--;
+    *w = 0;
+}
+
+static int si_physical_cores(void) {
+    DWORD len = 0;
+    GetLogicalProcessorInformation(NULL, &len);
+    if (!len) return 0;
+    SYSTEM_LOGICAL_PROCESSOR_INFORMATION *buf = (SYSTEM_LOGICAL_PROCESSOR_INFORMATION *)malloc(len);
+    if (!buf) return 0;
+    int cores = 0;
+    if (GetLogicalProcessorInformation(buf, &len)) {
+        DWORD count = len / sizeof(*buf);
+        for (DWORD i = 0; i < count; i++)
+            if (buf[i].Relationship == RelationProcessorCore) cores++;
+    }
+    free(buf);
+    return cores;
+}
+
+/* 对齐 _VIRTUAL_GPU 关键词表：虚拟显卡排到物理卡后面 */
+static int si_gpu_is_virtual(const char *name) {
+    static const char *keys[] = {
+        "virtual", "basic render", "basic display", "remote desktop",
+        "mumu", "parsec", "spacedesk", "usb display",
+    };
+    for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++)
+        if (pymcl_icontains(name, keys[i])) return 1;
+    return 0;
+}
+
+static cJSON *si_gpus(void) {
+    cJSON *physical = cJSON_CreateArray();
+    cJSON *virt = cJSON_CreateArray();
+    for (DWORD i = 0; i < 32; i++) {
+        DISPLAY_DEVICEW dd;
+        memset(&dd, 0, sizeof(dd));
+        dd.cb = sizeof(dd);
+        if (!EnumDisplayDevicesW(NULL, i, &dd, 0)) break;
+        if (!dd.DeviceString[0]) continue;
+        char *name = pymcl_wide_to_u8(dd.DeviceString);
+        if (!name || !name[0]) { free(name); continue; }
+        int dup = 0;
+        cJSON *it;
+        cJSON_ArrayForEach(it, physical) {
+            const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
+            if (nm && strcmp(nm, name) == 0) dup = 1;
+        }
+        cJSON_ArrayForEach(it, virt) {
+            const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
+            if (nm && strcmp(nm, name) == 0) dup = 1;
+        }
+        if (!dup) {
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "name", name);
+            cJSON_AddStringToObject(o, "driver", "");
+            cJSON_AddNumberToObject(o, "vram_mb", 0);
+            cJSON_AddItemToArray(si_gpu_is_virtual(name) ? virt : physical, o);
+        }
+        free(name);
+    }
+    while (cJSON_GetArraySize(virt) > 0)
+        cJSON_AddItemToArray(physical, cJSON_DetachItemFromArray(virt, 0));
+    cJSON_Delete(virt);
+    return physical;
+}
+
+static double si_round1(double x) {
+    return (double)((long long)(x * 10.0 + 0.5)) / 10.0;
+}
+
+static void si_add_disk(cJSON *arr, const char *path) {
+    ULARGE_INTEGER freeb, totalb;
+    if (!path[0] || !GetDiskFreeSpaceExA(path, &freeb, &totalb, NULL)) return;
+    cJSON *it;
+    cJSON_ArrayForEach(it, arr)
+        if (strcmp(pstr(it, "path", ""), path) == 0) return;
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "path", path);
+    cJSON_AddNumberToObject(o, "total_gb", si_round1((double)totalb.QuadPart / 1073741824.0));
+    cJSON_AddNumberToObject(o, "free_gb", si_round1((double)freeb.QuadPart / 1073741824.0));
+    cJSON_AddItemToArray(arr, o);
+}
+
+static cJSON *si_collect(cJSON *params) {
+    cJSON *info = cJSON_CreateObject();
+    {
+        char ts[32];
+        time_t now = time(NULL);
+        struct tm tmv;
+        localtime_s(&tmv, &now);
+        strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%S", &tmv);
+        cJSON_AddStringToObject(info, "collected_at", ts);
+    }
+    {
+        char host[MAX_COMPUTERNAME_LENGTH + 2] = "";
+        DWORD hn = sizeof(host);
+        GetComputerNameA(host, &hn);
+        cJSON_AddStringToObject(info, "hostname", host);
+    }
+    {
+        static const char *nt = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";
+        char product[128], disp[64], build[32], display[256], plat[64];
+        si_reg_str(nt, "ProductName", product, sizeof(product));
+        si_reg_str(nt, "DisplayVersion", disp, sizeof(disp));
+        si_reg_str(nt, "CurrentBuild", build, sizeof(build));
+        if (!build[0]) si_reg_str(nt, "CurrentBuildNumber", build, sizeof(build));
+        DWORD ubr = si_reg_dword(nt, "UBR");
+        display[0] = 0;
+        if (product[0]) snprintf(display, sizeof(display), "%s", product);
+        if (disp[0]) snprintf(display + strlen(display), sizeof(display) - strlen(display),
+                              "%s%s", display[0] ? " " : "", disp);
+        if (build[0]) {
+            snprintf(display + strlen(display), sizeof(display) - strlen(display),
+                     "%s%s", display[0] ? " " : "", build);
+            if (ubr) snprintf(display + strlen(display), sizeof(display) - strlen(display),
+                              ".%lu", (unsigned long)ubr);
+        }
+        if (!display[0]) snprintf(display, sizeof(display), "Windows");
+        snprintf(plat, sizeof(plat), "Windows-%s", build[0] ? build : "?");
+        const char *machine = getenv("PROCESSOR_ARCHITECTURE");
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", pymcl_os_name());
+        cJSON_AddStringToObject(o, "platform", plat);
+        cJSON_AddStringToObject(o, "system", "Windows");
+        cJSON_AddStringToObject(o, "release", disp);
+        cJSON_AddStringToObject(o, "version", build);
+        cJSON_AddStringToObject(o, "display", display);
+        cJSON_AddStringToObject(o, "arch", pymcl_arch());
+        cJSON_AddStringToObject(o, "machine", machine ? machine : "");
+        cJSON_AddItemToObject(info, "os", o);
+    }
+    {
+        char name[256];
+        si_reg_str("HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0",
+                   "ProcessorNameString", name, sizeof(name));
+        si_collapse_spaces(name);
+        SYSTEM_INFO si;
+        GetSystemInfo(&si);
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", name);
+        cJSON_AddNumberToObject(o, "cores_logical", (double)si.dwNumberOfProcessors);
+        cJSON_AddNumberToObject(o, "cores_physical", si_physical_cores());
+        cJSON_AddItemToObject(info, "cpu", o);
+    }
+    {
+        MEMORYSTATUSEX ms;
+        ms.dwLength = sizeof(ms);
+        cJSON *o = cJSON_CreateObject();
+        if (GlobalMemoryStatusEx(&ms)) {
+            cJSON_AddNumberToObject(o, "total_mb", (double)(ms.ullTotalPhys / (1024 * 1024)));
+            cJSON_AddNumberToObject(o, "avail_mb", (double)(ms.ullAvailPhys / (1024 * 1024)));
+            cJSON_AddNumberToObject(o, "load_percent", (double)ms.dwMemoryLoad);
+            cJSON_AddNumberToObject(o, "total_bytes", (double)ms.ullTotalPhys);
+            cJSON_AddNumberToObject(o, "avail_bytes", (double)ms.ullAvailPhys);
+        } else {
+            cJSON_AddNumberToObject(o, "total_mb", 0);
+            cJSON_AddNumberToObject(o, "avail_mb", 0);
+            cJSON_AddNumberToObject(o, "load_percent", 0);
+            cJSON_AddNumberToObject(o, "total_bytes", 0);
+            cJSON_AddNumberToObject(o, "avail_bytes", 0);
+        }
+        cJSON_AddItemToObject(info, "memory", o);
+    }
+    cJSON_AddItemToObject(info, "gpus", si_gpus());
+    {
+        cJSON *disks = cJSON_CreateArray();
+        char anchor[4] = "";
+        if (g_root[0] && g_root[1] == ':') {
+            anchor[0] = g_root[0]; anchor[1] = ':'; anchor[2] = '\\'; anchor[3] = 0;
+        }
+        si_add_disk(disks, anchor);
+        si_add_disk(disks, "C:\\");
+        cJSON_AddItemToObject(info, "disks", disks);
+    }
+    {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "width", GetSystemMetrics(SM_CXSCREEN));
+        cJSON_AddNumberToObject(o, "height", GetSystemMetrics(SM_CYSCREEN));
+        int screens = GetSystemMetrics(SM_CMONITORS);
+        cJSON_AddNumberToObject(o, "screens", screens > 0 ? screens : 1);
+        cJSON_AddItemToObject(info, "display", o);
+    }
+    {
+        int scan = cJSON_IsTrue(cJSON_GetObjectItem(params, "scan_system_java"));
+        cJSON *src = scan ? java_all() : java_list_installed();
+        cJSON *rows = cJSON_CreateArray();
+        cJSON *j;
+        int n = 0;
+        cJSON_ArrayForEach(j, src) {
+            if (n++ >= 16) break;
+            cJSON *row = cJSON_CreateObject();
+            cJSON_AddStringToObject(row, "name",
+                                    cJSON_GetStringValue(cJSON_GetObjectItem(j, "name")) ?: "");
+            cJSON *maj = cJSON_GetObjectItem(j, "major");
+            cJSON_AddItemToObject(row, "major", maj ? cJSON_Duplicate(maj, 1) : cJSON_CreateNull());
+            const char *exe = cJSON_GetStringValue(cJSON_GetObjectItem(j, "exe"));
+            if (!exe) exe = cJSON_GetStringValue(cJSON_GetObjectItem(j, "path"));
+            cJSON_AddStringToObject(row, "path", exe ?: "");
+            cJSON_AddItemToArray(rows, row);
+        }
+        cJSON_Delete(src);
+        cJSON_AddItemToObject(info, "java", rows);
+    }
+    {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", "PyMCL");
+        cJSON_AddStringToObject(o, "version", PYMCL_APP_VERSION);
+        cJSON_AddBoolToObject(o, "frozen", 1);
+        cJSON_AddStringToObject(o, "python", "");
+        cJSON_AddStringToObject(o, "root", g_root);
+        cJSON_AddNumberToObject(o, "memory_mb", config_int("memory_mb", 0));
+        cJSON_AddNumberToObject(o, "download_threads", config_int("download_threads", 0));
+        cJSON_AddStringToObject(o, "download_source", config_str("download_source", "auto"));
+        cJSON_AddStringToObject(o, "community_source", config_str("community_source", "auto"));
+        cJSON_AddItemToObject(info, "launcher", o);
+    }
+    {
+        cJSON *names = NULL;
+        instance_list(&names);
+        cJSON *rows = cJSON_CreateArray();
+        cJSON *nm;
+        int n = 0;
+        cJSON_ArrayForEach(nm, names) {
+            const char *name = cJSON_GetStringValue(nm);
+            if (!name || n++ >= 24) continue;
+            cJSON *row = cJSON_CreateObject();
+            cJSON_AddStringToObject(row, "name", name);
+            cJSON *vers = NULL;
+            instance_installed_ids(name, &vers);
+            while (cJSON_GetArraySize(vers) > 16)
+                cJSON_DeleteItemFromArray(vers, 16);
+            cJSON_AddItemToObject(row, "versions", vers);
+            cJSON *mods = list_instance_files(name, "mods");
+            cJSON_AddNumberToObject(row, "mod_count", cJSON_GetArraySize(mods));
+            cJSON_Delete(mods);
+            char jp[PYMCL_PATH];
+            instance_java_pref(name, jp, sizeof(jp));
+            cJSON_AddStringToObject(row, "java", jp);
+            cJSON_AddItemToArray(rows, row);
+        }
+        cJSON_Delete(names);
+        cJSON_AddItemToObject(info, "instances", rows);
+    }
+    {
+        /* summarize()：display · cpu · ramGB · gpu0，空段跳过 */
+        char summary[512] = "";
+        const char *parts[4];
+        char ram[16] = "";
+        cJSON *osd = cJSON_GetObjectItem(info, "os");
+        cJSON *cpu = cJSON_GetObjectItem(info, "cpu");
+        cJSON *mem = cJSON_GetObjectItem(info, "memory");
+        cJSON *gpus = cJSON_GetObjectItem(info, "gpus");
+        double total_mb = cJSON_GetObjectItem(mem, "total_mb")
+            ? cJSON_GetObjectItem(mem, "total_mb")->valuedouble : 0;
+        if (total_mb > 0)
+            snprintf(ram, sizeof(ram), "%dGB", (int)(total_mb / 1024.0 + 0.5));
+        cJSON *gpu0 = cJSON_GetArrayItem(gpus, 0);
+        parts[0] = pstr(osd, "display", "");
+        parts[1] = pstr(cpu, "name", "");
+        parts[2] = ram;
+        parts[3] = gpu0 ? pstr(gpu0, "name", "") : "";
+        for (int i = 0; i < 4; i++) {
+            if (!parts[i][0]) continue;
+            snprintf(summary + strlen(summary), sizeof(summary) - strlen(summary),
+                     "%s%s", summary[0] ? " · " : "", parts[i]);
+        }
+        cJSON_AddStringToObject(info, "summary", summary);
+    }
+    return info;
+}
+
+/* 对齐 mclauncher/sysinfo.get_smart_recommendation 的推荐值算法 */
+static cJSON *si_recommendation(void) {
+    cJSON *rec = cJSON_CreateObject();
+    int memory_mb = 4096, cpu_count = 4;
+    double total_gb = 8.0;
+    MEMORYSTATUSEX ms;
+    ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms) && ms.ullTotalPhys) {
+        total_gb = (double)ms.ullTotalPhys / (1024.0 * 1024.0 * 1024.0);
+        if (total_gb >= 32) memory_mb = 12288;
+        else if (total_gb >= 16) memory_mb = 8192;
+        else if (total_gb >= 8) memory_mb = 4096;
+        else memory_mb = 2048;
+        int safe = (int)(total_gb * 0.75 * 1024);
+        if (memory_mb > safe) memory_mb = safe > 1024 ? safe : 1024;
+    }
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    if (si.dwNumberOfProcessors > 0) cpu_count = (int)si.dwNumberOfProcessors;
+    else {
+        int phys = si_physical_cores();
+        if (phys > 0) cpu_count = phys;
+    }
+    cJSON_AddNumberToObject(rec, "memory_mb", memory_mb);
+    cJSON_AddNumberToObject(rec, "java_major", 17);
+    cJSON_AddNumberToObject(rec, "window_width", 854);
+    cJSON_AddNumberToObject(rec, "window_height", 480);
+    cJSON_AddStringToObject(rec, "gc_preset", "auto");
+    cJSON_AddNumberToObject(rec, "cpu_count", cpu_count);
+    cJSON_AddNumberToObject(rec, "total_ram_gb", si_round1(total_gb));
+    return rec;
+}
+
 cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     if (!method) return NULL;
 
@@ -762,6 +1107,20 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         cJSON_AddBoolToObject(o, "ok", 0);
         cJSON_AddStringToObject(o, "message", "需要 Python 桥完成此修复动作");
         return o;
+    }
+
+    /* ---- sysinfo（python 优先拿 WMI 显卡/驱动细节，纯 C 时用 Win32 兜底） ----
+     * EziApp 工具页的「查看系统信息 / 查看推荐配置」按钮以前在纯 C 桥上
+     * 直接报 unknown method，两个按钮一点就错。 */
+    if (strcmp(method, "collect_sysinfo") == 0) {
+        cJSON *r = py_rpc_call(method, params);
+        if (r) return r;
+        return si_collect(params);
+    }
+    if (strcmp(method, "get_smart_recommendation") == 0) {
+        cJSON *r = py_rpc_call(method, params);
+        if (r) return r;
+        return si_recommendation();
     }
 
     /* ---- AI 流式：常驻子进程转发事件（一次性 py_rpc 会立刻杀死流式线程） ---- */
