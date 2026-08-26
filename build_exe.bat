@@ -96,5 +96,8 @@ echo   Build log: %BUILD_LOG%
 echo   Run with:  dist\PyMCL.exe
 echo ============================================
 echo.
+if /I "%CI%"=="true" exit /b 0
+if /I "%~1"=="--nopause" exit /b 0
+if not "%NOPAUSE%"=="" exit /b 0
 pause
 exit /b 0
