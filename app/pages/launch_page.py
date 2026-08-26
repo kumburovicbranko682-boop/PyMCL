@@ -4,7 +4,7 @@
 from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtWidgets import QTextBrowser, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, InfoBar, InfoBarPosition, StrongBodyLabel,
+    CaptionLabel, FluentIcon as FIF, InfoBar, InfoBarPosition, StrongBodyLabel,
 )
 
 from mclauncher.config import CONFIG
@@ -349,8 +349,19 @@ class LaunchPage(QWidget):
         self._sync_banner()
 
     def _sync_banner(self):
-        version = self.version_box.currentText() or "—"
+        version = self.version_box.currentText()
         instance = self.instance_box.currentText() or "default"
+        if not version:
+            # 空状态说实话：没版本时横幅不再写「点击启动游戏进入世界」，
+            # 按钮也换成「安装游戏」，点了直接送到下载页（见 _on_launch）。
+            self.banner.set_info(
+                tr("还没有安装游戏"),
+                tr("点「安装游戏」挑一个 Minecraft 版本，装好即可开玩"))
+            self.launch_btn.setText(tr("安装游戏"))
+            self.launch_btn.setIcon(FIF.DOWNLOAD)
+            return
+        self.launch_btn.setText(tr("启动游戏"))
+        self.launch_btn.setIcon(FIF.PLAY)
         pack_name = ""
         pack_ver = ""
         pack_mc = ""
@@ -372,6 +383,15 @@ class LaunchPage(QWidget):
         self._flush_launch_defaults()
         instance = self.instance_box.currentText() or "default"
         version = self.version_box.currentText()
+        if not version:
+            # 没版本时这颗按钮显示的是「安装游戏」：直接送到下载页，
+            # 不再弹「未选择版本」模态框让人自己找「下载 → 原版游戏」。
+            self.nav_to("version")
+            InfoBar.info(
+                tr("先安装一个版本"),
+                tr("挑一个版本点「安装」；勾着「完成后启动」的话装好会自动进入游戏"),
+                parent=self.window(), position=InfoBarPosition.TOP, duration=6000)
+            return
         memory_mb = self.memory_slider.value()
         java = self._selected_java()
         try:
