@@ -59,6 +59,31 @@ DEFAULTS = {
 FULLSCREEN_MODES = ("maximize", "fullscreen")
 
 
+def from_global() -> dict:
+    """把全局设置折算成一份「版本设置」值（HMCL「复制全局游戏设置」同款）。
+
+    只覆盖有全局对应项的键；gpu 的全局 auto 没有版本级等价选项，折算成
+    ""（跟随全局），gc / renderer 的 auto 是版本级合法取值，原样复制。
+    """
+    gpu = str(CONFIG.get("gpu_mode") or "").strip().lower()
+    return {
+        "isolation": str(CONFIG.get("default_isolation") or ISOLATION_NONE),
+        "memory_mb": int(CONFIG.get("memory_mb") or 0) or None,
+        "java": str(CONFIG.get("default_java") or "").strip() or DEFAULTS["java"],
+        "jvm_args": str(CONFIG.get("default_jvm_args") or "").strip(),
+        "process_priority": str(CONFIG.get("default_priority") or "normal"),
+        "gc": str(CONFIG.get("gc_preset") or "auto"),
+        "gpu": "" if gpu in ("", "auto") else gpu,
+        "renderer": str(CONFIG.get("renderer") or "auto"),
+        "show_log": "on" if CONFIG.get("show_log_window") else "off",
+        "window_mode": ("maximize" if str(CONFIG.get("window_mode") or "")
+                        in FULLSCREEN_MODES else "window"),
+        "window_width": int(CONFIG.get("width") or 0) or None,
+        "window_height": int(CONFIG.get("height") or 0) or None,
+        "offline_skin": str(CONFIG.get("offline_skin") or "default"),
+    }
+
+
 def _file(instance, version_id) -> Path:
     return instance.versions_dir() / version_id / FILE_NAME
 

@@ -1318,5 +1318,7 @@
   "种子地图": "Seed Map",
   "在浏览器打开 Chunk Base 种子地图（自动带上种子与游戏版本）": "Open the Chunk Base seed map in your browser (seed and game version pre-filled)",
   "无法打开种子地图": "Could not open seed map",
-  "存档不存在：{0}": "World not found: {0}"
+  "存档不存在：{0}": "World not found: {0}",
+  "复制全局游戏设置": "Copy global game settings",
+  "把设置页的全局默认值（内存 / Java / JVM / 窗口等）填进本页，保存后生效": "Fill this page with the global defaults from Settings (memory / Java / JVM / window, etc.); takes effect after saving"
 }

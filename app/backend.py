@@ -1432,6 +1432,11 @@ class BackendAPI(QObject):
         from mclauncher import version_settings as vs
         return vs.load(self._instance(instance), version)
 
+    def global_version_defaults(self) -> dict:
+        """全局设置折算成版本设置值（HMCL「复制全局游戏设置」同款）。"""
+        from mclauncher import version_settings as vs
+        return vs.from_global()
+
     def save_version_settings(self, instance: str, version: str, data: dict) -> dict:
         from mclauncher import version_settings as vs
         out = vs.save(self._instance(instance), version, data or {})

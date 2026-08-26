@@ -22,6 +22,12 @@ class VersionSetupDialog(MessageBoxBase):
         hint = BodyLabel(tr("这些选项只作用于当前版本，对齐 PCL 的「版本设置」。"), self)
         hint.setWordWrap(True)
         self.viewLayout.addWidget(hint)
+        from qfluentwidgets import PushButton
+        self.copy_global_btn = PushButton(tr("复制全局游戏设置"))
+        self.copy_global_btn.setToolTip(
+            tr("把设置页的全局默认值（内存 / Java / JVM / 窗口等）填进本页，保存后生效"))
+        self.copy_global_btn.clicked.connect(self._copy_global)
+        self.viewLayout.addWidget(self.copy_global_btn)
 
         data = backend.get_version_settings(instance, version)
         form_host = QWidget(self)
@@ -194,6 +200,41 @@ class VersionSetupDialog(MessageBoxBase):
         self.widget.setMinimumWidth(540)
         # 对话框里保持实底，不透出主窗背景图
         paint_theme_surfaces(form_host, allow_transparent=False)
+
+    def _copy_global(self):
+        """HMCL 3.6.12「复制全局游戏设置」：全局默认值填进各控件，保存才落盘。"""
+        g = self.backend.global_version_defaults() or {}
+        self.iso.setCurrentText(
+            ISOLATION_LABELS.get(g.get("isolation") or "none", ISOLATION_LABELS["none"]))
+        self.memory.setText(str(g.get("memory_mb") or ""))
+        java = g.get("java") or tr("自动选择")
+        labels = [self.java.itemText(i) for i in range(self.java.count())]
+        picked = ""
+        for o in self._java_opts:
+            if o.get("value") == java or o.get("label") == java:
+                picked = o["label"]
+                break
+        if picked:
+            self.java.setCurrentText(picked)
+        elif java in labels:
+            self.java.setCurrentText(java)
+        else:
+            self.java.addItem(java)
+            self.java.setCurrentText(java)
+        self.jvm.setPlainText(g.get("jvm_args") or "")
+        self.gc.setCurrentText(GC_LABELS.get(g.get("gc") or "", tr("跟随全局")))
+        self.gpu.setCurrentText(self._gpu_labels.get(g.get("gpu") or "", tr("跟随全局")))
+        self.renderer.setCurrentText(
+            self._rnd_labels.get(g.get("renderer") or "", tr("跟随全局")))
+        self.show_log.setCurrentText(
+            self._log_labels.get(g.get("show_log") or "", tr("跟随全局")))
+        self.win_mode.setCurrentText(
+            tr("全屏") if g.get("window_mode") in FULLSCREEN_MODES else tr("窗口"))
+        self.win_w.setText(str(g.get("window_width") or ""))
+        self.win_h.setText(str(g.get("window_height") or ""))
+        skin_map = {"steve": "Steve", "alex": "Alex"}
+        self.skin.setCurrentText(skin_map.get(g.get("offline_skin") or "default", tr("默认")))
+        self.priority.setCurrentText(g.get("process_priority") or "normal")
 
     def _fill_java(self, opts):
         self._java_opts = opts or []
