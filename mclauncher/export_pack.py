@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-"""整合包导出：.mrpack（Modrinth）与 CurseForge 格式 zip（manifest.json）。
+"""整合包导出：.mrpack（Modrinth）/ CurseForge zip / MultiMC（Prism）zip。
 
-能解析到对应平台的模组走 files 清单，其余文件进 overrides。"""
+mrpack 与 CF 格式：能解析到对应平台的模组走 files 清单，其余文件进
+overrides。MultiMC 格式没有下载清单，全部文件原样打进 .minecraft/。"""
 from __future__ import annotations
 
 import json
@@ -172,4 +173,81 @@ def export_cf_zip(instance: Instance, dest: str | Path, dm: DownloadManager | No
             zf.write(path, "overrides/" + rel)
     if on_note:
         on_note("导出完成", 1, 1)
+    return str(dest)
+
+
+# MultiMC / Prism 组件 uid（mmc-pack.json 的 components[].uid）
+_MMC_LOADER_UIDS = {
+    "fabric": "net.fabricmc.fabric-loader",
+    "quilt": "org.quiltmc.quilt-loader",
+    "forge": "net.minecraftforge",
+    "neoforge": "net.neoforged",
+}
+
+
+def _mmc_components(meta: dict) -> list[dict]:
+    comps: list[dict] = []
+    mc = meta.get("mc_version") or ""
+    if mc:
+        comps.append({"uid": "net.minecraft", "version": mc, "important": True})
+    loader = str(meta.get("loader") or "").lower()
+    uid = _MMC_LOADER_UIDS.get(loader)
+    if uid:
+        # Fabric / Quilt 的 loader 组件依赖 intermediary 映射（版本同 MC），
+        # Prism 自己导出时也会写这一条
+        if loader in ("fabric", "quilt") and mc:
+            comps.append({"uid": "net.fabricmc.intermediary", "version": mc})
+        entry = {"uid": uid}
+        if meta.get("loader_version"):
+            entry["version"] = str(meta["loader_version"])
+        comps.append(entry)
+    return comps
+
+
+def export_mmc_zip(instance: Instance, dest: str | Path, on_note=None) -> str:
+    """导出 MultiMC / Prism 格式实例 zip（HMCL 同款第三种导出格式）。
+
+    结构：instance.cfg + mmc-pack.json + .minecraft/<所有本地文件>。
+    该格式没有在线下载清单，mods 里的 jar 原样打包，导入方开箱即玩。
+    """
+    inst = instance
+    dest = Path(dest)
+    utils.ensure_dir(dest.parent)
+    meta = _pack_meta(inst)
+
+    files: list[tuple[str, Path]] = []
+    mods_dir = inst.path / "mods"
+    if mods_dir.is_dir():
+        for p in sorted(mods_dir.iterdir()):
+            if p.is_file() and p.name.lower().endswith((".jar", ".jar.disabled", ".litemod")):
+                files.append(("mods/" + p.name, p))
+    files += _collect_overrides(inst)
+    for extra_name in ("options.txt", "servers.dat"):
+        p = inst.path / extra_name
+        if p.is_file():
+            files.append((extra_name, p))
+
+    cfg = "\n".join([
+        "[General]",
+        "ConfigVersion=1.2",
+        "InstanceType=OneSix",
+        "iconKey=default",
+        f"name={meta['name']}",
+        f"notes=由 PyMCL 从实例 {inst.name} 导出",
+        "",
+    ])
+    pack = {
+        "formatVersion": 1,
+        "components": _mmc_components(meta),
+    }
+    total = len(files) + 1
+    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("instance.cfg", cfg)
+        zf.writestr("mmc-pack.json", json.dumps(pack, ensure_ascii=False, indent=2))
+        for i, (rel, path) in enumerate(files):
+            if on_note:
+                on_note(f"打包 {rel}", i, total)
+            zf.write(path, ".minecraft/" + rel)
+    if on_note:
+        on_note("导出完成", total, total)
     return str(dest)

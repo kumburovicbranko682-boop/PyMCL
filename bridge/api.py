@@ -2271,13 +2271,18 @@ class BackendAPI:
         return repair(installer, version)
 
     def _export_pack_impl(self, progress, log, instance, dest, fmt="mrpack"):
-        from mclauncher.export_pack import export_cf_zip, export_mrpack
+        from mclauncher.export_pack import export_cf_zip, export_mmc_zip, export_mrpack
         inst = self._instance(instance)
         dm = self._dm(progress, log)
-        if str(fmt or "mrpack").lower() in ("curseforge", "cf", "zip"):
+        kind = str(fmt or "mrpack").lower()
+        if kind in ("curseforge", "cf", "zip"):
             if not dest:
                 dest = str(utils.ROOT / "exports" / f"{inst.name}-curseforge.zip")
             return export_cf_zip(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))
+        if kind in ("multimc", "mmc", "prism"):
+            if not dest:
+                dest = str(utils.ROOT / "exports" / f"{inst.name}-multimc.zip")
+            return export_mmc_zip(inst, dest, on_note=lambda m, a, b: progress(a, b, m))
         if not dest:
             dest = str(utils.ROOT / "exports" / f"{inst.name}.mrpack")
         return export_mrpack(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))

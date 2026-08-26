@@ -259,12 +259,17 @@ class InstancePage(QWidget):
             failed(e)
 
     def export_pack(self, name: str):
-        items = [tr("Modrinth 整合包 (.mrpack)"), tr("CurseForge 整合包 (.zip)")]
+        items = [tr("Modrinth 整合包 (.mrpack)"), tr("CurseForge 整合包 (.zip)"),
+                 tr("MultiMC / Prism 实例 (.zip)")]
         dlg = ComboDialog(tr("导出整合包"), tr("选择导出格式"), items=items,
                           current=items[0], parent=self.window())
         if not dlg.exec():
             return
-        fmt = "curseforge" if dlg.value() == items[1] else "mrpack"
+        fmt = "mrpack"
+        if dlg.value() == items[1]:
+            fmt = "curseforge"
+        elif dlg.value() == items[2]:
+            fmt = "multimc"
         self.backend.export_modpack(name, fmt=fmt)
 
     def pick_java(self, name: str):
