@@ -242,7 +242,7 @@ class ModManagerPage(QWidget):
                 self.list_layout.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的模组")))
             else:
                 self.list_layout.addWidget(
-                    EmptyState(FIF.TAG, tr("还没有安装模组，可点右上角「导入 jar」或到「下载」页安装")))
+                    EmptyState(FIF.TAG, tr("还没有安装模组，可点右上角「导入 jar」或到「下载 → Mod」安装")))
             self.list_layout.addStretch(1)
             return
         for row in rows:
@@ -331,5 +331,5 @@ class ModManagerPage(QWidget):
         clip = QGuiApplication.clipboard().text().strip()
         low = clip.lower()
         if clip and ("modrinth.com" in low or "curseforge.com" in low):
-            InfoBar.info(tr("识别到剪贴板链接"), tr("到「下载」页搜索框粘贴即可安装"), parent=self,
+            InfoBar.info(tr("识别到剪贴板链接"), tr("到「下载 → Mod」搜索框粘贴即可安装"), parent=self,
                          position=InfoBarPosition.TOP, duration=3000)

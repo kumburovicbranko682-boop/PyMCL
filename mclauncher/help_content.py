@@ -28,7 +28,7 @@ ARTICLES: list[dict] = [
         "id": "mods",
         "title": "模组 / 整合包安装",
         "body": (
-            "到「下载」页搜索 Modrinth / CurseForge（国内走镜像）。\n"
+            "到「下载 → Mod」或「下载 → 整合包」搜索（Modrinth / CurseForge，国内走镜像）。\n"
             "原版版本不会加载 mods 文件夹里的 jar，需要先装 Fabric / Forge / Quilt / NeoForge。\n"
             "不要把 .jar 解压成文件夹，否则会预检失败。"
         ),

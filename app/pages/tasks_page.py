@@ -297,7 +297,7 @@ class TasksPage(QWidget):
         scroll.setWidget(host)
         root.addWidget(scroll, 1)
 
-        self.empty = EmptyState(FIF.DOWNLOAD, tr("暂无任务 —— 去下载板块里的版本 / 整合包 / 模组 / 光影 / 资源包 / Java 发起"))
+        self.empty = EmptyState(FIF.DOWNLOAD, tr("暂无任务 —— 到「下载」里的 原版游戏 / Mod / 整合包 / 光影包 / 资源包 / Java 发起安装"))
         self.list_layout.addWidget(self.empty)
         self.list_layout.addStretch(1)
 
