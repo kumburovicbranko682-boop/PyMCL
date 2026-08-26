@@ -212,6 +212,7 @@ class LaunchPage(QWidget):
         while self.news_host.count():
             item = self.news_host.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         mode = CONFIG.get("homepage_mode") or "news"
         if mode == "blank":
@@ -252,6 +253,7 @@ class LaunchPage(QWidget):
             while self.news_host.count():
                 item = self.news_host.takeAt(0)
                 if item.widget():
+                    item.widget().hide()
                     item.widget().deleteLater()
             self._fill_news(rows or [])
 
@@ -419,7 +421,7 @@ class LaunchPage(QWidget):
             self.java_box.clear()
             self.java_box.addItems(labels)
             want = self.backend.java_combo_label_for(instance, self._java_opts)
-            self.java_box.setCurrentText(want if want in labels else JAVA_AUTO)
+            self.java_box.setCurrentText(want if want in labels else tr(JAVA_AUTO))
             self.java_box.blockSignals(False)
         finally:
             self._syncing_java = False
@@ -464,10 +466,12 @@ class LaunchPage(QWidget):
                 pack_mc = row.get("mc_version") or ""
                 break
         if pack_name:
-            bits = [b for b in (pack_ver, f"Minecraft {pack_mc}" if pack_mc else "", f"实例 {instance}") if b]
+            bits = [b for b in (pack_ver, f"Minecraft {pack_mc}" if pack_mc else "",
+                                tr("实例 {0}").format(instance)) if b]
             self.banner.set_info(pack_name, " · ".join(bits) or version)
         else:
-            self.banner.set_info(version, f"实例 {instance} · 点击「启动游戏」进入世界")
+            self.banner.set_info(
+                version, tr("实例 {0} · 点击「启动游戏」进入世界").format(instance))
 
     def _on_launch(self):
         from qfluentwidgets import MessageBox
@@ -510,11 +514,13 @@ class LaunchPage(QWidget):
         self.log_edit.clear()
         for w in warns:
             self.log_edit.appendPlainText(
-                f"[预检:warn] {w.get('title')}: {w.get('detail')}")
+                tr("[预检:warn] {0}: {1}").format(w.get('title'), w.get('detail')))
         self.progress.setValue(0)
+        self.progress.setVisible(True)
         self.status_label.setText(tr("准备启动…"))
         self.launch_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
+        self.stop_btn.setVisible(True)
         self._crash_shown = False
         extra = []
         server = self.server_edit.text().strip()
@@ -656,6 +662,8 @@ class LaunchPage(QWidget):
             return
         self.launch_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
+        self.stop_btn.setVisible(False)
+        self.progress.setVisible(False)
         self.status_label.setText(message)
         if success:
             self.progress.setValue(100)

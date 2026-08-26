@@ -5,6 +5,7 @@ from PySide6.QtCore import (
     QAbstractAnimation, QEasingCurve, QParallelAnimationGroup, QPoint,
     QPropertyAnimation, QRect, Qt, QTimer, Signal,
 )
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
     QStackedWidget, QVBoxLayout, QWidget,
@@ -277,6 +278,13 @@ class DownloadCatBar(QFrame):
         btn.setCheckable(True)
         btn.setCursor(Qt.PointingHandCursor)
         btn.setFixedHeight(40)
+        # 选中态加粗（font-weight:700）：拉丁字母加粗后明显变宽，而
+        # sizeHint 按常规字重算，英文下选中项两端会被裁掉；按粗体量宽。
+        # 注意要按样式表里的 14px 量，btn.font() 此刻还是默认字号。
+        bold = QFont(btn.font())
+        bold.setPixelSize(14)
+        bold.setBold(True)
+        btn.setMinimumWidth(QFontMetrics(bold).horizontalAdvance(title) + 36)
         self._style_btn(btn)
         self._group.addButton(btn)
         return btn

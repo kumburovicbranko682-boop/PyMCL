@@ -4,10 +4,12 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFileDialog, QHBoxLayout, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
+)
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
-    LineEdit, MessageBoxBase, PasswordLineEdit, PrimaryPushButton, PushButton,
+    LineEdit, MessageBoxBase, PasswordLineEdit, Pivot, PrimaryPushButton, PushButton,
     SimpleCardWidget, StrongBodyLabel, SubtitleLabel, TransparentPushButton,
 )
 
@@ -240,19 +242,35 @@ class AccountPage(QWidget):
         top.addWidget(list_card, 1)
         root.addLayout(top)
 
-        ms = SimpleCardWidget(self)
-        ms_l = QHBoxLayout(ms)
-        ms_l.setContentsMargins(16, 12, 16, 12)
-        ms_l.addWidget(StrongBodyLabel(tr("微软账号")), 1)
+        # 四种登录方式合并进一张卡：分段切换、一次只展开一种表单。
+        # 以前四张卡同时铺开 6 个输入框 + 4 个主按钮，谁是主路径根本看不出来。
+        add_card = SimpleCardWidget(self)
+        al = QVBoxLayout(add_card)
+        al.setContentsMargins(16, 12, 16, 12)
+        al.setSpacing(10)
+        head = QHBoxLayout()
+        head.addWidget(StrongBodyLabel(tr("添加账号")))
+        head.addStretch(1)
+        self.method_pivot = Pivot()
+        head.addWidget(self.method_pivot)
+        al.addLayout(head)
+        self.method_stack = QStackedWidget()
+        al.addWidget(self.method_stack)
+        root.addWidget(add_card)
+        root.addStretch(1)
+
+        ms_page = QWidget()
+        ms_l = QHBoxLayout(ms_page)
+        ms_l.setContentsMargins(0, 0, 0, 0)
+        ms_l.addWidget(CaptionLabel(tr("官方正版账号，在浏览器 / 设备码里完成登录")), 1)
         btn = PrimaryPushButton(FIF.PEOPLE, tr("设备码 / 浏览器登录"))
         btn.clicked.connect(self._ms)
         ms_l.addWidget(btn)
-        root.addWidget(ms)
 
-        yg = SimpleCardWidget(self)
-        yl = QVBoxLayout(yg)
-        yl.setContentsMargins(16, 12, 16, 12)
-        yl.addWidget(StrongBodyLabel(tr("皮肤站（authlib-injector）")))
+        yg_page = QWidget()
+        yl = QVBoxLayout(yg_page)
+        yl.setContentsMargins(0, 0, 0, 0)
+        yl.setSpacing(8)
         row = QHBoxLayout()
         self.preset = ComboBox()
         self.preset.setFixedWidth(180)
@@ -276,12 +294,11 @@ class AccountPage(QWidget):
         yl.addLayout(row2)
         self.preset.currentTextChanged.connect(self._fill_preset)
         self._fill_preset()
-        root.addWidget(yg)
 
-        n8 = SimpleCardWidget(self)
-        n8l = QVBoxLayout(n8)
-        n8l.setContentsMargins(16, 12, 16, 12)
-        n8l.addWidget(StrongBodyLabel(tr("统一通行证（Nide8）")))
+        n8_page = QWidget()
+        n8l = QVBoxLayout(n8_page)
+        n8l.setContentsMargins(0, 0, 0, 0)
+        n8l.setSpacing(8)
         n8l.addWidget(CaptionLabel(tr("填 32 位服务器 ID，或把含该 ID 的链接贴进来")))
         n8row = QHBoxLayout()
         self.nide8_id = LineEdit()
@@ -299,11 +316,10 @@ class AccountPage(QWidget):
         n8row2.addWidget(self.nide8_pw)
         n8row2.addWidget(self.n8_btn)
         n8l.addLayout(n8row2)
-        root.addWidget(n8)
 
-        off = SimpleCardWidget(self)
-        ol = QHBoxLayout(off)
-        ol.setContentsMargins(16, 12, 16, 12)
+        off_page = QWidget()
+        ol = QHBoxLayout(off_page)
+        ol.setContentsMargins(0, 0, 0, 0)
         self.offline = LineEdit()
         self.offline.setPlaceholderText(tr("离线角色名"))
         self.skin_box = ComboBox()
@@ -311,17 +327,44 @@ class AccountPage(QWidget):
         self.skin_box.setFixedWidth(90)
         off_btn = PushButton(tr("保存离线账号"))
         off_btn.clicked.connect(self._offline)
-        ol.addWidget(StrongBodyLabel(tr("离线")), 0)
         ol.addWidget(self.offline, 1)
         ol.addWidget(self.skin_box)
         ol.addWidget(off_btn)
-        root.addWidget(off)
-        root.addStretch(1)
+
+        self._method_keys = []
+        for key, label, page_w in (
+            ("microsoft", tr("微软"), ms_page),
+            ("authlib", tr("皮肤站"), yg_page),
+            ("nide8", tr("统一通行证"), n8_page),
+            ("offline", tr("离线"), off_page),
+        ):
+            self._method_keys.append(key)
+            self.method_stack.addWidget(page_w)
+            self.method_pivot.addItem(key, label)
+        self.method_pivot.setCurrentItem("microsoft")
+        self.method_pivot.currentItemChanged.connect(self._on_method)
+        self._on_method("microsoft")
 
         backend.finished.connect(self._on_finished)
         backend.login_code.connect(self._on_login_code)
         backend.login_status.connect(self._on_login_status)
         self.reload()
+
+    def _on_method(self, key: str):
+        if key not in self._method_keys:
+            return
+        idx = self._method_keys.index(key)
+        # QStackedWidget 高度按最高的一页算，微软页只有一行按钮，
+        # 下面会多出一截空白；把非当前页的 sizePolicy 设成 Ignored，
+        # 卡片高度始终贴合当前表单
+        for i in range(self.method_stack.count()):
+            w = self.method_stack.widget(i)
+            if i == idx:
+                w.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+            else:
+                w.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.method_stack.setCurrentIndex(idx)
+        self.method_stack.adjustSize()
 
     def _fill_preset(self, _t=""):
         name = self.preset.currentText()
@@ -333,6 +376,7 @@ class AccountPage(QWidget):
         while self.list_box.count():
             item = self.list_box.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         rows = self.backend.get_account_rows()
         if not rows:

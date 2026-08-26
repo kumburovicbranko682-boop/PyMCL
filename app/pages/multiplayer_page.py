@@ -85,11 +85,12 @@ class MultiplayerPage(QWidget):
         fw_hint.setWordWrap(True)
         fw_text.addWidget(fw_hint)
         fw_box.addLayout(fw_text, 1)
+        # 定宽在英文下装不下文字（Open settings 被裁两端），改成最小宽
         self.fw_btn = PrimaryPushButton(tr("允许访问"))
-        self.fw_btn.setFixedWidth(110)
+        self.fw_btn.setMinimumWidth(110)
         self.fw_btn.clicked.connect(self._allow_firewall)
         fw_open = PushButton(tr("打开设置"))
-        fw_open.setFixedWidth(90)
+        fw_open.setMinimumWidth(90)
         fw_open.clicked.connect(self._open_firewall)
         fw_box.addWidget(self.fw_btn, 0, Qt.AlignVCenter)
         fw_box.addWidget(fw_open, 0, Qt.AlignVCenter)
@@ -315,7 +316,7 @@ class MultiplayerPage(QWidget):
 
     def _add_action(self, letter, color, title, desc, text, slot, primary=False):
         btn = PrimaryPushButton(text) if primary else PushButton(text)
-        btn.setFixedWidth(110)
+        btn.setMinimumWidth(110)
         btn.clicked.connect(slot)
         self.actions.addWidget(ActionCard(letter, color, title, desc, btn))
 
@@ -363,17 +364,22 @@ class MultiplayerPage(QWidget):
             "unsupported": "#D95568",
             "missing": "#E8862E",
         }
-        pill_text = info.get("label") or state
+        # label / hint 是 terracotta.py 里的中文原文，展示前过一遍 tr；
+        # 动态错误串 tr 查不到会原样返回，不受影响
+        pill_text = tr(info.get("label") or state)
         if state in ("exception", "fatal"):
             pill_text = tr("加入失败")
         self.state_pill.setText(pill_text)
         self.state_pill.set_color(colors.get(state, "#888888"))
-        status_text = info.get("error") or info.get("label") or ""
+        status_text = tr(info.get("error") or info.get("label") or "")
         if info.get("error_hint"):
-            status_text = (info.get("error") or "") + "\n" + info["error_hint"]
+            status_text = tr(info.get("error") or "") + "\n" + tr(info["error_hint"])
         elif info.get("difficulty_hint"):
-            status_text = (info.get("label") or "") + "\n" + info["difficulty_hint"]
+            status_text = tr(info.get("label") or "") + "\n" + tr(info["difficulty_hint"])
         self.status.setText(status_text)
+        # 状态行只有比角标多说了内容才占一行：无错误/提示时它和角标
+        # 一字不差（「联机内核未下载」×2），纯重复
+        self.status.setVisible(bool(status_text) and status_text != pill_text)
         room = info.get("room") or ""
         url = info.get("url") or ""
         if room or url:
@@ -426,7 +432,7 @@ class MultiplayerPage(QWidget):
             self._add_action("▶", "#4C8BF5", tr("启动联机内核"), tr("内核已安装，点一下即可开始联机。"),
                              tr("启动"), lambda: self._prepare(self), primary=True)
         elif state in ("launching", "unknown", "installing"):
-            self._add_action("…", "#888888", tr("请稍候"), info.get("label") or tr("正在准备联机内核。"), tr("刷新"), self.reload)
+            self._add_action("…", "#888888", tr("请稍候"), tr(info.get("label") or "正在准备联机内核。"), tr("刷新"), self.reload)
         elif state == "waiting":
             self._add_action(tr("房"), "#2E9B6B", tr("我想当房主"),
                              tr("创建房间并生成邀请码，与好友一起畅玩。"),
@@ -444,7 +450,7 @@ class MultiplayerPage(QWidget):
             self._add_action(tr("返"), "#888888", tr("退出"), tr("这将同时彻底关闭房间，其他房客将退出。"), tr("退出"), self._back)
         elif state in ("guest-connecting", "guest-starting"):
             self._add_action(tr("连"), "#4C8BF5", tr("正在加入房间"),
-                             info.get("difficulty_hint") or tr("正在与房主建立连接。"),
+                             tr(info.get("difficulty_hint") or "正在与房主建立连接。"),
                              tr("退出"), self._back)
         elif state == "guest-ok":
             self._add_action(tr("进"), "#2E9B6B", tr("进入世界"),
@@ -453,7 +459,7 @@ class MultiplayerPage(QWidget):
             self._add_action(tr("返"), "#888888", tr("退出"), tr("这不会影响其他房客加入当前房间。"), tr("退出"), self._back)
         elif state in ("exception", "fatal"):
             self._add_action("!", "#D95568", tr("联机失败"),
-                             info.get("error_hint") or info.get("error") or tr("请返回后重试，或检查网络。"),
+                             tr(info.get("error_hint") or info.get("error") or "请返回后重试，或检查网络。"),
                              tr("返回"), self._back)
             self._add_action(tr("直"), "#4C8BF5", tr("朋友是公网就直连"),
                              tr("让他把单人世界对局域网开放，并在路由映射该端口，然后填他的公网 IP:端口。"),
