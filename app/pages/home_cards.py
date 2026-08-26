@@ -382,11 +382,12 @@ class PlaytimeBody(QWidget):
             all_pt = self.page.backend.get_all_playtime() or {}
         except Exception:
             return
-        self.total.setText(tr("总时长") + "：" + self.page.backend.format_playtime(total))
+        from ..widgets import fmt_duration
+        self.total.setText(tr("总时长") + "：" + fmt_duration(total))
         rows = sorted(
             ((name, info.get("total", 0)) for name, info in all_pt.items()),
             key=lambda r: r[1], reverse=True)[:5]
-        self.detail.setText("\n".join(f"{name}  {self.page.backend.format_playtime(sec)}"
+        self.detail.setText("\n".join(f"{name}  {fmt_duration(sec)}"
                                       for name, sec in rows if sec > 0))
 
 

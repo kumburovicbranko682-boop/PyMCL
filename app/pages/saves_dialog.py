@@ -21,7 +21,7 @@ class SavesDialog(MessageBoxBase):
         self.backend = backend
         self.instance = instance
         self.version = version
-        self.viewLayout.addWidget(SubtitleLabel(f"存档 · {instance}", self))
+        self.viewLayout.addWidget(SubtitleLabel(tr("存档 · {0}").format(instance), self))
         self.kind = ComboBox()
         self.kind.addItems([tr("存档"), tr("备份"), tr("截图"), tr("崩溃报告"), tr("日志")])
         self.list = ListWidget()
@@ -150,11 +150,11 @@ class SavesDialog(MessageBoxBase):
         if not name:
             return
         if self.kind.currentText() == tr("备份"):
-            if MessageBox(tr("删除备份"), f"确定删除备份「{name}」？", self).exec():
+            if MessageBox(tr("删除备份"), tr("确定删除备份「{0}」？").format(name), self).exec():
                 self.backend.delete_save_backup(self.instance, name, self.version)
                 self.reload()
             return
-        box = MessageBox(tr("删除存档"), f"确定删除「{name}」？", self)
+        box = MessageBox(tr("删除存档"), tr("确定删除「{0}」？").format(name), self)
         if box.exec():
             self.backend.delete_save(self.instance, name, self.version)
             self.reload()
@@ -169,7 +169,7 @@ class SavesDialog(MessageBoxBase):
         except Exception as e:
             MessageBox(tr("备份失败"), str(e), self).exec()
             return
-        MessageBox(tr("已开始备份"), f"「{name}」正在打包，可到下载任务页看进度。", self).exec()
+        MessageBox(tr("已开始备份"), tr("「{0}」正在打包，可到下载任务页看进度。").format(name), self).exec()
 
     def _restore(self):
         name = self._selected_name()
@@ -177,7 +177,7 @@ class SavesDialog(MessageBoxBase):
             return
         box = MessageBox(
             tr("还原备份"),
-            f"从「{name}」还原存档？\n若同名存档已存在，会另存为「原名-还原」，不会覆盖。",
+            tr("从「{0}」还原存档？\n若同名存档已存在，会另存为「原名-还原」，不会覆盖。").format(name),
             self,
         )
         if not box.exec():
@@ -187,7 +187,7 @@ class SavesDialog(MessageBoxBase):
         except Exception as e:
             MessageBox(tr("还原失败"), str(e), self).exec()
             return
-        MessageBox(tr("还原完成"), f"已还原为存档「{out.get('name')}」。", self).exec()
+        MessageBox(tr("还原完成"), tr("已还原为存档「{0}」。").format(out.get('name')), self).exec()
         self.kind.setCurrentText(tr("存档"))
 
     def _export(self):
@@ -202,7 +202,7 @@ class SavesDialog(MessageBoxBase):
         except Exception as e:
             MessageBox(tr("导出失败"), str(e), self).exec()
             return
-        MessageBox(tr("导出完成"), f"已导出到：\n{out}", self).exec()
+        MessageBox(tr("导出完成"), tr("已导出到：\n{0}").format(out), self).exec()
 
     def _datapack(self):
         name = self._selected_name()

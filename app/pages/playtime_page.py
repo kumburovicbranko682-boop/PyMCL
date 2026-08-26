@@ -184,15 +184,9 @@ class PlaytimePage(QWidget):
         self._lay.addWidget(card)
 
     def _fmt(self, seconds: int) -> str:
-        try:
-            return self.backend.format_playtime(seconds)
-        except Exception:
-            s = seconds or 0
-            h = s // 3600
-            m = (s % 3600) // 60
-            if h > 0:
-                return f"{h} 小时 {m} 分钟"
-            return f"{m} 分钟"
+        # 不走 backend.format_playtime：那份在 mclauncher 里写死了中文
+        from ..widgets import fmt_duration
+        return fmt_duration(seconds)
 
     def _on_clear(self):
         from qfluentwidgets import MessageBox

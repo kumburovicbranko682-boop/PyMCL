@@ -12,7 +12,7 @@ from qfluentwidgets import (
 )
 
 from ..pcl_chrome import Theme, chip_qss, ghost_btn_qss, row_qss, _icon
-from ..widgets import EmptyState, IconTile, InputDialog, ThumbnailTile
+from ..widgets import EmptyState, IconTile, InputDialog, ThumbnailTile, fmt_downloads
 from mclauncher.i18n import tr
 
 _HEART = getattr(FIF, "HEART", FIF.TAG)
@@ -24,19 +24,6 @@ except ImportError:
         @staticmethod
         def get(key, default=None):
             return default
-
-
-def fmt_downloads(n) -> str:
-    try:
-        n = int(n or 0)
-    except (TypeError, ValueError):
-        return "—"
-    if n >= 100_000_000:
-        s = f" {n / 100_000_000:.1f}亿"
-        return s.replace(".0", "").strip()
-    if n >= 10_000:
-        return f"{n / 10_000:.0f}万"
-    return str(n) if n else "—"
 
 
 class PclCard(QFrame):

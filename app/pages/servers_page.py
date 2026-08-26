@@ -175,7 +175,7 @@ class ServerPage(QWidget):
         port = int(port_text) if _PORT_RE.match(port_text) else 25565
         try:
             self.backend.add_server(self._instance, name, ip, port)
-            InfoBar.success(tr("已添加"), f"服务器 {name or ip} 已添加", duration=2000, parent=self)
+            InfoBar.success(tr("已添加"), tr("服务器 {0} 已添加").format(name or ip), duration=2000, parent=self)
             self.reload(self._instance)
         except Exception as e:
             InfoBar.error(tr("添加失败"), str(e), duration=3000, parent=self)
@@ -193,14 +193,14 @@ class ServerPage(QWidget):
         try:
             self.backend.update_server(self._instance, index, name=name, ip=ip,
                                        port=s.get("port", 25565))
-            InfoBar.success(tr("已更新"), f"服务器已更新", duration=2000, parent=self)
+            InfoBar.success(tr("已更新"), tr("服务器已更新"), duration=2000, parent=self)
             self.reload(self._instance)
         except Exception as e:
             InfoBar.error(tr("更新失败"), str(e), duration=3000, parent=self)
 
     def _on_delete(self, index: int):
         s = self._servers[index]
-        box = MessageBox(tr("确认删除"), f"删除服务器 {s.get('name', '?')}？", self)
+        box = MessageBox(tr("确认删除"), tr("删除服务器 {0}？").format(s.get('name', '?')), self)
         if box.exec():
             try:
                 self.backend.delete_server(self._instance, index)
@@ -217,7 +217,7 @@ class ServerPage(QWidget):
             with open(text, "r", encoding="utf-8") as f:
                 data = f.read()
             n = self.backend.import_servers(self._instance, data)
-            InfoBar.success(tr("导入完成"), f"已导入 {n} 个服务器", duration=2000, parent=self)
+            InfoBar.success(tr("导入完成"), tr("已导入 {0} 个服务器").format(n), duration=2000, parent=self)
             self.reload(self._instance)
         except Exception as e:
             InfoBar.error(tr("导入失败"), str(e), duration=3000, parent=self)
@@ -234,6 +234,6 @@ class ServerPage(QWidget):
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
-            InfoBar.success(tr("已导出"), f"已保存到 {path}", duration=2000, parent=self)
+            InfoBar.success(tr("已导出"), tr("已保存到 {0}").format(path), duration=2000, parent=self)
         except Exception as e:
             InfoBar.error(tr("导出失败"), str(e), duration=3000, parent=self)

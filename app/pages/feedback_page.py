@@ -167,7 +167,7 @@ class FeedbackPage(QWidget):
             self._reload_history()
 
         def err(exc):
-            self.spec.setPlainText(f"采集失败：{exc}")
+            self.spec.setPlainText(tr("采集失败：{0}").format(exc))
 
         self.backend.call_async(work, ok, err)
 
@@ -214,7 +214,7 @@ class FeedbackPage(QWidget):
             self.title_edit.setText("")
             self._reload_history()
             fid = (data or {}).get("id") or ""
-            InfoBar.success(tr("已发送"), f"开发者会实时看到这条反馈 {fid}".strip(),
+            InfoBar.success(tr("已发送"), tr("开发者会实时看到这条反馈 {0}").format(fid).strip(),
                             parent=self, position=InfoBarPosition.TOP, duration=3500)
 
         def err(exc):

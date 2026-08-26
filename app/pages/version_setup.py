@@ -18,7 +18,7 @@ class VersionSetupDialog(MessageBoxBase):
         self.instance = instance
         self.version = version
         self._java_opts = []
-        self.viewLayout.addWidget(SubtitleLabel(f"版本设置 · {version}", self))
+        self.viewLayout.addWidget(SubtitleLabel(tr("版本设置 · {0}").format(version), self))
         hint = BodyLabel(tr("这些选项只作用于当前版本，对齐 PCL 的「版本设置」。"), self)
         hint.setWordWrap(True)
         self.viewLayout.addWidget(hint)

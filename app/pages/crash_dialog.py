@@ -192,7 +192,7 @@ def show_launcher_error(parent, kind: str, text: str, log_file: str = ""):
             "title": title,
             "headline": tr("未捕获异常已写入日志"),
             "detail": (text or "")[-8000:],
-            "help": f"完整日志：{log_file}" if log_file else HELP_FOOTER,
+            "help": tr("完整日志：{0}").format(log_file) if log_file else HELP_FOOTER,
             "direct_file": log_file,
             "files": [log_file] if log_file else [],
             "output_tail": text or "",

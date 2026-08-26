@@ -152,6 +152,41 @@ def grid_columns(scroll, page, card_w: int, spacing: int = 12, gutter: int = 8) 
     return max(1, (avail + spacing) // (card_w + spacing))
 
 
+def fmt_downloads(n) -> str:
+    """下载量按当前语言习惯缩写：中文用 万/亿，其它语言用 K/M/B。"""
+    try:
+        n = int(n or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if not n:
+        return "—"
+    from mclauncher.i18n import current_language
+    if current_language().startswith("zh"):
+        if n >= 100_000_000:
+            return f"{n / 100_000_000:.1f}".rstrip("0").rstrip(".") + "亿"
+        if n >= 10_000:
+            return f"{n / 10_000:.0f}万"
+        return str(n)
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}".rstrip("0").rstrip(".") + "B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}".rstrip("0").rstrip(".") + "M"
+    if n >= 10_000:
+        return f"{n / 1_000:.0f}K"
+    return str(n)
+
+
+def fmt_duration(seconds: int) -> str:
+    """时长格式化（UI 层做翻译；mclauncher.playtime 那份只会输出中文）。"""
+    s = max(0, int(seconds or 0))
+    hours, mins, secs = s // 3600, (s % 3600) // 60, s % 60
+    if hours > 0:
+        return tr("{0} 小时 {1} 分钟").format(hours, mins)
+    if mins > 0:
+        return tr("{0} 分钟 {1} 秒").format(mins, secs)
+    return tr("{0} 秒").format(secs)
+
+
 def anchor_grid(grid, col: int, row: int):
     """卡片网格贴左上：让第 col 列 / 第 row 行（都在内容之后）吃掉剩余空间。
 

@@ -267,7 +267,7 @@ class ModManagerPage(QWidget):
     def _delete(self, filename: str):
         inst = self._current_instance()
         ver = self._current_version()
-        box = MessageBox(tr("删除确认"), f"将删除模组文件「{filename}」，不可恢复。", self)
+        box = MessageBox(tr("删除确认"), tr("将删除模组文件「{0}」，不可恢复。").format(filename), self)
         box.yesButton.setText(tr("删除"))
         box.cancelButton.setText(tr("取消"))
         if not box.exec():
