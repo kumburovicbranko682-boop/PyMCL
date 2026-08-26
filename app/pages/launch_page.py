@@ -563,7 +563,9 @@ class LaunchPage(QWidget):
                 if success:
                     self._login_dlg.accept()
                 else:
-                    self._login_dlg.show_status(message)
+                    # 与账号页同款失败呈现：标明「登录失败」、清掉过期代码、
+                    # 禁用已无意义的「打开浏览器」，而不是原样贴一句状态。
+                    self._login_dlg.show_failure(message)
             if success:
                 self.reload()
         if task_id != self._task_id:

@@ -76,9 +76,32 @@ loop = QEventLoop()
 QTimer.singleShot(500, loop.quit)
 loop.exec()
 check(bool(accepted), "success must still auto-close the dialog")
+page._login_dlg = None
 
-app.quit()
+# --- 账号页：关掉设备码框必须取消后台登录任务（与启动页同款） ---
+backend.start_microsoft_login = lambda: "task-3"
+cancelled = []
+backend.cancel_task = lambda tid: cancelled.append(tid)
+QTimer.singleShot(150, lambda: page._login_dlg and page._login_dlg.reject())
+page._ms()
+check(cancelled == ["task-3"],
+      f"dismissing the dialog must cancel the polling task, got {cancelled}")
+
+# --- 启动页的同一个对话框：失败呈现必须与账号页一致 ---
+from app.pages.launch_page import LaunchPage
+lp = LaunchPage(backend)
+lp._login_dlg = DeviceCodeDialog(lp)
+lp._login_task_id = "task-4"
+backend.finished.emit("task-4", False, "设备码已过期")
+app.processEvents()
+hint = lp._login_dlg.hint.text()
+check("登录失败" in hint and "设备码已过期" in hint,
+      f"launch page dialog must mark failures too, got {hint!r}")
+check(not lp._login_dlg.yesButton.isEnabled(),
+      "launch page dialog must disable the dead browser button on failure")
+
 print("SCENARIO-OK")
+os._exit(0)
 """
 
 
@@ -89,7 +112,7 @@ class LoginFailureVisibleTest(unittest.TestCase):
             env["PYMCL_HOME"] = home
             env["QT_QPA_PLATFORM"] = "offscreen"
             proc = subprocess.run(
-                [sys.executable, "-c", _SCENARIO],
+                [sys.executable, "-u", "-c", _SCENARIO],
                 cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                 env=env, capture_output=True, text=True, timeout=180,
             )
