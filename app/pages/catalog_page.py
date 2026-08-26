@@ -511,7 +511,10 @@ class PclCatalogPage(QWidget):
         if token != self._search_token:
             return
         self._clear_list()
-        self.list_layout.addWidget(EmptyState(self.spec["icon"], f"搜索失败: {err}"))
+        # 网络抖一下不该是死胡同：失败态直接给「重试」，别让人去找搜索按钮
+        self.list_layout.addWidget(EmptyState(
+            self.spec["icon"], tr("搜索失败：{err}").format(err=err),
+            action_text=tr("重试"), on_action=self._search))
         self.list_layout.addStretch(1)
 
     def _on_search_ok(self, token, results, type_f):

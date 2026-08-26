@@ -894,6 +894,7 @@
   "重置布局": "Reset layout",
   "重置条件": "Reset conditions",
   "重置默认": "Reset to default",
+  "搜索失败：{err}": "Search failed: {err}",
   "重试": "Retry",
   "问我要下什么、哪报错、模组怎么配…  Enter 发送，Shift+Enter 换行": "Ask what to download, what failed, how to configure mods…  Enter to send, Shift+Enter for newline",
   "防火墙": "Firewall",
