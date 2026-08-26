@@ -125,9 +125,13 @@ class CrashDialog(QDialog):
                           position=InfoBarPosition.TOP, duration=4500)
 
     def _view(self):
+        # open_path 打不开会返回 False（文件被清理、没有关联程序），
+        # 以前这里不看返回值也不接 OSError——点了没反应，人只会觉得按钮坏了。
         path = self.report.get("direct_file") or ""
         if path:
-            open_path(path)
+            if not open_path(path):
+                InfoBar.error(tr("无法打开"), tr("文件不存在或已被清理：{0}").format(path),
+                              parent=self, position=InfoBarPosition.TOP, duration=4500)
             return
         tail = self.report.get("output_tail") or self.report.get("detail") or ""
         if not tail:
@@ -136,18 +140,27 @@ class CrashDialog(QDialog):
         dest = utils.ROOT / tr("游戏崩溃前的输出.txt")
         try:
             dest.write_text(tail, encoding="utf-8")
-            open_path(dest)
-        except OSError:
-            pass
+        except OSError as exc:
+            InfoBar.error(tr("无法打开"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4500)
+            return
+        if not open_path(dest):
+            InfoBar.error(tr("无法打开"), tr("文件不存在或已被清理：{0}").format(dest),
+                          parent=self, position=InfoBarPosition.TOP, duration=4500)
 
     def _export(self):
         if not self.report:
             return
         try:
             path = export_report(self.report)
-            open_path(path)
-        except OSError:
-            pass
+        except OSError as exc:
+            InfoBar.error(tr("导出失败"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4500)
+            return
+        if not open_path(path):
+            # 报告导出成功、只是没能拉起文件管理器：至少告诉人文件在哪
+            InfoBar.success(tr("已导出"), str(path), parent=self,
+                            position=InfoBarPosition.TOP, duration=4500)
 
     def _send(self):
         backend = self.backend or getattr(self.parent(), "backend", None)
