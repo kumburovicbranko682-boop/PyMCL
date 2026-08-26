@@ -458,7 +458,7 @@ class SettingsPage(QWidget):
         row.addWidget(self.test_ai_btn)
         row.addStretch(1)
         root.addLayout(row)
-        root.addWidget(CaptionLabel(f"启动器主目录: {settings.get('root', '')}"))
+        root.addWidget(CaptionLabel(tr("启动器主目录: {0}").format(settings.get("root", ""))))
         root.addStretch(1)
 
         self.save_btn.clicked.connect(self._save)
@@ -748,8 +748,8 @@ class SettingsPage(QWidget):
             info = info or {}
             from mclauncher.utils import format_size
             from qfluentwidgets import MessageBox
-            box_msg = (f"将删除 {info.get('count') or 0} 个未引用库 / 残留 .part / 更新缓存，"
-                       f"约 {format_size(info.get('bytes') or 0)}")
+            box_msg = tr("将删除 {0} 个未引用库 / 残留 .part / 更新缓存，约 {1}").format(
+                info.get("count") or 0, format_size(info.get("bytes") or 0))
             if not MessageBox(tr("清理文件"), box_msg, self).exec():
                 return
             self.clean_btn.setEnabled(False)
@@ -759,7 +759,8 @@ class SettingsPage(QWidget):
         def cleaned(result):
             self.clean_btn.setEnabled(True)
             self.clean_btn.setText(tr("清理"))
-            InfoBar.success(tr("清理完成"), f"删除 {(result or {}).get('removed')} 个文件",
+            InfoBar.success(tr("清理完成"),
+                            tr("删除 {0} 个文件").format((result or {}).get("removed")),
                             parent=self, position=InfoBarPosition.TOP, duration=3000)
 
         def failed(exc):
@@ -880,13 +881,15 @@ class SettingsPage(QWidget):
                              position=InfoBarPosition.TOP, duration=3000)
                 return
             from qfluentwidgets import MessageBox
-            msg = (f"发现官方启动器目录: {found['dir']}\n\n"
-                   f"发现 {len(found['versions'])} 个版本\n\n要导入吗？")
+            msg = (tr("发现官方启动器目录: {0}").format(found["dir"]) + "\n\n"
+                   + tr("发现 {0} 个版本").format(len(found["versions"]))
+                   + "\n\n" + tr("要导入吗？"))
             if not MessageBox(tr("官方启动器迁移"), msg, self).exec():
                 return
             try:
-                task_id = self.backend.migrate_official_launcher()
-                InfoBar.success(tr("迁移中"), f"导入任务已启动: {task_id}", parent=self,
+                # 内部任务 id（task-3 这类）对用户没有意义，指路任务页才有用
+                self.backend.migrate_official_launcher()
+                InfoBar.success(tr("迁移中"), tr("导入已开始，进度见「下载任务」页"), parent=self,
                                 position=InfoBarPosition.TOP, duration=4000)
             except Exception as e:
                 InfoBar.error(tr("迁移失败"), str(e), parent=self,
@@ -911,17 +914,18 @@ class SettingsPage(QWidget):
             rec = rec or {}
             mem = rec.get("memory_mb", 4096)
             from qfluentwidgets import MessageBox
-            msg = (f"你的系统: {rec.get('total_ram_gb', '?')} GB 内存 / "
-                   f"{rec.get('cpu_count', '?')} 核 CPU\n\n"
-                   f"推荐内存: {mem} MB\n\n"
-                   "可以到「性能」设置区调整。")
+            msg = (tr("你的系统: {0} GB 内存 / {1} 核 CPU").format(
+                       rec.get("total_ram_gb", "?"), rec.get("cpu_count", "?"))
+                   + "\n\n" + tr("推荐内存: {0} MB").format(mem)
+                   + "\n\n" + tr("可以到「性能」设置区调整。"))
             box = MessageBox(tr("智能推荐"), msg, self)
             box.yesButton.setText(tr("应用推荐"))
             box.cancelButton.setText(tr("关闭"))
             if box.exec():
                 self.memory_spin.setValue(mem)
-                InfoBar.success(tr("已应用"), f"内存已设为 {mem} MB，保存设置后生效", parent=self,
-                                position=InfoBarPosition.TOP, duration=3000)
+                InfoBar.success(tr("已应用"),
+                                tr("内存已设为 {0} MB，保存设置后生效").format(mem),
+                                parent=self, position=InfoBarPosition.TOP, duration=3000)
 
         def failed(exc):
             self.rec_btn.setEnabled(True)

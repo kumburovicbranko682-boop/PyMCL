@@ -161,6 +161,34 @@ class VisibleStringsEnglishTests(unittest.TestCase):
         self.assertEqual(format_duration(3900), "1 小时 5 分钟")
         i18n.set_language("en")
 
+    def test_settings_dialogs_english(self):
+        """设置页确认框/气泡的动态句子不冒中文，也不再暴露内部任务 id。"""
+        cases = {
+            ("启动器主目录: {0}", "/x"): "/x",
+            ("将删除 {0} 个未引用库 / 残留 .part / 更新缓存，约 {1}", (3, "1.2 MB")): "1.2 MB",
+            ("删除 {0} 个文件", 3): "3",
+            ("发现官方启动器目录: {0}", "/mc"): "/mc",
+            ("发现 {0} 个版本", 2): "2",
+            ("你的系统: {0} GB 内存 / {1} 核 CPU", (16, 8)): "16",
+            ("推荐内存: {0} MB", 4096): "4096",
+            ("内存已设为 {0} MB，保存设置后生效", 4096): "4096",
+        }
+        for (key, arg), must_contain in cases.items():
+            args = arg if isinstance(arg, tuple) else (arg,)
+            text = i18n.tr(key).format(*args)
+            self.assertIsNone(_CJK.search(text),
+                              f"英文界面下 {key!r} 冒中文: {text!r}")
+            self.assertIn(str(must_contain), text)
+        for key in ("要导入吗？", "导入已开始，进度见「下载任务」页",
+                    "可以到「性能」设置区调整。"):
+            self.assertIsNone(_CJK.search(i18n.tr(key)), key)
+
+        # 迁移成功的气泡不许再打内部任务 id
+        src = (Path(__file__).resolve().parent.parent
+               / "app" / "pages" / "settings_page.py").read_text("utf-8")
+        self.assertNotIn("导入任务已启动", src,
+                         "不要把内部任务 id 亮给用户，指路任务页即可")
+
     def test_download_counts_follow_language(self):
         """下载量单位跟随语言：英文用 K/M/B，中文保留 万/亿。"""
         from app.widgets import fmt_downloads

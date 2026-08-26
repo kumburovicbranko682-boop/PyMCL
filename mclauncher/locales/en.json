@@ -1015,5 +1015,16 @@
   "{0} 分钟": "{0} min",
   "采集失败：{0}": "Collection failed: {0}",
   "自定义": "Custom",
-  "完整日志：{0}": "Full log: {0}"
+  "完整日志：{0}": "Full log: {0}",
+  "启动器主目录: {0}": "Launcher home: {0}",
+  "将删除 {0} 个未引用库 / 残留 .part / 更新缓存，约 {1}": "This removes {0} unreferenced libraries / leftover .part files / update caches, about {1}",
+  "删除 {0} 个文件": "Removed {0} files",
+  "发现官方启动器目录: {0}": "Found the official launcher folder: {0}",
+  "发现 {0} 个版本": "Found {0} versions",
+  "要导入吗？": "Import them?",
+  "导入已开始，进度见「下载任务」页": "Import started — watch progress on the Download Tasks page",
+  "你的系统: {0} GB 内存 / {1} 核 CPU": "Your system: {0} GB RAM / {1} CPU cores",
+  "推荐内存: {0} MB": "Recommended memory: {0} MB",
+  "可以到「性能」设置区调整。": "You can adjust it in the Performance settings section.",
+  "内存已设为 {0} MB，保存设置后生效": "Memory set to {0} MB; takes effect after saving settings"
 }
