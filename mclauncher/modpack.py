@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """整合包支持：Modrinth（.mrpack，含在线搜索）、CurseForge（.zip）、
-MultiMC / Prism Launcher 导出的实例包（mmc-pack.json）。"""
+MultiMC / Prism Launcher 导出的实例包（mmc-pack.json）、
+MCBBS 规范整合包（mcbbs.packmeta，HMCL / PCL2 同款格式）。"""
 import json
 import os
 import re
@@ -779,7 +780,7 @@ def _looks_like_mc_dir(root: Path) -> bool:
         names = {p.name.lower() for p in root.iterdir()}
     except OSError:
         return False
-    if "manifest.json" in names or "modrinth.index.json" in names:
+    if names & {"manifest.json", "modrinth.index.json", "mcbbs.packmeta"}:
         return False
     return bool(names & _PLAIN_MC_STRONG)
 
@@ -1197,6 +1198,229 @@ def _install_mmc_pack(dm: DownloadManager, root: Path, instance: Instance, pack_
     return pack_meta
 
 
+# ================================================================ MCBBS
+
+MCBBS_MANIFEST = "mcbbs.packmeta"
+
+# addons 里的主加载器 id -> install_loader 认的名称
+_MCBBS_LOADER_ADDONS = {
+    "forge": "forge",
+    "neoforge": "neoforge",
+    "neoforged": "neoforge",
+    "fabric": "fabric-loader",
+    "fabric-loader": "fabric-loader",
+    "quilt": "quilt-loader",
+    "quilt-loader": "quilt-loader",
+}
+
+
+def _mcbbs_root(tmpdir: Path):
+    """找 MCBBS 整合包根（mcbbs.packmeta 所在目录，可能套一层文件夹）。"""
+    if (tmpdir / MCBBS_MANIFEST).is_file():
+        return tmpdir
+    return _nested_marker_root(tmpdir, MCBBS_MANIFEST)
+
+
+def parse_mcbbs_addons(mf: dict) -> dict:
+    """解析 mcbbs.packmeta 的 addons：MC 版本、主加载器、附加组件。"""
+    mc = ""
+    loader = None
+    loader_version = ""
+    extras = []  # [(id, version)]：optifine / liteloader / 未知组件
+    for addon in (mf or {}).get("addons") or []:
+        if not isinstance(addon, dict):
+            continue
+        aid = str(addon.get("id") or "").strip().lower()
+        ver = str(addon.get("version") or "").strip()
+        if aid == "game":
+            mc = ver
+        elif aid in _MCBBS_LOADER_ADDONS and loader is None:
+            loader = _MCBBS_LOADER_ADDONS[aid]
+            loader_version = ver
+        elif aid:
+            extras.append((aid, ver))
+    return {"mc": mc, "loader": loader, "loader_version": loader_version,
+            "extras": extras}
+
+
+def split_mcbbs_files(mf: dict) -> tuple[list, list]:
+    """files 按类型分流：CurseForge 文件（要下载）与 addFile（随 overrides 落地）。
+
+    规范写 "curse"，HMCL 兼容老包的 "curseFile"，没写 type 但带
+    projectID/fileID 的也按 curse 认。
+    """
+    curse, add = [], []
+    for f in (mf or {}).get("files") or []:
+        if not isinstance(f, dict):
+            continue
+        typ = str(f.get("type") or "").strip().lower()
+        if f.get("projectID") and f.get("fileID") and typ in ("curse", "cursefile", ""):
+            curse.append(f)
+        elif typ == "addfile":
+            add.append(f)
+    return curse, add
+
+
+def _install_mcbbs_extra(installer: Installer, instance: Instance, aid, ver,
+                         mc_version, loader, on_progress=None, force=False):
+    """装 addons 里的附加组件（optifine / liteloader）。
+
+    失败不整包报废（PCL2/HMCL 同款容忍）；返回新版本 id（仅当组件以
+    独立版本形式装成），否则 None。
+    """
+    try:
+        if aid == "optifine":
+            from . import optifine as optifine_mod
+            from .game_install import parse_optifine_token
+            typ, patch = parse_optifine_token(ver)
+            if loader == "forge":
+                _emit(on_progress, f"安装 OptiFine {ver}（作为 Forge Mod 放入 mods/）")
+                optifine_mod.install_as_mod(installer, mc_version,
+                                            instance.path / "mods", typ=typ, patch=patch)
+            elif loader is None:
+                _emit(on_progress, f"安装 OptiFine {ver}（独立版本）")
+                return installer.install_optifine(mc_version, typ=typ, patch=patch, force=force)
+            else:
+                _emit(on_progress, f"OptiFine 与 {loader} 不能共存，已跳过")
+        elif aid == "liteloader":
+            if loader is None:
+                _emit(on_progress, "安装 LiteLoader")
+                return installer.install_liteloader(mc_version, force=force)
+            _emit(on_progress, f"LiteLoader 与 {loader} 同装暂不支持，已跳过")
+        else:
+            label = f"{aid} {ver}".strip()
+            _emit(on_progress, f"组件 {label} 暂不支持自动安装，已跳过")
+    except (InstallError, ModpackError, DownloadError) as e:
+        _emit(on_progress, f"组件 {aid} 安装失败（{e}），已跳过；不影响其余内容")
+    return None
+
+
+def _apply_mcbbs_launch_info(instance: Instance, version_id, info, on_progress=None):
+    """launchInfo（最低内存 / JVM 参数 / 游戏参数）落进版本设置，启动链直接生效。"""
+    if not isinstance(info, dict) or not version_id:
+        return
+    patch = {}
+    try:
+        min_mem = int(info.get("minMemory") or 0)
+    except (TypeError, ValueError):
+        min_mem = 0
+    if min_mem > 0:
+        patch["memory_mb"] = min_mem
+    jvm_args = [str(a).strip() for a in (info.get("javaArgument") or []) if str(a).strip()]
+    if jvm_args:
+        patch["jvm_args"] = " ".join(jvm_args)
+    game_args = [str(a).strip() for a in (info.get("launchArgument") or []) if str(a).strip()]
+    if game_args:
+        patch["game_args"] = " ".join(game_args)
+    if not patch:
+        return
+    from . import version_settings
+    try:
+        version_settings.save(instance, version_id, patch)
+    except OSError as e:
+        utils.log.warning("写入整合包 launchInfo 版本设置失败: %s", e)
+        return
+    parts = []
+    if "memory_mb" in patch:
+        parts.append(f"最低内存 {patch['memory_mb']}MB")
+    if "jvm_args" in patch:
+        parts.append("JVM 参数")
+    if "game_args" in patch:
+        parts.append("游戏参数")
+    _emit(on_progress, f"已按整合包 launchInfo 预设版本设置：{'、'.join(parts)}")
+
+
+def _install_mcbbs_pack(dm: DownloadManager, root: Path, instance: Instance, pack_path,
+                        on_progress=None, cancel=None, force=False, java=None):
+    """安装 MCBBS 规范整合包（mcbbs.packmeta，HMCL / PCL2 同款格式）。
+
+    addons -> 装原版 + 加载器（含 OptiFine / LiteLoader 附加组件）；
+    files 的 curse 条目走 CurseForge 下载、addFile 条目随 overrides/ 落地；
+    launchInfo 折算成版本设置（内存 / JVM / 游戏参数）。
+    """
+    mf = utils.read_json(root / MCBBS_MANIFEST, None)
+    if not isinstance(mf, dict):
+        raise ModpackError("mcbbs.packmeta 不是有效的 JSON 对象")
+    mtype = str(mf.get("manifestType") or "")
+    if mtype and mtype != "minecraftModpack":
+        raise ModpackError(f"mcbbs.packmeta 的 manifestType 不是 minecraftModpack: {mtype}")
+    name = str(mf.get("name") or Path(pack_path).stem)
+    _emit(on_progress, f"识别为 MCBBS 规范整合包「{name}」版本 {mf.get('version', '?')}")
+
+    parsed = parse_mcbbs_addons(mf)
+    if not parsed["mc"]:
+        raise ModpackError("mcbbs.packmeta 的 addons 里没有 game（Minecraft 版本）")
+
+    if instance.path.is_dir():
+        instance.ensure_standard_dirs()
+    else:
+        instance.create()
+    _emit(on_progress, f"安装到实例 {instance.name} ({instance.path})")
+    installer = Installer(instance, dm, on_progress=on_progress or dm.on_progress, cancel=cancel)
+
+    embedded = _copy_embedded_versions(root, instance)
+    if embedded:
+        _emit(on_progress, f"发现整合包自带版本: {', '.join(embedded)}")
+
+    declared = parsed["mc"]
+    mc_version = declared if declared in embedded else (
+        _resolve_pack_minecraft(dm, declared, on_progress) or declared)
+    _emit(on_progress, f"安装 Minecraft {mc_version}")
+    installer.install_version(mc_version, force=force, java=java)
+
+    loader = parsed["loader"]
+    loader_version = parsed["loader_version"]
+    loader_vid = None
+    if loader:
+        _emit(on_progress, f"安装加载器 {loader} {loader_version} (Minecraft {mc_version})")
+        loader_vid = install_loader(installer, loader, loader_version, mc_version, force=force)
+        _emit(on_progress, f"加载器安装完成: {loader_vid}")
+    else:
+        _emit(on_progress, "整合包没有声明 Forge/Fabric 等加载器，按原版安装")
+
+    for aid, ver in parsed["extras"]:
+        extra_vid = _install_mcbbs_extra(installer, instance, aid, ver, mc_version,
+                                         loader, on_progress=on_progress, force=force)
+        loader_vid = extra_vid or loader_vid
+
+    curse_files, add_files = split_mcbbs_files(mf)
+    manual_mods, pack_paths = _download_cf_pack_files(dm, instance, curse_files, on_progress)
+
+    overrides = root / "overrides"
+    if overrides.is_dir():
+        _emit(on_progress, "拷贝 overrides/（mods、config、资源等）")
+        _copy_tree_over(overrides, instance.path)
+        pack_paths.extend(_tree_rel_paths(overrides))
+    for f in add_files:
+        rel = str(f.get("path") or "").replace("\\", "/").strip("/")
+        if rel and rel not in pack_paths:
+            pack_paths.append(rel)
+
+    version_id = loader_vid or mc_version
+    _apply_mcbbs_launch_info(instance, version_id, mf.get("launchInfo"), on_progress)
+
+    pack_meta = {
+        "name": name,
+        "version": str(mf.get("version") or "?"),
+        "mc_version": mc_version,
+        "loader": (f"{loader}-{loader_version}" if loader else "vanilla"),
+        "source": "mcbbs",
+        "instance": instance.name,
+    }
+    if mf.get("author"):
+        pack_meta["author"] = str(mf.get("author"))
+    if mf.get("fileApi"):
+        # 更新源（HMCL 的 McbbsModpackCompletionTask 同款语义），供后续检查更新
+        pack_meta["file_api"] = str(mf.get("fileApi"))
+    if manual_mods:
+        pack_meta["manual_mods"] = manual_mods
+    instance.set_meta("modpack", pack_meta)
+    instance.set_meta("mc_version", version_id)
+    write_pack_files(instance, pack_paths)
+    _emit(on_progress, f"整合包 {name} 安装完成 -> 实例 {instance.name}")
+    return pack_meta
+
+
 # ================================================================ CurseForge
 
 def download_pack_mods_tolerant(dm: DownloadManager, tasks, raw_files, meta,
@@ -1249,6 +1473,46 @@ def download_pack_mods_tolerant(dm: DownloadManager, tasks, raw_files, meta,
     return manual_mods
 
 
+def _download_cf_pack_files(dm: DownloadManager, instance: Instance, raw_files,
+                            on_progress=None):
+    """按 projectID/fileID 批量下载整合包 Mod 到 mods/。
+
+    先批量查元数据，再用 CDN 直链（官网 /download 会被 Cloudflare 403）。
+    返回 (manual_mods, pack_paths)。CurseForge zip 与 MCBBS 包共用。
+    """
+    from .mods import cf_files_by_ids, cf_mod_download_urls
+    raw_files = [f for f in (raw_files or []) if f.get("projectID") and f.get("fileID")]
+    if not raw_files:
+        return [], []
+    meta = {}
+    try:
+        meta = cf_files_by_ids(dm, [f.get("fileID") for f in raw_files])
+    except Exception as e:
+        utils.log.warning("批量查询整合包 Mod 元数据失败，将仅用 CDN 规则: %s", e)
+    tasks = []
+    pack_paths = []
+    for f in raw_files:
+        pid, fid = f.get("projectID"), f.get("fileID")
+        info = meta.get(int(fid), {}) if fid is not None else {}
+        filename = info.get("fileName")
+        download_url = info.get("downloadUrl")
+        dest_name = filename or f"mod-{pid}-{fid}.jar"
+        dest = instance.path / "mods" / dest_name
+        pack_paths.append(f"mods/{dest_name}")
+        sha1 = None
+        for h in info.get("hashes") or []:
+            if h.get("algo") == 1 and h.get("value"):
+                sha1 = h.get("value")
+                break
+        size = info.get("fileLength")
+        urls = cf_mod_download_urls(pid, fid, filename=filename, download_url=download_url)
+        tasks.append((urls, dest, sha1, size))
+    _emit(on_progress, f"开始下载整合包 Mod（{len(tasks)} 个）")
+    manual_mods = download_pack_mods_tolerant(
+        dm, tasks, raw_files, meta, on_progress=on_progress)
+    return manual_mods, pack_paths
+
+
 def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                    on_progress=None, cancel=None, force=False, java=None,
                    origin=None):
@@ -1276,6 +1540,13 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
             utils.safe_extract_zip(pack_path, tmpdir)
         except (zipfile.BadZipFile, ValueError) as e:
             raise ModpackError(f"不是有效的整合包 zip: {e}")
+
+        mcbbs_root = _mcbbs_root(tmpdir)
+        if mcbbs_root is not None:
+            # mcbbs.packmeta 是 manifest.json 的超集（可能同包并存），优先按 MCBBS 装
+            return _install_mcbbs_pack(dm, mcbbs_root, instance, pack_path,
+                                       on_progress=on_progress, cancel=cancel,
+                                       force=force, java=java)
 
         manifest_file = tmpdir / "manifest.json"
         pack_root = tmpdir
@@ -1338,37 +1609,8 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
         _emit(on_progress, f"加载器安装完成: {loader_vid}")
 
         # mods 文件：先批量查元数据，再用 CDN 直链（官网 /download 会被 Cloudflare 403）
-        from .mods import cf_files_by_ids, cf_mod_download_urls
-        raw_files = [f for f in (mf.get("files") or []) if f.get("projectID") and f.get("fileID")]
-        meta = {}
-        if raw_files:
-            try:
-                meta = cf_files_by_ids(dm, [f.get("fileID") for f in raw_files])
-            except Exception as e:
-                utils.log.warning("批量查询整合包 Mod 元数据失败，将仅用 CDN 规则: %s", e)
-        tasks = []
-        pack_paths = []
-        for f in raw_files:
-            pid, fid = f.get("projectID"), f.get("fileID")
-            info = meta.get(int(fid), {}) if fid is not None else {}
-            filename = info.get("fileName")
-            download_url = info.get("downloadUrl")
-            dest_name = filename or f"mod-{pid}-{fid}.jar"
-            dest = instance.path / "mods" / dest_name
-            pack_paths.append(f"mods/{dest_name}")
-            sha1 = None
-            for h in info.get("hashes") or []:
-                if h.get("algo") == 1 and h.get("value"):
-                    sha1 = h.get("value")
-                    break
-            size = info.get("fileLength")
-            urls = cf_mod_download_urls(pid, fid, filename=filename, download_url=download_url)
-            tasks.append((urls, dest, sha1, size))
-        manual_mods = []
-        if tasks:
-            _emit(on_progress, f"开始下载整合包 Mod（{len(tasks)} 个）")
-            manual_mods = download_pack_mods_tolerant(
-                dm, tasks, raw_files, meta, on_progress=on_progress)
+        manual_mods, pack_paths = _download_cf_pack_files(
+            dm, instance, mf.get("files") or [], on_progress)
 
         # overrides
         overrides = mf.get("overrides")
@@ -1444,9 +1686,10 @@ def _install_plain_zip(dm: DownloadManager, tmpdir: Path, instance: Instance, pa
         raise ModpackError(
             "整合包缺少 manifest.json，也不是 .minecraft 目录结构。\n"
             f"zip 顶层内容: {top or '(空)'}\n"
-            "支持四种格式：CurseForge 导出的 zip（内含 manifest.json）、"
+            "支持五种格式：CurseForge 导出的 zip（内含 manifest.json）、"
             "Modrinth 的 .mrpack、MultiMC / Prism Launcher 导出的实例包"
-            "（内含 mmc-pack.json）、直接压缩的 .minecraft 目录（含 mods / versions 等）。"
+            "（内含 mmc-pack.json）、MCBBS 规范整合包（内含 mcbbs.packmeta）、"
+            "直接压缩的 .minecraft 目录（含 mods / versions 等）。"
         )
     rel = root.relative_to(tmpdir)
     where = f"（位于 {rel} 子目录）" if str(rel) != "." else ""

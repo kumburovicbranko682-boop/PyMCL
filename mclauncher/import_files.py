@@ -60,7 +60,8 @@ def _zip_kind(path: Path) -> str:
             # 1) 整合包标记（允许套一层目录）
             for parts, _raw in entries:
                 if len(parts) <= 2 and parts[-1].lower() in (
-                        "modrinth.index.json", "mmc-pack.json", "instance.cfg"):
+                        "modrinth.index.json", "mmc-pack.json", "instance.cfg",
+                        "mcbbs.packmeta"):
                     return "modpack"
             for parts, raw in entries:
                 if len(parts) <= 2 and parts[-1].lower() == "manifest.json":
