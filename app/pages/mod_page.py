@@ -207,6 +207,11 @@ class ModManagerPage(QWidget):
         self._reload_instances()
         self._reload_targets()
 
+    def _goto_mod_download(self):
+        win = self.window()
+        if win is not None and hasattr(win, "switchTo"):
+            win.switchTo("mod")
+
     def reload_list(self):
         inst = self._current_instance()
         ver = self._current_version()
@@ -241,8 +246,11 @@ class ModManagerPage(QWidget):
             if self._entries:
                 self.list_layout.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的模组")))
             else:
-                self.list_layout.addWidget(
-                    EmptyState(FIF.TAG, tr("还没有安装模组，可点右上角「导入 jar」或到「下载」页安装")))
+                self.list_layout.addWidget(EmptyState(
+                    FIF.TAG,
+                    tr("还没有安装模组 —— 可点右上角「导入 jar」，或去「下载 → Mod」搜索安装"),
+                    action_text=tr("去下载 Mod"),
+                    on_action=self._goto_mod_download))
             self.list_layout.addStretch(1)
             return
         for row in rows:
