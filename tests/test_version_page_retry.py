@@ -65,5 +65,34 @@ class VersionPageRetryTests(unittest.TestCase):
         es.deleteLater()
 
 
+class CatalogSearchRetryTests(unittest.TestCase):
+    def test_search_error_offers_retry_that_searches_again(self):
+        backend = BackendAPI(None)
+        calls: list = []
+        backend.call_async = lambda fn, ok, err=None: calls.append(fn)
+
+        from app.pages.catalog_page import ModPage
+
+        page = ModPage(backend, None)
+        _app.processEvents()
+        page._search()
+        base = len(calls)
+        self.assertGreaterEqual(base, 1, "搜索应通过 call_async 发起")
+
+        page._on_search_err(page._search_token, "模拟断网")
+        _app.processEvents()
+        empties = page.findChildren(EmptyState)
+        btn = next((e.action_btn for e in empties if e.action_btn is not None), None)
+        self.assertIsNotNone(btn, "搜索失败空状态必须带重试按钮")
+        self.assertEqual(btn.text(), tr("重试"))
+
+        btn.click()
+        _app.processEvents()
+        self.assertGreater(len(calls), base, "点「重试」应重新发起搜索")
+
+        page.deleteLater()
+        _app.processEvents()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

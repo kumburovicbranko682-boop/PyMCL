@@ -965,5 +965,6 @@
   "每个版本的存档、Mod、设置完全独立，互不影响": "Each version keeps fully separate saves, mods and settings",
   "还没有安装任何版本。请先到「下载 → 原版游戏」安装一个版本。": "No versions installed yet. Install one from Download → Vanilla Game first.",
   "请先选择版本；还没有版本时，到「下载 → 原版游戏」安装": "Select a version first; if none are installed, get one from Download → Vanilla Game",
-  "请先到「下载 → 原版游戏」安装一个版本": "Install a version from Download → Vanilla Game first"
+  "请先到「下载 → 原版游戏」安装一个版本": "Install a version from Download → Vanilla Game first",
+  "搜索失败": "Search failed"
 }
