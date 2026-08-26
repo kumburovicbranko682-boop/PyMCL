@@ -47,7 +47,8 @@ class FeedbackPage(QWidget):
         row1 = QHBoxLayout()
         self._cat_keys = [k for k, _ in CATEGORIES]
         self.cat = ComboBox(form)
-        self.cat.addItems([label for _, label in CATEGORIES])
+        # 分类名是 feedback_defaults 里的中文原文，展示时过 tr
+        self.cat.addItems([tr(label) for _, label in CATEGORIES])
         self.cat.setFixedWidth(160)
         self.contact = LineEdit(form)
         self.contact.setPlaceholderText(tr("联系方式（QQ / 邮箱，可选）"))
@@ -125,7 +126,7 @@ class FeedbackPage(QWidget):
             except Exception:
                 rows = []
         for art in rows:
-            btn = TransparentPushButton(art.get("title") or art.get("id") or "?", self)
+            btn = TransparentPushButton(tr(art.get("title") or art.get("id") or "?"), self)
             btn.setProperty("article_id", art.get("id") or "")
             btn.clicked.connect(lambda _=False, a=art: self._show_help(a))
             # 按钮不铺满整行：直接加进 VBox 会拉满宽、文字居中，
@@ -145,7 +146,7 @@ class FeedbackPage(QWidget):
                 full = getter(aid) or {}
                 body = full.get("body") or ""
                 art = {**art, **full}
-        MessageBox(art.get("title") or tr("帮助"), body or tr("暂无内容"), self).exec()
+        MessageBox(tr(art.get("title") or "帮助"), tr(body or "暂无内容"), self).exec()
 
     def prefill(self, category="bug", title="", body=""):
         if category in self._cat_keys:
@@ -178,7 +179,7 @@ class FeedbackPage(QWidget):
             return
         lines = []
         for row in rows[:8]:
-            label = fb_mod.category_label(row.get("category") or "")
+            label = tr(fb_mod.category_label(row.get("category") or ""))
             lines.append(f"{label}  {row.get('title') or ''}  ({row.get('id') or ''})")
         self.hist.setText("\n".join(lines))
 

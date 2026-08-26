@@ -35,7 +35,9 @@ class JavaCard(SimpleCardWidget):
 class JavaDownloadTile(SimpleCardWidget):
     def __init__(self, major: str, note: str, on_download, parent=None):
         super().__init__(parent)
-        self.setFixedSize(150, 128)
+        # 定宽 150 装不下英文说明（会被硬裁）；改成最小宽，按文字自适应
+        self.setMinimumWidth(150)
+        self.setFixedHeight(128)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(4)
@@ -51,12 +53,13 @@ class JavaDownloadTile(SimpleCardWidget):
 
 
 class JavaPage(QWidget):
+    # 存原文、展示时才 tr：类属性里的 tr() 在 import 那一刻就定死语言
     NOTES = {
-        "8": tr("1.16 及以下旧版本"),
-        "11": tr("部分旧模组环境"),
-        "17": tr("1.18 – 1.20.4 推荐"),
-        "21": tr("1.20.5 – 1.21.11"),
-        "25": tr("26.1+ 需要 Java 25"),
+        "8": "1.16 及以下旧版本",
+        "11": "部分旧模组环境",
+        "17": "1.18 – 1.20.4 推荐",
+        "21": "1.20.5 – 1.21.11",
+        "25": "26.1+ 需要 Java 25",
     }
 
     def __init__(self, backend, parent=None):
@@ -97,7 +100,7 @@ class JavaPage(QWidget):
         tiles = QHBoxLayout()
         tiles.setSpacing(12)
         for major in ("8", "11", "17", "21", "25"):
-            tiles.addWidget(JavaDownloadTile(major, self.NOTES[major], self._download))
+            tiles.addWidget(JavaDownloadTile(major, tr(self.NOTES[major]), self._download))
         tiles.addStretch(1)
         root.addLayout(tiles)
         root.addStretch(1)
