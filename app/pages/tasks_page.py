@@ -297,7 +297,13 @@ class TasksPage(QWidget):
         scroll.setWidget(host)
         root.addWidget(scroll, 1)
 
-        self.empty = EmptyState(FIF.DOWNLOAD, tr("暂无任务 —— 去下载板块里的版本 / 整合包 / 模组 / 光影 / 资源包 / Java 发起"))
+        # 旧文案把「原版游戏」说成「版本」、「Mod」说成「模组」，与下载横条
+        # 名字对不上，而且光说不给路。现在按钮直接带去下载分区。
+        self.empty = EmptyState(
+            FIF.DOWNLOAD,
+            tr("暂无任务 —— 在「下载」里安装原版游戏 / Mod / 整合包时，进度会出现在这里"),
+            action_text=tr("去下载"),
+            on_action=lambda: self._goto_download())
         self.list_layout.addWidget(self.empty)
         self.list_layout.addStretch(1)
 
@@ -305,6 +311,11 @@ class TasksPage(QWidget):
         backend.progress.connect(self._progress)
         backend.log.connect(self._log)
         backend.finished.connect(self._finished)
+
+    def _goto_download(self):
+        win = self.window()
+        if win is not None and hasattr(win, "switchTo"):
+            win.switchTo("version")
 
     def _add(self, task_id, title):
         if not _is_download_title(title):
