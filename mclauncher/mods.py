@@ -236,6 +236,79 @@ def _primary_file(version):
 
 # ================================================================ 中文搜索（别名目录 + 多源）
 
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_EN_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9']{2,}")
+_EN_STOPWORDS = {
+    "the", "and", "for", "mod", "mods", "with", "you", "your", "all",
+    "minecraft", "edition", "fabric", "forge", "quilt", "neoforge",
+}
+
+
+def _has_cjk(text) -> bool:
+    return bool(_CJK_RE.search(str(text or "")))
+
+
+def _english_terms_from_hits(hits, limit=3) -> list:
+    """从 Modrinth 命中标题里提取英文关键词，供 CurseForge 二次搜索。
+
+    CurseForge 只有英文标题，中文直查基本返回空（PCL CE 同款思路）。
+    """
+    weight = {}
+    for rank, h in enumerate(hits[:8]):
+        title = str(h.get("title") or h.get("name") or "")
+        for w in _EN_WORD_RE.findall(title):
+            lw = w.lower()
+            if lw in _EN_STOPWORDS:
+                continue
+            weight[lw] = weight.get(lw, 0.0) + max(1.0, 8.0 - rank)
+    ordered = sorted(weight.items(), key=lambda kv: -kv[1])
+    return [w for w, _ in ordered[:limit]]
+
+
+def _mcim_translate_hits(dm: DownloadManager, hits, limit=6):
+    """用 MCIM 翻译接口补中文简介（/translate/modrinth/{id}、/translate/curseforge/{id}）。
+
+    公益接口，失败静默忽略；连续 2 次失败就不再尝试，避免拖慢搜索。
+    """
+    failures = 0
+    for h in hits[:limit]:
+        if failures >= 2:
+            break
+        src = str(h.get("source") or "")
+        if src == "modrinth":
+            key = h.get("slug") or h.get("project_id") or h.get("id")
+        elif src == "curseforge":
+            key = h.get("id")
+        else:
+            continue
+        if not key:
+            continue
+        try:
+            data = dm.fetch_json(
+                f"{MCIM_MIRROR}/translate/{src}/{key}", timeout=(2, 4), expand=False)
+        except Exception:
+            failures += 1
+            continue
+        translated = str((data or {}).get("translated") or "").strip()
+        if translated:
+            if h.get("description"):
+                h["description_orig"] = h.get("description")
+            h["description"] = translated[:160]
+    return hits
+
+
+def _dedupe_hits(hits) -> list:
+    out, seen = [], set()
+    for h in hits:
+        key = (str(h.get("source") or ""),
+               str(h.get("slug") or h.get("id") or h.get("title") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(h)
+    return out
+
+
 def _filter_sources(hits, sources):
     """sources 为 None 表示不限；否则按来源过滤（用户在下载页选了单一源）。"""
     if not sources:
@@ -266,9 +339,25 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None,
         return []
     hits = []
 
+    def _finish(rows):
+        rows = _filter_sources(rows, sources)
+        rows = _dedupe_hits(rows)[:limit]
+        if not rows:
+            return []
+        try:
+            from . import mod_translations
+            mod_translations.annotate_hits(rows)
+        except Exception:
+            pass
+        if _has_cjk(q):
+            _mcim_translate_hits(dm, rows)
+        return rows
+
     # 1) 精确别名命中：详情 404 当没命中，继续走全文搜索，不把死 slug 当结果
     dead_slugs = set()
     slug, cf_id, title = catalog.lookup_mod_alias(q)
+    # 别名只有 title（如 OptiFine 不在 Modrinth）：拿 title 当全文搜索关键词
+    fallback_q = title if (title and not slug and not cf_id) else q
     if slug:
         got = _alias_to_modrinth_hits(dm, slug, title, limit)
         if got:
@@ -281,11 +370,9 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None,
             hits.extend(_alias_to_cf_hits(dm, cf_id, title, api_key))
         except Exception as e:
             utils.log.warning("别名命中后 CurseForge 查询失败 %s: %s", cf_id, e)
-    got = _filter_sources(hits, sources)
+    got = _finish(hits)
     if got:
-        from . import mod_translations
-        mod_translations.annotate_hits(got)
-        return got[:limit]
+        return got
 
     # 2) 模糊匹配：跳过已经 404 的 slug，最多 3 条
     fuzzy = catalog.fuzzy_match_mod(q)
@@ -306,11 +393,9 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None,
                 utils.log.warning("模糊匹配 CurseForge 查询失败 %s: %s", cf_id, e)
         if len(hits) >= 4:
             break
-    got = _filter_sources(hits, sources)
+    got = _finish(hits)
     if got:
-        from . import mod_translations
-        mod_translations.annotate_hits(got)
-        return got[:limit]
+        return got
 
     # 3) mcmod 数据集（HMCL 同款 2.8 万条）：中文名 → CF slug → 双源解析
     try:
@@ -318,23 +403,32 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None,
     except Exception as e:
         utils.log.warning("mcmod 数据集搜索失败: %s", e)
         hits = []
-    if hits:
-        return hits[:limit]
+    got = _finish(hits)
+    if got:
+        return got
 
-    # 4) 别名未命中：回退到 Modrinth（英文原文）+ CurseForge 全文
+    # 4) 别名未命中：回退到 Modrinth 全文 + CurseForge（中文查询提英文词再搜）
     hits = []
-    if not sources or "modrinth" in sources:
+    mr_hits = []
+    srcset = {str(s).lower() for s in (sources or [])}
+    if not sources or "modrinth" in srcset:
         try:
-            hits.extend(search_mods(dm, q, limit=limit))
+            mr_hits = search_mods(dm, fallback_q, limit=limit)
+            hits.extend(mr_hits)
         except Exception as e:
             utils.log.warning("中文搜索回退 Modrinth 失败: %s", e)
-    if not sources or "curseforge" in sources:
+    cf_query = fallback_q
+    if _has_cjk(cf_query) and mr_hits:
+        terms = _english_terms_from_hits(mr_hits)
+        if terms:
+            cf_query = " ".join(terms)
+    if cf_query and (not sources or "curseforge" in srcset):
         try:
-            hits.extend(search_curseforge(dm, q, limit=limit, api_key=api_key,
+            hits.extend(search_curseforge(dm, cf_query, limit=limit, api_key=api_key,
                                           class_id=CF_CLASS_MOD))
         except Exception as e:
             utils.log.warning("中文搜索回退 CurseForge 失败: %s", e)
-    return _filter_sources(hits, sources)[:limit]
+    return _finish(hits)
 
 
 def _dataset_hits(dm: DownloadManager, query, api_key=None, sources=None,
@@ -350,7 +444,6 @@ def _dataset_hits(dm: DownloadManager, query, api_key=None, sources=None,
 
     if not mt.load(dm):
         return []
-    # 数据集同一 slug 可能有多条（如 匠魂/匠魂2/匠魂3 都指 tinkers-construct），按 slug 去重
     recs, seen = [], set()
     for r in mt.search_chinese(query, limit=max_records * 2):
         if r["slug"] and r["slug"] not in seen:
@@ -370,9 +463,9 @@ def _dataset_hits(dm: DownloadManager, query, api_key=None, sources=None,
             arr = dm.fetch_json(f"{MODRINTH_API}/projects",
                                 params={"ids": json.dumps(slugs)},
                                 timeout=API_TIMEOUT)
-            for p in arr or []:
-                if isinstance(p, dict) and p.get("slug"):
-                    mr_found[p["slug"]] = p
+            for proj in arr or []:
+                if isinstance(proj, dict) and proj.get("slug"):
+                    mr_found[proj["slug"]] = proj
         except Exception as e:
             utils.log.warning("Modrinth 批量解析译名候选失败: %s", e)
 
@@ -385,16 +478,16 @@ def _dataset_hits(dm: DownloadManager, query, api_key=None, sources=None,
         url = mt.mcmod_url(rec["mcmod_id"])
         if url:
             extra["mcmod_url"] = url
-        p = mr_found.get(rec["slug"])
-        if p is not None:
+        proj = mr_found.get(rec["slug"])
+        if proj is not None:
             hits.append({
                 "source": "modrinth",
-                "slug": p.get("slug"),
-                "title": p.get("title") or rec["name_en"] or rec["slug"],
+                "slug": proj.get("slug"),
+                "title": proj.get("title") or rec["name_en"] or rec["slug"],
                 "author": "?",
-                "downloads": p.get("downloads", 0),
-                "description": (p.get("description") or "")[:120],
-                "icon_url": p.get("icon_url") or "",
+                "downloads": proj.get("downloads", 0),
+                "description": (proj.get("description") or "")[:120],
+                "icon_url": proj.get("icon_url") or "",
                 **extra,
             })
             continue
@@ -473,18 +566,51 @@ def detect_loader(instance: Instance):
     return None
 
 
+# 年式版本号（2026 起）：26.1 / 26.1.2；主版本 20+ 才算年式，3–19 视为模组/整合包自身版本。
+_MC_YEAR_CORE = r"(?:2\d|[3-9]\d)\.\d+(?:\.\d+)?"
+_MC_YEAR_PRE = rf"{_MC_YEAR_CORE}-(?:snapshot|rc|pre)-?\d*"
+
+
 def _mc_version_from_text(text):
+    """从文本里提取 Minecraft 版本号。
+
+    识别老式 1.x(.y)、年式 26.x(.y) 及其预发布后缀（-snapshot-N / -rc-N / -pre-N）。
+    模组自身版本（如 5.2.1，主版本 3–19）不会被当成 MC 版本。
+    """
     if not text:
         return None
     s = str(text).strip()
-    if re.fullmatch(r"1\.\d+(\.\d+)?", s):
+    if re.fullmatch(r"1\.\d+(\.\d+)?", s) or re.fullmatch(_MC_YEAR_CORE, s):
         return s
-    m = re.search(r"(1\.\d+(?:\.\d+)?)", s)
+    if re.fullmatch(_MC_YEAR_PRE, s, re.I):
+        return s
+    # 老式优先：避免 "1.21.11-forge" 被年式分支截成 "21.11"；
+    # 负向后顾避免把 "26.1.2" 中间的 "1.2" 当版本
+    m = re.search(r"(?<![\d.])(1\.\d+(?:\.\d+)?)", s)
+    if m:
+        return m.group(1)
+    m = re.search(rf"(?<![\d.])({_MC_YEAR_PRE})", s, re.I)
+    if m:
+        return m.group(1)
+    m = re.search(rf"(?<![\d.])({_MC_YEAR_CORE})", s)
     return m.group(1) if m else None
 
 
+def _mc_sort_key(ver: str) -> tuple:
+    """版本排序键：年式 26.x 数值上天然高于 1.21.x。"""
+    core = str(ver or "").split("-")[0]
+    nums = []
+    for p in core.split("."):
+        if not p.isdigit():
+            break
+        nums.append(int(p))
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums[:3])
+
+
 def detect_mc_version(instance: Instance):
-    """优先用实例/整合包元数据，再取已装版本里最高的 1.x。"""
+    """优先用实例/整合包元数据，再取已装版本里最高的 MC 版本（年式 26.x 高于 1.x）。"""
     meta = instance.meta() or {}
     pack = meta.get("modpack") if isinstance(meta.get("modpack"), dict) else {}
     for cand in (pack.get("mc_version"), meta.get("mc_version")):
@@ -496,8 +622,7 @@ def detect_mc_version(instance: Instance):
         hit = _mc_version_from_text(vid)
         if not hit:
             continue
-        parts = tuple(int(x) for x in hit.split("."))
-        found.append((parts, hit))
+        found.append((_mc_sort_key(hit), hit))
     if found:
         found.sort()
         return found[-1][1]

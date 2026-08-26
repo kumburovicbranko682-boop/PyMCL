@@ -95,30 +95,55 @@ def pack_dependencies(instance, version_id: str) -> dict:
 
 
 def _match_modrinth(dm: DownloadManager, hashes: list[str]) -> dict:
-    """sha1 → Modrinth version 对象。批量接口失败时退化为逐个查询。"""
+    """sha1 → Modrinth version 对象。官方优先、MCIM 兜底；批量失败再逐个查询。"""
     if not hashes:
         return {}
-    try:
-        resp = dm.session.post(
-            f"{MODRINTH_API}/version_files",
-            json={"hashes": hashes, "algorithm": "sha1"},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if isinstance(data, dict):
-            return data
-    except Exception as e:
-        utils.log.warning("Modrinth 批量反查失败，改为逐个查询: %s", e)
+    from . import source
+    bases = [str(MODRINTH_API).rstrip("/")] if MODRINTH_API else []
+    # Tests patch MODRINTH_API to a local server; don't also hit the real API.
+    if bases == ["https://api.modrinth.com/v2"] or not bases:
+        try:
+            for base in source.modrinth_api_bases():
+                b = str(base).rstrip("/")
+                if b not in bases:
+                    bases.append(b)
+        except Exception:
+            pass
+    if not bases:
+        bases = ["https://api.modrinth.com/v2"]
+    last_err = None
+    for base in bases:
+        try:
+            resp = dm.session.post(
+                f"{base}/version_files",
+                json={"hashes": hashes, "algorithm": "sha1"},
+                timeout=20,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict):
+                return data
+        except Exception as e:
+            last_err = e
+            continue
+    if last_err:
+        utils.log.warning("Modrinth 批量反查失败，改为逐个查询: %s", last_err)
     out = {}
     misses = 0
     for h in hashes:
-        try:
-            v = dm.fetch_json(f"{MODRINTH_API}/version_file/{h}", timeout=12)
-            if isinstance(v, dict):
-                out[h] = v
+        hit = None
+        for base in bases:
+            try:
+                v = dm.fetch_json(f"{base}/version_file/{h}", timeout=12)
+                if isinstance(v, dict):
+                    hit = v
+                    break
+            except Exception:
+                continue
+        if hit:
+            out[h] = hit
             misses = 0
-        except Exception:
+        else:
             misses += 1
             if misses >= 3:
                 # 连续失败大概率是断网，别把每个模组都拖一遍超时

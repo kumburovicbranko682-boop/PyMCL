@@ -48,14 +48,19 @@ def _adoptium_arch(arch=None) -> str:
 
 
 def adoptium_major(major: int) -> int:
-    """把任意 major 映射到 Adoptium 有发布的 LTS 版本。"""
+    """把任意 major 映射到 Adoptium 有发布的 LTS 版本。
+
+    MC 26.1+ 需要 Java 25，>21 不能再收口到 21。
+    """
     if major <= 8:
         return 8
     if major <= 11:
         return 11
     if major <= 17:
         return 17
-    return 21
+    if major <= 21:
+        return 21
+    return 25
 
 
 # ---------------------------------------------------------------- 探测

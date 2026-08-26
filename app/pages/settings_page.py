@@ -312,7 +312,7 @@ class SettingsPage(QWidget):
             list(src_map.values()), src_map.get(settings.get("download_source") or "auto", src_map["auto"]))
         self.comm_card, self.comm_box = _combo_card(
             FIF.LIBRARY, tr("社区资源源"),
-            tr("模组 / 整合包：MCIM 国内镜像，挂了可改官方"),
+            tr("模组 / 整合包：自动 = 官方优先，失败再走 MCIM 国内镜像"),
             list(comm_map.values()), comm_map.get(settings.get("community_source") or "auto", comm_map["auto"]))
         self.proxy_card, self.proxy_sw = _switch_card(
             FIF.VPN, tr("跟随系统代理"),

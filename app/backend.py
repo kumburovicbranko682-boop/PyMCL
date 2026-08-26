@@ -401,6 +401,28 @@ class BackendAPI(QObject):
     def task_title(self, task_id: str) -> str:
         return self._titles.get(task_id, task_id)
 
+    def list_tasks(self) -> list[dict]:
+        """运行中 + 近期结束的任务快照。与 bridge/api.py 的 list_tasks 保持同构。"""
+        running = list(self._workers)
+        rows = [{
+            "id": tid,
+            "title": self._titles.get(tid, tid),
+            "status": "running",
+            "success": None,
+            "message": "",
+        } for tid in running]
+        for tid, (ok, msg) in list(self._task_results.items())[-20:]:
+            if tid in running:
+                continue
+            rows.append({
+                "id": tid,
+                "title": self._titles.get(tid, tid),
+                "status": "done" if ok else "failed",
+                "success": bool(ok),
+                "message": msg,
+            })
+        return rows
+
     def _dm(self, progress, log) -> DownloadManager:
         worker = QThread.currentThread()
         last_key = [""]
@@ -776,6 +798,11 @@ class BackendAPI(QObject):
 
     def terracotta_shutdown(self):
         terracotta_mod.stop()
+
+    def terracotta_remember_lobby(self, url: str) -> str:
+        """把大厅地址写进当前实例的 servers.dat（多人列表出现「陶瓦联机大厅」）。"""
+        inst = self._instance()
+        return str(terracotta_mod.remember_lobby(url, inst.path))
 
     def terracotta_enter_world(self):
         info = self.terracotta_snapshot()

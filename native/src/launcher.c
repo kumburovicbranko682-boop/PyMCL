@@ -105,8 +105,39 @@ static void patch_ignore(char **args, int n, const char **names, int nn) {
     }
 }
 
+/* 对齐 mclauncher/gc.py：GC 预设拼在用户 JVM 参数前；已有 GC 旗标就不再加。 */
+static const char *gc_preset_flags(const char *key) {
+    if (!key || !key[0] || pymcl_ieq(key, "auto"))
+        return "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 "
+               "-XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M";
+    if (pymcl_ieq(key, "g1")) return "-XX:+UseG1GC";
+    if (pymcl_ieq(key, "g1_tuned"))
+        return "-XX:+UseG1GC -XX:+UnlockExperimentalVMOptions -XX:G1NewSizePercent=20 "
+               "-XX:G1ReservePercent=20 -XX:MaxGCPauseMillis=50 -XX:G1HeapRegionSize=32M "
+               "-XX:+DisableExplicitGC -XX:+AlwaysPreTouch -XX:+ParallelRefProcEnabled";
+    if (pymcl_ieq(key, "zgc")) return "-XX:+UseZGC -XX:+UnlockExperimentalVMOptions";
+    if (pymcl_ieq(key, "none")) return "";
+    /* 未知键按 Python 语义落到 auto */
+    return gc_preset_flags("auto");
+}
+void gc_preset_apply(const char *preset, const char *existing, char *out, size_t n) {
+    const char *ex = existing ? existing : "";
+    char **toks = NULL;
+    int nt = pymcl_split_args(ex, &toks);
+    int has_gc = 0;
+    for (int i = 0; i < nt; i++) {
+        if (pymcl_startswith(toks[i], "-XX:+Use") && strstr(toks[i], "GC")) has_gc = 1;
+    }
+    pymcl_free_args(toks, nt);
+    const char *flags = gc_preset_flags(preset);
+    if (has_gc || !flags[0]) snprintf(out, n, "%s", ex);
+    else if (!ex[0]) snprintf(out, n, "%s", flags);
+    else snprintf(out, n, "%s %s", flags, ex);
+}
+
 int build_launch_command(const char *instance, const char *version, cJSON *account_props,
                          const char *java_exe, int memory_mb, int width, int height,
+                         const char *extra_jvm, const char *game_dir,
                          char ***argv, int *argc, char *natives_out, size_t nn) {
     cJSON *vjson = instance_version_json(instance, version);
     if (!vjson) { pymcl_set_error("版本 %s 未安装，请先安装。", version); return -1; }
@@ -212,7 +243,8 @@ int build_launch_command(const char *instance, const char *version, cJSON *accou
     cJSON_AddStringToObject(ph, "clientid", config_str("microsoft_client_id", PYMCL_MS_CLIENT_DEFAULT));
     cJSON_AddStringToObject(ph, "version_name", version);
     cJSON_AddStringToObject(ph, "version_type", cJSON_GetStringValue(cJSON_GetObjectItem(resolved, "type")) ?: "release");
-    cJSON_AddStringToObject(ph, "game_directory", ip);
+    /* 版本隔离时游戏目录是 versions/<ver>，不再固定实例根目录。 */
+    cJSON_AddStringToObject(ph, "game_directory", game_dir && game_dir[0] ? game_dir : ip);
     cJSON_AddStringToObject(ph, "assets_root", assets);
     cJSON *idx = cJSON_GetObjectItem(resolved, "assetIndex");
     cJSON_AddStringToObject(ph, "assets_index_name", cJSON_GetStringValue(cJSON_GetObjectItem(idx, "id")) ?: "legacy");
@@ -290,6 +322,33 @@ int build_launch_command(const char *instance, const char *version, cJSON *accou
     }
     if (manifest_is_legacy(resolved) && memory_mb > 1024) memory_mb = 1024;
     for (int i = 0; i < nj; i++) if (strcmp(jvm[i], "-p") == 0) { free(jvm[i]); jvm[i] = pymcl_strdup("--module-path"); }
+    /* 对齐 mclauncher/launcher.py：default_jvm + extra_jvm 排在清单 JVM 参数前，
+     * 再统一去重 -Xmx/-Xms。以前全局「默认 JVM 参数」和版本设置的 GC/JVM
+     * 参数在 C 桥启动时整个被无视。 */
+    {
+        char **pre = NULL; int np = 0;
+        char **dj = NULL;
+        int ndj = pymcl_split_args(config_str("default_jvm_args", ""), &dj);
+        for (int i = 0; i < ndj; i++) {
+            pre = (char **)realloc(pre, sizeof(char *) * (size_t)(np + 1));
+            pre[np++] = dj[i];
+        }
+        free(dj);
+        char **xj = NULL;
+        int nxj = pymcl_split_args(extra_jvm ? extra_jvm : "", &xj);
+        for (int i = 0; i < nxj; i++) {
+            pre = (char **)realloc(pre, sizeof(char *) * (size_t)(np + 1));
+            pre[np++] = xj[i];
+        }
+        free(xj);
+        if (np) {
+            char **merged = (char **)calloc((size_t)(np + nj), sizeof(char *));
+            memcpy(merged, pre, sizeof(char *) * (size_t)np);
+            memcpy(merged + np, jvm, sizeof(char *) * (size_t)nj);
+            free(pre); free(jvm);
+            jvm = merged; nj += np;
+        }
+    }
     apply_memory(&jvm, &nj, memory_mb);
     int has_brand = 0, has_ver = 0;
     for (int i = 0; i < nj; i++) {

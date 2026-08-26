@@ -152,7 +152,9 @@ async function showInstanceVersions(container: HTMLElement, instanceName: string
         const confirmed = await confirmDialog('卸载版本', `确定要卸载版本 ${version} 吗？`);
         if (!confirmed) return;
         try {
-          await bridge.call('uninstall_version', { spec: version });
+          // spec 不带实例前缀时后端落到 default_instance——从非默认实例的
+          // 版本列表点卸载会删错实例。带上本弹窗对应的实例名。
+          await bridge.call('uninstall_version', { spec: `${instanceName} / ${version}` });
           toast('版本已卸载', 'success');
           modal.remove();
           showInstanceVersions(container, instanceName);

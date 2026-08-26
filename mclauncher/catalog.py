@@ -40,8 +40,9 @@ MOD_ALIASES = {
     "世界地图": {"slug": "xaeros-world-map", "title": "Xaero's World Map"},
     "xaeros世界地图": {"slug": "xaeros-world-map", "title": "Xaero's World Map"},
 
-    "高清修复": {"slug": "iris", "title": "Iris Shaders"},
-    "optifine": {"slug": "iris", "title": "Iris Shaders"},
+    # OptiFine 不在 Modrinth 上架：不给 slug，让全文搜索用 title 接手（不要偷换成 Iris）
+    "高清修复": {"title": "OptiFine"},
+    "optifine": {"title": "OptiFine"},
     "光影": {"slug": "iris", "title": "Iris Shaders"},
 
     "fabric api": {"slug": "fabric-api", "title": "Fabric API"},
@@ -151,8 +152,9 @@ MOD_ALIASES = {
     "锂": {"slug": "lithium", "title": "Lithium"},
     "lithium": {"slug": "lithium", "title": "Lithium"},
 
-    "磷": {"slug": "phosphor", "title": "Phosphor"},
-    "phosphor": {"slug": "phosphor", "title": "Phosphor"},
+    # Phosphor 已停更，光照优化统一指向 Starlight
+    "磷": {"slug": "starlight", "title": "Starlight（Phosphor 已停更）"},
+    "phosphor": {"slug": "starlight", "title": "Starlight（Phosphor 已停更）"},
 
     "星光": {"slug": "starlight", "title": "Starlight"},
     "starlight": {"slug": "starlight", "title": "Starlight"},
@@ -249,7 +251,7 @@ MOD_ALIASES = {
     "传说武器": {"slug": "mcdw", "title": "MCDungeons Weapons"},
     "更多武器": {"slug": "mcdw", "title": "MCDungeons Weapons"},
 
-    "考古": {"slug": "archaeology", "title": "Archaeology"},
+    "考古": {"title": "Archaeology"},
 
     "传送书": {"slug": "waystones", "title": "Waystones"},
     "waystones": {"slug": "waystones", "title": "Waystones"},
@@ -270,14 +272,14 @@ MOD_ALIASES = {
     "pam's harvestcraft": {"slug": "pam-harvestcraft-2", "cf": 221857, "title": "Pam's HarvestCraft 2"},
     "harvestcraft": {"slug": "pam-harvestcraft-2", "cf": 221857, "title": "Pam's HarvestCraft 2"},
 
-    "糖果世界": {"slug": "candy-world", "title": "Candy World"},
+    "糖果世界": {"title": "Candy World"},
 
     "梦幻世界": {"slug": "twilight-forest", "cf": 227639, "title": "Twilight Forest"},
 
     "ATC警报": {"slug": "atc-alarm", "title": "ATC Alarm"},
 
-    "经验书": {"slug": "xp-book", "title": "XP Book"},
-    "xp book": {"slug": "xp-book", "title": "XP Book"},
+    "经验书": {"title": "XP Book"},
+    "xp book": {"title": "XP Book"},
 
     "通用机械": {"slug": "mekanism", "cf": 268560, "title": "Mekanism"},
     "mekanism": {"slug": "mekanism", "cf": 268560, "title": "Mekanism"},
@@ -422,8 +424,8 @@ MOD_ALIASES = {
     "ars nouveau": {"slug": "ars-nouveau", "title": "Ars Nouveau"},
     "新生魔法": {"slug": "ars-nouveau", "title": "Ars Nouveau"},
 
-    "巫术": {"slug": "witchcraft", "title": "Witchcraft"},
-    "witchcraft": {"slug": "witchcraft", "title": "Witchcraft"},
+    "巫术": {"title": "Witchcraft"},
+    "witchcraft": {"title": "Witchcraft"},
 
     "血魔法": {"slug": "blood-magic", "cf": 224791, "title": "Blood Magic"},
     "blood magic": {"slug": "blood-magic", "cf": 224791, "title": "Blood Magic"},
@@ -588,8 +590,8 @@ def lookup_modpack_alias(query: str):
 #  mc 为空表示不限制版本（用实例当前版本）
 # ----------------------------------------------------------------
 POPULAR_MODS = [
-    # 优化类
-    ("Sodium 钠 (渲染优化)", "modrinth", "sodium", "1.20.1", "fabric"),
+    # 优化类（mc 一律 None：随实例当前版本，不绑死旧版本）
+    ("Sodium 钠 (渲染优化)", "modrinth", "sodium", None, "fabric"),
     ("Lithium 锂 (服务器优化)", "modrinth", "lithium", None, "fabric"),
     ("Starlight 星光 (光照优化)", "modrinth", "starlight", None, "fabric"),
     ("Iris 光影加载器", "modrinth", "iris", None, "fabric"),

@@ -1,7 +1,7 @@
 // 反馈与帮助页。
 import { bridge } from '../bridge';
 import { store } from '../store';
-import { showError, showLoading, toast } from '../ui';
+import { confirmDialog, showError, showLoading, toast } from '../ui';
 import { errorMessage, escapeHtml } from './common';
 
 interface FeedbackRecord {
@@ -119,6 +119,7 @@ function render(container: HTMLElement, history: FeedbackRecord[], articles: Hel
       toast('请填写标题和详细说明', 'warning');
       return;
     }
+    if (!(await ensureConsent())) return;
     const button = container.querySelector<HTMLButtonElement>('#feedback-submit')!;
     button.disabled = true;
     button.textContent = '发送中…';
@@ -140,6 +141,33 @@ function render(container: HTMLElement, history: FeedbackRecord[], articles: Hel
       toast(errorMessage(error, '读取系统信息失败'), 'error');
     }
   });
+}
+
+// 对齐 Qt 的 prompt_feedback_consent：后端 has_consent() 不为 true 时提交必然
+// 抛「需要先同意上传诊断数据」，而本页以前既不询问、设置页也没有这个开关，
+// 反馈在 EziApp 下永远发不出去。这里现场询问并把选择写回 config。
+async function ensureConsent(): Promise<boolean> {
+  try {
+    const settings = await bridge.call<Record<string, unknown>>('get_settings');
+    if (settings?.feedback_consent === true) return true;
+  } catch {
+    // 读取失败就按未同意处理，走下面的询问流程。
+  }
+  const ok = await confirmDialog(
+    '是否上传诊断数据',
+    '同意后才会向开发者上传：你提交的反馈内容，以及本机配置（CPU / 内存 / 显卡 / Java / 实例）。暂不同意则不会上传，下次提交时会再次询问。',
+  );
+  try {
+    await bridge.call('save_settings', { data: { feedback_consent: ok } });
+  } catch (error) {
+    if (ok) {
+      // 同意没写进 config 的话后端仍会拒绝上传，明确报错而不是假装成功。
+      toast(errorMessage(error, '无法保存选择'), 'error');
+      return false;
+    }
+  }
+  if (!ok) toast('未同意上传，反馈未发送', 'warning');
+  return ok;
 }
 
 function renderFaq(articles: HelpArticle[]): string {

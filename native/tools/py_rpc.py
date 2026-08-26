@@ -71,6 +71,15 @@ def main() -> int:
                 if name in params:
                     kwargs[name] = params[name]
         result = fn(**kwargs)
+        # 任务型方法（install_world / repair_version / start_* …）只返回 task id，
+        # 真正的工作在守护线程里。一次性进程立刻退出会把线程杀死：UI 拿到
+        # task id 显示“已排队”，下载却已经静默夭折。这里等任务真正结束，
+        # 把最终成败作为本次调用的结果返回。
+        if isinstance(result, str) and result in getattr(api, "_titles", {}):
+            done = api.wait_task(result, timeout=7200)
+            if done.get("ok"):
+                return write({"ok": True, "result": done.get("message") or result})
+            return write({"ok": False, "error": done.get("message") or "任务失败"})
         return write({"ok": True, "result": result})
     except Exception as exc:  # noqa: BLE001
         return write({"ok": False, "error": str(exc)})

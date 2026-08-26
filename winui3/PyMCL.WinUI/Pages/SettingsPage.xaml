@@ -110,6 +110,13 @@
                     </StackPanel>
                     <StackPanel Spacing="4">
                         <Grid>
+                            <TextBlock Text="允许多开" VerticalAlignment="Center" Margin="0,0,120,0" TextWrapping="Wrap"/>
+                            <ToggleSwitch x:Name="MultiSw" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <TextBlock Text="关闭时，游戏运行中再点「启动」会被拒绝" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="12" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <StackPanel Spacing="4">
+                        <Grid>
                             <TextBlock Text="下载飞入动画" VerticalAlignment="Center" Margin="0,0,120,0" TextWrapping="Wrap"/>
                             <ToggleSwitch x:Name="FlyAnimSw" HorizontalAlignment="Right" IsOn="True"/>
                         </Grid>

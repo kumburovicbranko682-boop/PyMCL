@@ -1,0 +1,4 @@
+# Build-time deps for Windows exe (PyInstaller).
+# Keep ASCII-only so old pip on Chinese Windows (GBK) can parse this file.
+pyinstaller==6.10.0
+-r requirements.txt

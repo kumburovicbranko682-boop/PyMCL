@@ -85,7 +85,7 @@ function render(container: HTMLElement) {
       try {
         // 只提交这一个键。以前是 `{...store.settings, default_java}`，
         // store 里可能是别处存进去的残缺 settings，整份回传会把没带上的键一起写坏。
-        await bridge.call('save_settings', { default_java: javaPath });
+        await bridge.call('save_settings', { data: { default_java: javaPath } });
         store.setSettings({ ...(store.settings || {}), default_java: javaPath } as any);
         render(container);
         toast('已设为默认 Java', 'success');

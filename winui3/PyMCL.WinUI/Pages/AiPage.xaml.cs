@@ -228,8 +228,12 @@ public sealed partial class AiPage : UserControl
     private async void NewChat_Click(object sender, RoutedEventArgs e)
     {
         if (AppServices.Client is null) return;
-        var data = await AppServices.Client.CallAsync<AiStoreDto>("ai_new_chat");
-        FillList(data);
+        try
+        {
+            var data = await AppServices.Client.CallAsync<AiStoreDto>("ai_new_chat");
+            FillList(data);
+        }
+        catch (Exception ex) { AppServices.Toast?.Invoke("新建对话失败", ex.Message, InfoBarSeverity.Error); }
     }
 
     private async void DeleteChat_Click(object sender, RoutedEventArgs e)
@@ -249,8 +253,12 @@ public sealed partial class AiPage : UserControl
     {
         if (_picking || ChatList.SelectedItem is not AiChatDto chat || AppServices.Client is null) return;
         if (chat.Id == _activeId) return;
-        var data = await AppServices.Client.CallAsync<AiStoreDto>("ai_set_active", new { chat_id = chat.Id });
-        FillList(data);
+        try
+        {
+            var data = await AppServices.Client.CallAsync<AiStoreDto>("ai_set_active", new { chat_id = chat.Id });
+            FillList(data);
+        }
+        catch (Exception ex) { AppServices.Toast?.Invoke("切换对话失败", ex.Message, InfoBarSeverity.Error); }
     }
 
     private async Task ConfirmAsync(string? label, string? name)
