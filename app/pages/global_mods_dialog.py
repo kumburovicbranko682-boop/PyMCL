@@ -18,9 +18,20 @@ class GlobalModsDialog(MessageBoxBase):
         wrap = QWidget(self)
         wrap.setLayout(self.host)
         self.viewLayout.addWidget(wrap)
+        btns = QHBoxLayout()
         open_btn = TransparentPushButton(FIF.FOLDER, tr("打开文件夹"))
         open_btn.clicked.connect(backend.open_global_mods)
-        self.viewLayout.addWidget(open_btn)
+        # 空状态让人去文件夹放 jar，但对话框自己不会察觉文件变化——
+        # 没有刷新手段的话，照指示做完回来界面还说「还没有全局模组」，
+        # 只能关掉重开。
+        refresh_btn = TransparentPushButton(FIF.SYNC, tr("刷新"))
+        refresh_btn.clicked.connect(self.reload)
+        btns.addWidget(open_btn)
+        btns.addWidget(refresh_btn)
+        btns.addStretch(1)
+        btns_wrap = QWidget(self)
+        btns_wrap.setLayout(btns)
+        self.viewLayout.addWidget(btns_wrap)
         self.yesButton.setText(tr("关闭"))
         self.cancelButton.hide()
         self.widget.setMinimumWidth(480)
@@ -33,7 +44,7 @@ class GlobalModsDialog(MessageBoxBase):
                 it.widget().deleteLater()
         rows = self.backend.list_global_mods() or []
         if not rows:
-            self.host.addWidget(BodyLabel(tr("还没有全局模组，点「打开文件夹」放入 jar。")))
+            self.host.addWidget(BodyLabel(tr("还没有全局模组——点「打开文件夹」放入 jar，回来点「刷新」。")))
             return
         for row in rows:
             bar = QHBoxLayout()

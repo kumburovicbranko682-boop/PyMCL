@@ -831,7 +831,7 @@
   "还原备份": "Restore backup",
   "还原失败": "Restore failed",
   "还原完成": "Restore finished",
-  "还没有全局模组，点「打开文件夹」放入 jar。": "No global mods yet—Open folder and drop jars in.",
+  "还没有全局模组——点「打开文件夹」放入 jar，回来点「刷新」。": "No global mods yet — open the folder, drop jars in, then press Refresh.",
   "还没有安装世界": "No worlds installed",
   "还没有安装光影": "No shaders installed yet",
   "还没有存档——进游戏创建一个世界后，这里就会出现": "No saves yet — create a world in game and it will show up here",
