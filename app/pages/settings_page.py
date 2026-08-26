@@ -99,6 +99,12 @@ class SettingsPage(QWidget):
             tr("安装新版本时写入该版本的隔离模式，可稍后在版本设置改"),
             list(iso_map.values()),
             iso_map.get(settings.get("default_isolation") or "none", iso_map["none"]))
+        # 卡片描述跟着当前档位讲人话（和首次向导/版本设置同一份解释）
+        from ..widgets import isolation_hint
+        self.iso_box.setToolTip(tr("安装新版本时写入该版本的隔离模式，可稍后在版本设置改"))
+        self.iso_box.currentTextChanged.connect(
+            lambda t: self.iso_card.setContent(isolation_hint(t)))
+        self.iso_card.setContent(isolation_hint(self.iso_box.currentText()))
         iso_group.addSettingCard(self.iso_card)
         game_card = SettingCard(FIF.FOLDER, tr("游戏目录"), tr("实例与版本所在文件夹"))
         self.game_dir = LineEdit(game_card)

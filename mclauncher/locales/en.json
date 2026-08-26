@@ -958,5 +958,9 @@
   "还没有安装游戏": "No game installed yet",
   "点「安装游戏」挑一个 Minecraft 版本，装好即可开玩": "Click “Install Game” to pick a Minecraft version — then you're ready to play",
   "先安装一个版本": "Install a version first",
-  "挑一个版本点「安装」；勾着「完成后启动」的话装好会自动进入游戏": "Pick a version and click Install; with “Launch when done” checked the game starts automatically"
+  "挑一个版本点「安装」；勾着「完成后启动」的话装好会自动进入游戏": "Pick a version and click Install; with “Launch when done” checked the game starts automatically",
+  "所有版本共用同一份存档、Mod 和设置": "All versions share the same saves, mods and settings",
+  "每个版本的存档单独存放；Mod 和设置各版本共用": "Each version keeps its own saves; mods and settings are shared across versions",
+  "每个版本的 Mod 和设置单独存放；存档各版本共用": "Each version keeps its own mods and settings; saves are shared across versions",
+  "每个版本的存档、Mod、设置完全独立，互不影响": "Each version keeps fully separate saves, mods and settings"
 }

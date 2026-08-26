@@ -37,6 +37,22 @@ class InputDialog(MessageBoxBase):
         return self.edit.text().strip()
 
 
+def isolation_hint(label_text: str) -> str:
+    """按隔离下拉框当前文字（已 tr）返回一句人话解释；找不到返回空串。"""
+    from mclauncher.version_settings import ISOLATION_HINTS, ISOLATION_LABELS
+    for key, raw in ISOLATION_LABELS.items():
+        if label_text in (raw, tr(raw)):
+            return tr(ISOLATION_HINTS.get(key, ""))
+    return ""
+
+
+def bind_isolation_hint(combo, label):
+    """隔离选择器 → 解释标签：换选项即换解释，构造时立即同步一次。"""
+    label.setWordWrap(True)
+    combo.currentTextChanged.connect(lambda t: label.setText(isolation_hint(t)))
+    label.setText(isolation_hint(combo.currentText()))
+
+
 def prompt_feedback_consent(parent) -> bool:
     """首次（或未同意时）弹窗，必须手动点同意才会上传。"""
     from qfluentwidgets import MessageBox

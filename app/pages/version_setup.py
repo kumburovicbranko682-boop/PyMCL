@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """单版本设置：隔离 / JVM / 登录 / Nide8 / 窗口。"""
 from qfluentwidgets import (
-    BodyLabel, CheckBox, ComboBox, LineEdit, MessageBoxBase, SubtitleLabel, TextEdit,
+    BodyLabel, CaptionLabel, CheckBox, ComboBox, LineEdit, MessageBoxBase, SubtitleLabel, TextEdit,
 )
 from PySide6.QtWidgets import QFormLayout, QWidget
 
@@ -9,6 +9,7 @@ from mclauncher.gc import LABELS as GC_LABELS
 from mclauncher.version_settings import FULLSCREEN_MODES, ISOLATION_LABELS
 from mclauncher.i18n import tr
 from ..pcl_chrome import form_label, paint_theme_surfaces
+from ..widgets import bind_isolation_hint
 
 
 class VersionSetupDialog(MessageBoxBase):
@@ -32,6 +33,8 @@ class VersionSetupDialog(MessageBoxBase):
         self.iso.addItems(list(ISOLATION_LABELS.values()))
         cur = ISOLATION_LABELS.get(data.get("isolation") or "none", ISOLATION_LABELS["none"])
         self.iso.setCurrentText(cur)
+        self.iso_hint = CaptionLabel("", self)
+        bind_isolation_hint(self.iso, self.iso_hint)
 
         self.memory = LineEdit()
         self.memory.setPlaceholderText(tr("留空则用启动页滑条"))
@@ -130,6 +133,7 @@ class VersionSetupDialog(MessageBoxBase):
         self.priority.setCurrentText(data.get("process_priority") or "normal")
 
         form.addRow(form_label(tr("隔离")), self.iso)
+        form.addRow("", self.iso_hint)
         form.addRow(form_label(tr("内存 MB")), self.memory)
         form.addRow(form_label("Java"), self.java)
         form.addRow(form_label("GC"), self.gc)

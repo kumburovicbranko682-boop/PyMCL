@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """首次运行向导：游戏目录 / 下载源 / 内存 / 隔离。"""
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, ComboBox, LineEdit, MessageBoxBase, SpinBox, SubtitleLabel
+from qfluentwidgets import BodyLabel, CaptionLabel, ComboBox, LineEdit, MessageBoxBase, SpinBox, SubtitleLabel
 
 from mclauncher.config import CONFIG
 from mclauncher.i18n import tr
+from ..widgets import bind_isolation_hint
 
 
 class FirstRunDialog(MessageBoxBase):
@@ -44,6 +45,10 @@ class FirstRunDialog(MessageBoxBase):
         self.iso.addItems([tr("关闭（共用实例目录）"), tr("隔离存档"), tr("隔离 Mod 与配置"), tr("隔离全部")])
         self.viewLayout.addWidget(BodyLabel(tr("新版本默认隔离"), self))
         self.viewLayout.addWidget(self.iso)
+        # 「隔离」对第一次用的人是黑话：跟着选项实时给一句人话解释
+        self.iso_hint = CaptionLabel("", self)
+        bind_isolation_hint(self.iso, self.iso_hint)
+        self.viewLayout.addWidget(self.iso_hint)
 
         self.yesButton.setText(tr("开始使用"))
         self.cancelButton.setText(tr("以后再说"))
