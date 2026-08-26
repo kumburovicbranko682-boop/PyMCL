@@ -49,6 +49,7 @@ class VersionPage(QWidget):
         self.backend = backend
         self._all_versions: list[dict] = []
         self._fetched = False
+        self._fetching = False
         self._cols = 0
         # 首屏只建一屏卡片：每张 Fluent 卡 ~7ms，一次建 80 张光构造就
         # 500ms+，还占内存。翻页用「加载更多」补，步长 80。
@@ -143,11 +144,15 @@ class VersionPage(QWidget):
             self.instance_box.setCurrentText(CONFIG.get("default_instance"))
         self.instance_box.blockSignals(False)
         self._all_versions = self.backend.get_version_list()
+        self._start_fetch()
         self._refill()
         self._reload_installed()
+
+    def _start_fetch(self):
         if self._fetched:
             return
         self._fetched = True
+        self._fetching = True
         self.backend.call_async(
             self.backend.fetch_version_list,
             self._on_versions_fetched,
@@ -155,11 +160,13 @@ class VersionPage(QWidget):
         )
 
     def _on_versions_fetched(self, rows):
+        self._fetching = False
         self._all_versions = rows or []
         self._refill()
 
     def _on_versions_err(self, err):
         self._fetched = False
+        self._fetching = False
         msg = str(err or tr("未知错误"))
         InfoBar.error(
             tr("版本列表加载失败"),
@@ -174,8 +181,14 @@ class VersionPage(QWidget):
                 if item.widget():
                     item.widget().deleteLater()
             self.grid.addWidget(
-                EmptyState(FIF.INFO, tr("版本列表加载失败")), 0, 0)
+                EmptyState(FIF.INFO, tr("版本列表加载失败，多为网络波动"),
+                           action_text=tr("重试"),
+                           on_action=self._retry_fetch), 0, 0)
             self._cols = 1
+
+    def _retry_fetch(self):
+        self._start_fetch()
+        self._refill()
 
     def reload_installed_only(self):
         cur = self.instance_box.currentText()
@@ -212,7 +225,12 @@ class VersionPage(QWidget):
                 rows.append(v)
 
         if not rows:
-            self.grid.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的版本")), 0, 0)
+            if not self._all_versions and self._fetching:
+                # 清单还在后台拉取：别谎报「没有匹配的版本」
+                self.grid.addWidget(
+                    EmptyState(FIF.SYNC, tr("正在获取版本列表…")), 0, 0)
+            else:
+                self.grid.addWidget(EmptyState(FIF.SEARCH, tr("没有匹配的版本")), 0, 0)
             self._cols = 1
             return
         cols = grid_columns(self.scroll, self, 240)
