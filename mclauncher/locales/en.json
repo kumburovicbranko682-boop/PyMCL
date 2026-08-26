@@ -60,7 +60,7 @@
   "个性化布局": "Personalized layout",
   "为当前实例增添玩法": "Add more to play with in this instance",
   "主加载器": "Primary Loader",
-  "主加载器只能选一个。Forge 可同时勾选 OptiFine（放入 mods）。": "Pick only one main loader. Forge can also enable OptiFine (placed in mods).",
+  "直接点「开始安装」就是原版。想装 Mod 才需要选加载器：主加载器只能选一个，Forge 可同时勾选 OptiFine（放入 mods）。": "Just click Install for vanilla. Loaders are only needed for mods: pick one main loader; Forge can also enable OptiFine (placed in mods).",
   "主页": "Home",
   "主页 — Minecraft 新闻 / 自定义主页": "Home — Minecraft news / custom homepage",
   "主页已设为空白": "Home page set to blank",

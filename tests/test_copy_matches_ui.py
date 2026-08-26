@@ -61,6 +61,19 @@ class CopyMatchesUiTest(unittest.TestCase):
                              f"联机页文案不应再出现黑话「{jargon}」")
         self.assertIn("邀请码即可加入", src, "开头应直接告诉玩家怎么加入")
 
+    def test_install_wizard_leads_with_vanilla_path(self):
+        """安装向导第一句必须先讲「直接点开始安装就是原版」，
+        再谈加载器——不能拿「主加载器只能选一个」当开场白。"""
+        src = (ROOT / "app" / "pages" / "install_wizard.py").read_text(encoding="utf-8")
+        self.assertIn("直接点「开始安装」就是原版", src,
+                      "向导引导句应先告诉原版玩家零操作通过")
+        self.assertIn("想装 Mod 才需要选加载器", src,
+                      "应说明加载器只与装 Mod 有关")
+        vanilla_at = src.find("直接点「开始安装」就是原版")
+        loader_at = src.find("主加载器只能选一个")
+        self.assertTrue(0 <= vanilla_at < loader_at,
+                        "原版指引必须出现在加载器规则之前")
+
     def test_download_source_labels_are_shared(self):
         """首次向导与设置页必须共用 DOWNLOAD_SOURCE_LABELS，不许各写一份。"""
         for rel in ("app/pages/first_run.py", "app/pages/settings_page.py"):

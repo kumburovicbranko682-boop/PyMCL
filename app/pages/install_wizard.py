@@ -18,7 +18,10 @@ class InstallWizardDialog(MessageBoxBase):
         self.instance = instance
         self._dismissed = False
         self.viewLayout.addWidget(SubtitleLabel(f"安装 {mc_version}", self))
-        hint = BodyLabel(tr("主加载器只能选一个。Forge 可同时勾选 OptiFine（放入 mods）。"), self)
+        # 先告诉人「什么都不改就是原版」，再谈加载器——别让第一次装游戏的人
+        # 对着 Fabric/Forge/OptiFine 一排行话发懵。
+        hint = BodyLabel(tr("直接点「开始安装」就是原版。想装 Mod 才需要选加载器："
+                            "主加载器只能选一个，Forge 可同时勾选 OptiFine（放入 mods）。"), self)
         hint.setWordWrap(True)
         self.viewLayout.addWidget(hint)
 
