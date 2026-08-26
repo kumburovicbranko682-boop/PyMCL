@@ -20,7 +20,7 @@ from qfluentwidgets import (
 from mclauncher.config import CONFIG
 from mclauncher.i18n import tr
 from ..pcl_chrome import Theme, ghost_btn_qss, row_qss
-from ..widgets import EmptyState, IconTile, Pill
+from ..widgets import EmptyState, IconTile, Pill, confirm_mod_update
 from .catalog_page import PclCard
 
 
@@ -126,7 +126,10 @@ class ModManagerPage(QWidget):
         bar.addStretch(1)
         self.folder_btn = TransparentPushButton(FIF.FOLDER, tr("打开 mods 文件夹"))
         self.import_btn = TransparentPushButton(FIF.ADD, tr("导入 jar"))
-        self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
+        # 后端查到新版本会直接下载替换、删掉旧 jar——叫「检查更新」
+        # 是在骗人：人以为只看一眼，文件已经被换掉了。
+        self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查并更新"))
+        self.update_btn.setToolTip(tr("联网检查已启用模组的新版本，发现后直接下载替换旧文件"))
         for b in (self.folder_btn, self.import_btn, self.update_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
@@ -316,8 +319,12 @@ class ModManagerPage(QWidget):
             self._install_jars(paths)
 
     def _check_updates(self):
+        inst = self._current_instance()
+        # 会替换/删除文件的批量动作，和删除单个模组一样要先问一声
+        if not confirm_mod_update(self, inst):
+            return
         try:
-            self.backend.start_mod_updates(self._current_instance())
+            self.backend.start_mod_updates(inst)
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)

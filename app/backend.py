@@ -1265,7 +1265,9 @@ class BackendAPI(QObject):
         return check_updates(self._instance(instance))
 
     def start_mod_updates(self, instance: str) -> str:
-        return self.start_task(f"检查模组更新 {instance}", self._mod_update_impl, instance)
+        # 任务标题也要说实话：这个任务查到更新会直接替换文件，
+        # 不是只读的「检查」。
+        return self.start_task(f"检查并更新模组 {instance}", self._mod_update_impl, instance)
 
     def apply_mod_update(self, instance: str, row: dict) -> str:
         from mclauncher.mod_update import apply_update

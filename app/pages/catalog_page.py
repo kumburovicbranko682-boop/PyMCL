@@ -377,7 +377,10 @@ class PclCatalogPage(QWidget):
             b.setFixedHeight(28)
             b.setCheckable(True)
         self.mode_search.setChecked(True)
-        self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
+        # 与模组管理页同一后端动作：查到新版本直接替换旧 jar，
+        # 文案必须承认这一点，不能装成只读的「检查」。
+        self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查并更新"))
+        self.update_btn.setToolTip(tr("联网检查已启用模组的新版本，发现后直接下载替换旧文件"))
         self.installed_ver_box = ComboBox()
         self.installed_ver_box.setFixedWidth(160)
         self.installed_ver_box.addItem(tr("实例目录"))
@@ -694,6 +697,9 @@ class PclCatalogPage(QWidget):
 
     def _check_updates(self):
         inst = self._current_instance()
+        from ..widgets import confirm_mod_update
+        if not confirm_mod_update(self, inst):
+            return
         self.backend.start_mod_updates(inst)
 
     def _install(self, item, tile=None):
