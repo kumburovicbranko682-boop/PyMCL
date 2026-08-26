@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 
-from . import global_mods, utils, version_settings
+from . import global_mods, gpu, utils, version_settings
 from .argsplit import split_args
 from .config import CONFIG
 
@@ -84,6 +84,7 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "window_title": (settings.get("window_title") or "").strip(),
         "wrapper": str(settings.get("wrapper") or "").strip(),
         "game_lang": game_lang,
+        "gpu_mode": gpu.resolve_mode(settings),
     }
 
 

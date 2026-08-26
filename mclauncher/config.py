@@ -98,6 +98,8 @@ DEFAULT_CONFIG = {
     "global_mods_dir": "",
     "launcher_visibility": "keep",
     "gc_preset": "auto",
+    # 显卡偏好（PCL2「尝试使用独立显卡」同款）：auto / discrete / integrated
+    "gpu_mode": "auto",
     "download_limit_kbps": 0,
     "auto_check_update": True,
     "custom_homepage": "",

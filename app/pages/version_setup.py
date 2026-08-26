@@ -72,6 +72,17 @@ class VersionSetupDialog(MessageBoxBase):
         if gck and gck in GC_LABELS:
             self.gc.setCurrentText(GC_LABELS[gck])
 
+        # 显卡偏好（PCL2「尝试使用独立显卡」同款），空 = 跟随全局设置
+        self._gpu_labels = {
+            "discrete": tr("强制独立显卡（高性能）"),
+            "integrated": tr("强制核芯显卡（省电）"),
+        }
+        self.gpu = ComboBox()
+        self.gpu.addItems([tr("跟随全局")] + list(self._gpu_labels.values()))
+        gpuk = data.get("gpu") or ""
+        if gpuk in self._gpu_labels:
+            self.gpu.setCurrentText(self._gpu_labels[gpuk])
+
         self.game = LineEdit()
         self.game.setPlaceholderText(tr("附加游戏参数"))
         self.game.setText(data.get("game_args") or "")
@@ -137,6 +148,7 @@ class VersionSetupDialog(MessageBoxBase):
         form.addRow(form_label(tr("内存 MB")), self.memory)
         form.addRow(form_label("Java"), self.java)
         form.addRow(form_label("GC"), self.gc)
+        form.addRow(form_label(tr("显卡")), self.gpu)
         form.addRow(form_label(tr("JVM 参数")), self.jvm)
         form.addRow(form_label(tr("游戏参数")), self.game)
         form.addRow(form_label(tr("绑定账号")), self.login)
@@ -207,6 +219,8 @@ class VersionSetupDialog(MessageBoxBase):
             "nide8_id": self.nide8.text().strip(),
             "auth_server": self.auth_server.text().strip(),
             "gc": gc_inv.get(self.gc.currentText(), ""),
+            "gpu": {v: k for k, v in self._gpu_labels.items()}.get(
+                self.gpu.currentText(), ""),
             "window_title": self.title.text().strip(),
             "window_mode": "maximize" if self.win_mode.currentText() == tr("全屏") else "window",
             "window_width": size_of(self.win_w),

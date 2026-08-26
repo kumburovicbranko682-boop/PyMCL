@@ -43,6 +43,7 @@ DEFAULTS = {
     "auth_server_name": "",
     "nide8_id": "",
     "gc": "",
+    "gpu": "",
     "window_title": "",
     "window_mode": "window",
     "window_width": None,

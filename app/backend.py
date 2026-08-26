@@ -1172,6 +1172,7 @@ class BackendAPI(QObject):
             "global_mods_dir": CONFIG.get("global_mods_dir") or "",
             "launcher_visibility": CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": CONFIG.get("gc_preset") or "auto",
+            "gpu_mode": CONFIG.get("gpu_mode") or "auto",
             "download_limit_kbps": int(CONFIG.get("download_limit_kbps") or 0),
             "auto_check_update": bool(CONFIG.get("auto_check_update", True)),
             "custom_homepage": CONFIG.get("custom_homepage") or "",
@@ -1258,6 +1259,7 @@ class BackendAPI(QObject):
                                 else CONFIG.get("global_mods_dir") or ""),
             "launcher_visibility": data.get("launcher_visibility") or CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": data.get("gc_preset") or CONFIG.get("gc_preset") or "auto",
+            "gpu_mode": data.get("gpu_mode") or CONFIG.get("gpu_mode") or "auto",
             "download_limit_kbps": int(_keep("download_limit_kbps", default=0) or 0),
             "auto_check_update": bool(data.get("auto_check_update", CONFIG.get("auto_check_update", True))),
             "custom_homepage": data.get("custom_homepage") if "custom_homepage" in data else CONFIG.get("custom_homepage") or "",
@@ -2520,12 +2522,20 @@ class BackendAPI(QObject):
         if prep.get("wrapper"):
             cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
             log(f"包装器命令: {prep['wrapper']}")
+        from mclauncher import gpu as gpu_mod
+        gpu_env, gpu_note = gpu_mod.launch_env(prep.get("gpu_mode"), java_exe)
+        if gpu_note:
+            log(gpu_note)
+        env = None
+        if gpu_env:
+            env = os.environ.copy()
+            env.update(gpu_env)
         log(f"实际启动: {cmd[0]}")
         log(tr("正在启动游戏进程…"))
         progress(3, 4, tr("游戏启动中"))
         worker = QThread.currentThread()
         proc = GameProcess(cmd, cwd=game_dir, on_line=log, priority=prep["priority"],
-                           window_title=prep.get("window_title") or "")
+                           window_title=prep.get("window_title") or "", env=env)
         game_key = getattr(worker, "task_id", "") or f"pid-{proc.proc.pid}"
         with self._game_lock:
             self._game_proc = proc

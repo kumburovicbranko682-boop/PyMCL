@@ -937,6 +937,7 @@ class BackendAPI:
             "proxy_pass": CONFIG.get("proxy_pass") or "",
             "launcher_visibility": CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": CONFIG.get("gc_preset") or "auto",
+            "gpu_mode": CONFIG.get("gpu_mode") or "auto",
             "download_limit_kbps": int(CONFIG.get("download_limit_kbps") or 0),
             "auto_check_update": bool(CONFIG.get("auto_check_update", True)),
             "custom_homepage": CONFIG.get("custom_homepage") or "",
@@ -1020,9 +1021,9 @@ class BackendAPI:
             patch["proxy_user"] = str(data.get("proxy_user") or "")
         if "proxy_pass" in data:
             patch["proxy_pass"] = str(data.get("proxy_pass") or "")
-        for key in ("launcher_visibility", "gc_preset", "custom_homepage", "homepage_mode",
-                    "window_mode", "offline_skin", "instances_dir", "default_java",
-                    "game_lang"):
+        for key in ("launcher_visibility", "gc_preset", "gpu_mode", "custom_homepage",
+                    "homepage_mode", "window_mode", "offline_skin", "instances_dir",
+                    "default_java", "game_lang"):
             if key in data:
                 patch[key] = data.get(key)
         if "download_limit_kbps" in data:
@@ -2179,12 +2180,20 @@ class BackendAPI:
         if prep.get("wrapper"):
             cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
             log(f"包装器命令: {prep['wrapper']}")
+        from mclauncher import gpu as gpu_mod
+        gpu_env, gpu_note = gpu_mod.launch_env(prep.get("gpu_mode"), java_exe)
+        if gpu_note:
+            log(gpu_note)
+        env = None
+        if gpu_env:
+            env = os.environ.copy()
+            env.update(gpu_env)
         log(f"实际启动: {cmd[0]}")
         log("正在启动游戏进程…")
         progress(3, 4, "游戏启动中")
         worker = getattr(_tls, "worker", None)
         proc = GameProcess(cmd, cwd=game_dir, on_line=log, priority=prep["priority"],
-                           window_title=prep.get("window_title") or "")
+                           window_title=prep.get("window_title") or "", env=env)
         game_key = getattr(worker, "task_id", "") or f"pid-{proc.proc.pid}"
         with self._game_lock:
             self._game_proc = proc

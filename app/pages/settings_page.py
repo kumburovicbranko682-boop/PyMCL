@@ -358,6 +358,18 @@ class SettingsPage(QWidget):
             FIF.SPEED_HIGH if hasattr(FIF, "SPEED_HIGH") else FIF.DEVELOPER_TOOLS, tr("内存回收器"), tr("启动时写入 JVM。版本设置可覆盖。"),
             list(gc_map.values()),
             gc_map.get(settings.get("gc_preset") or "auto", gc_map["auto"]))
+        # 显卡偏好（PCL2「尝试使用独立显卡」/ HMCL PRIME offload 同款）
+        gpu_map = {
+            "auto": tr("自动（系统默认）"),
+            "discrete": tr("强制独立显卡（高性能）"),
+            "integrated": tr("强制核芯显卡（省电）"),
+        }
+        self._gpu_keys = {v: k for k, v in gpu_map.items()}
+        self.gpu_card, self.gpu_box = _combo_card(
+            FIF.GAME if hasattr(FIF, "GAME") else FIF.DEVELOPER_TOOLS, tr("游戏显卡"),
+            tr("双显卡设备可强制游戏走独显。Windows 写注册表偏好；Linux 注入 PRIME offload。版本设置可覆盖。"),
+            list(gpu_map.values()),
+            gpu_map.get(settings.get("gpu_mode") or "auto", gpu_map["auto"]))
         self.limit_card, self.limit_spin = _spin_card(
             FIF.CLOUD_DOWNLOAD, tr("下载限速 (KB/s)"), tr("0 表示不限制"),
             0, 102400, int(settings.get("download_limit_kbps") or 0))
@@ -425,6 +437,7 @@ class SettingsPage(QWidget):
         perf_group.addSettingCard(self.memory_card)
         perf_group.addSettingCard(self.auto_mem_card)
         perf_group.addSettingCard(self.gc_card)
+        perf_group.addSettingCard(self.gpu_card)
         perf_group.addSettingCard(self.limit_card)
 
         self.jvm_card, self.jvm_edit = _line_card(
@@ -1336,6 +1349,7 @@ class SettingsPage(QWidget):
             "update_url": self.upd_url.text().strip(),
             "launcher_visibility": self._vis_keys.get(self.vis_box.currentText(), "keep"),
             "gc_preset": self._gc_keys.get(self.gc_box.currentText(), "auto"),
+            "gpu_mode": self._gpu_keys.get(self.gpu_box.currentText(), "auto"),
             "download_limit_kbps": self.limit_spin.value(),
             "auto_check_update": self.auto_upd.isChecked(),
             "ui_motion": self.motion_sw.isChecked(),
