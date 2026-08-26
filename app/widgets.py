@@ -112,8 +112,22 @@ class DeviceCodeDialog(MessageBoxBase):
     def show_code(self, code: str, uri: str):
         self._uri = uri
         self.code.setText(code)
+        # 别让人手抄：代码可选中，且直接送进剪贴板
+        self.code.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.uri.setText(uri)
-        self.hint.setText(tr("请在浏览器打开下面的地址并输入代码："))
+        copied = False
+        try:
+            from PySide6.QtGui import QGuiApplication
+            clipboard = QGuiApplication.clipboard()
+            if clipboard is not None:
+                clipboard.setText(code)
+                copied = True
+        except Exception:
+            pass
+        if copied:
+            self.hint.setText(tr("代码已复制到剪贴板 — 点「打开浏览器」，在打开的页面直接粘贴："))
+        else:
+            self.hint.setText(tr("请在浏览器打开下面的地址并输入代码："))
 
     def show_status(self, text: str):
         self.hint.setText(text)
