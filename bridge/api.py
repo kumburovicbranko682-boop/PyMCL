@@ -539,6 +539,15 @@ class BackendAPI:
     def terracotta_shutdown(self):
         terracotta_mod.stop()
 
+    def terracotta_remember_lobby(self, url: str) -> str:
+        """把大厅地址写进当前实例的 servers.dat（多人列表出现「陶瓦联机大厅」）。
+
+        C 桥的原生 terracotta_enter_world/direct_connect 在启动前用一次性
+        py_rpc 调这里：NBT 写入只有 Python 有实现。
+        """
+        inst = self._instance()
+        return str(terracotta_mod.remember_lobby(url, inst.path))
+
     def terracotta_enter_world(self):
         info = self.terracotta_snapshot()
         url = str(info.get("url") or "")

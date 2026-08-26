@@ -724,6 +724,11 @@ class BackendAPI(QObject):
     def terracotta_shutdown(self):
         terracotta_mod.stop()
 
+    def terracotta_remember_lobby(self, url: str) -> str:
+        """把大厅地址写进当前实例的 servers.dat（多人列表出现「陶瓦联机大厅」）。"""
+        inst = self._instance()
+        return str(terracotta_mod.remember_lobby(url, inst.path))
+
     def terracotta_enter_world(self):
         info = self.terracotta_snapshot()
         url = str(info.get("url") or "")

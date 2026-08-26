@@ -777,7 +777,16 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
          * terracotta_prepare）不再走这里的一次性调用：backend.c 已把它们包进
          * 原生任务机制，UI 能拿到 task_added/finished 事件。 */
         cJSON *r = py_rpc_call(method, params);
-        if (r) return r;
+        if (r) {
+            if (strcmp(method, "terracotta_snapshot") == 0 && cJSON_IsObject(r)) {
+                /* 一次性 Python 进程里 _game_proc 恒为 None，game_running 永远
+                 * 是 false：EziApp 开房前永远弹「游戏还没启动」确认，进入世界
+                 * 在游戏已开着时还会再启动一个。以原生 g_game 的真实状态为准。 */
+                cJSON_DeleteItemFromObject(r, "game_running");
+                cJSON_AddBoolToObject(r, "game_running", backend_game_alive());
+            }
+            return r;
+        }
         /* graceful empty fallbacks so UI stays usable without Python */
         if (strcmp(method, "help_articles") == 0 || strcmp(method, "cached_news") == 0
             || strcmp(method, "fetch_news") == 0 || strcmp(method, "list_loader_versions") == 0
@@ -796,6 +805,7 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
             cJSON_AddStringToObject(o, "room", "");
             cJSON_AddStringToObject(o, "url", "");
             cJSON_AddStringToObject(o, "error", "");
+            cJSON_AddBoolToObject(o, "game_running", backend_game_alive());
             return o;
         }
         if (strcmp(method, "lan_hint") == 0)

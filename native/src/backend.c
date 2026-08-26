@@ -600,10 +600,13 @@ static void *task_run(void *p) {
                         WaitForSingleObject(proc, INFINITE);
                         DWORD code = 0;
                         GetExitCodeProcess(proc, &code);
-                        CloseHandle(rd); CloseHandle(proc);
+                        /* 先把 g_game 摘下来再关句柄：backend_game_alive /
+                         * cancel_task 在别的线程探测 g_game，不能让它们
+                         * 摸到已经 CloseHandle 的句柄。 */
                         pthread_mutex_lock(&g_mu);
                         if (g_game == proc) g_game = NULL;
                         pthread_mutex_unlock(&g_mu);
+                        CloseHandle(rd); CloseHandle(proc);
                         long scode = (long)code;
                         if (code > 0x7FFFFFFFu) scode = (long)(code - 0x100000000ull);
                         /* 对齐 bridge/api.py：finally 里必发，取消也发。 */
@@ -705,6 +708,179 @@ static cJSON *start_task(const char *title, const char *method, cJSON *args) {
 static const char *ensure_inst(const char *name) {
     if (name && name[0]) return name;
     return config_str("default_instance", "default");
+}
+
+/* 原生游戏进程是否还活着（g_game 由 launch_game 任务线程维护）。
+ * 一次性 py_rpc 进程里 Python 侧的 _game_proc 永远是 None，所以
+ * terracotta 快照 / 进入世界 必须以这里的状态为准。 */
+int backend_game_alive(void) {
+    int alive;
+    pthread_mutex_lock(&g_mu);
+    alive = g_game != NULL && WaitForSingleObject(g_game, 0) == WAIT_TIMEOUT;
+    pthread_mutex_unlock(&g_mu);
+    return alive;
+}
+
+/* 对齐 mclauncher/terracotta.split_join_url：去掉协议头，从最后一个冒号
+ * 拆端口，缺省 25565/127.0.0.1。端口不是合法数字时报错（Python 侧是
+ * int() 抛异常）。 */
+static int terra_split_url(const char *text, char *host, size_t hn, int *port) {
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s", text ? text : "");
+    char *s = buf;
+    while (*s == ' ' || *s == '\t' || *s == '\r' || *s == '\n') s++;
+    size_t len = strlen(s);
+    while (len > 0 && (s[len - 1] == ' ' || s[len - 1] == '\t'
+                       || s[len - 1] == '\r' || s[len - 1] == '\n'))
+        s[--len] = 0;
+    if (!*s) return -1;
+    char *scheme = strstr(s, "://");
+    if (scheme) s = scheme + 3;
+    *port = 25565;
+    char *colon = strrchr(s, ':');
+    if (colon) {
+        char *end = NULL;
+        long p = strtol(colon + 1, &end, 10);
+        if (!end || *end || end == colon + 1 || p <= 0 || p > 65535) return -1;
+        *port = (int)p;
+        *colon = 0;
+    }
+    snprintf(host, hn, "%s", *s ? s : "127.0.0.1");
+    return 0;
+}
+
+static unsigned long long path_mtime(const char *path) {
+    wchar_t *w = pymcl_u8_to_wide(path);
+    if (!w) return 0;
+    WIN32_FILE_ATTRIBUTE_DATA d;
+    BOOL ok = GetFileAttributesExW(w, GetFileExInfoStandard, &d);
+    free(w);
+    if (!ok) return 0;
+    ULARGE_INTEGER u;
+    u.LowPart = d.ftLastWriteTime.dwLowDateTime;
+    u.HighPart = d.ftLastWriteTime.dwHighDateTime;
+    return (unsigned long long)u.QuadPart;
+}
+
+/* 对齐 bridge/api.py::_launch_into_server。以前这两个方法根本不在 C 桥的
+ * 分发表里：EziApp/WinUI 的「进入世界」「公网直连」按钮一点就是
+ * unknown method。也不能简单丢给一次性 py_rpc——launch_game 的工作线程
+ * 会随一次性进程退出而被杀死，游戏根本起不来（或 120s 超时被砍）。
+ * 这里在原生侧校验、组参，启动仍走原生 launch_game 任务：g_game、
+ * game_started/game_exited、取消任务全都复用现成机制。 */
+static cJSON *terracotta_launch_into(const char *method, cJSON *params) {
+    char host[256] = "", url[512] = "";
+    int port = 25565;
+    if (strcmp(method, "terracotta_direct_connect") == 0) {
+        if (terra_split_url(pstr(params, "address", ""), host, sizeof(host), &port) != 0
+            || !host[0] || strcmp(host, "127.0.0.1") == 0 || pymcl_ieq(host, "localhost")) {
+            pymcl_set_error("请输入房主的公网地址，例如 1.2.3.4:25565");
+            return NULL;
+        }
+        snprintf(url, sizeof(url), "%s:%d", host, port);
+    } else {
+        /* enter_world：陶瓦状态在内核进程/磁盘里，一次性快照查询足够快。 */
+        cJSON *snap = py_rpc_call("terracotta_snapshot", NULL);
+        if (!snap) return NULL; /* py_rpc 已带上具体错误（含缺 Python） */
+        const char *state = cJSON_GetStringValue(cJSON_GetObjectItem(snap, "state"));
+        const char *u = cJSON_GetStringValue(cJSON_GetObjectItem(snap, "url"));
+        if (!state || strcmp(state, "guest-ok") != 0 || !u || !u[0]) {
+            cJSON_Delete(snap);
+            pymcl_set_error("还没连上房间。请先输入邀请码加入。");
+            return NULL;
+        }
+        snprintf(url, sizeof(url), "%s", u);
+        cJSON_Delete(snap);
+        if (terra_split_url(url, host, sizeof(host), &port) != 0) {
+            pymcl_set_error("还没有联机地址。");
+            return NULL;
+        }
+    }
+    char inst[128];
+    snprintf(inst, sizeof(inst), "%s", ensure_inst(NULL));
+    /* servers.dat 是 NBT，只有 Python 有写实现：尽力而为，失败不阻断直连。 */
+    int remembered = 0;
+    {
+        cJSON *rp = cJSON_CreateObject();
+        cJSON_AddStringToObject(rp, "url", url);
+        cJSON *rr = py_rpc_call_t("terracotta_remember_lobby", rp, 30);
+        cJSON_Delete(rp);
+        if (rr) { remembered = 1; cJSON_Delete(rr); }
+    }
+    if (backend_game_alive()) {
+        if (remembered)
+            return cJSON_CreateString("请到游戏「多人游戏」双击「陶瓦联机大厅」。");
+        char m[384];
+        snprintf(m, sizeof(m), "游戏已在运行。请到「多人游戏」手动添加服务器 %s:%d。",
+                 host, port);
+        return cJSON_CreateString(m);
+    }
+    char version[256] = "";
+    {
+        cJSON *ids = NULL;
+        instance_installed_ids(inst, &ids);
+        char vd[PYMCL_PATH], p[PYMCL_PATH];
+        instance_versions_dir(inst, vd, sizeof(vd));
+        unsigned long long best = 0;
+        cJSON *v;
+        cJSON_ArrayForEach(v, ids) {
+            const char *vid = cJSON_GetStringValue(v);
+            if (!vid || !vid[0]) continue;
+            pymcl_path_join(p, sizeof(p), vd, vid);
+            unsigned long long mt = path_mtime(p);
+            if (!version[0] || mt > best) {
+                best = mt;
+                snprintf(version, sizeof(version), "%s", vid);
+            }
+        }
+        cJSON_Delete(ids);
+    }
+    if (!version[0]) {
+        pymcl_set_error("请先到「启动」页安装一个版本。");
+        return NULL;
+    }
+    char account[256] = "离线模式", username[256] = "Player";
+    {
+        cJSON *root = accounts_load();
+        const char *active = cJSON_GetStringValue(cJSON_GetObjectItem(root, "active"));
+        cJSON *acc = NULL, *it;
+        if (active && active[0])
+            cJSON_ArrayForEach(it, cJSON_GetObjectItem(root, "accounts")) {
+                const char *nm = cJSON_GetStringValue(cJSON_GetObjectItem(it, "name"));
+                if (nm && strcmp(nm, active) == 0) { acc = it; break; }
+            }
+        const char *nm = acc ? cJSON_GetStringValue(cJSON_GetObjectItem(acc, "name")) : NULL;
+        const char *ty = acc ? cJSON_GetStringValue(cJSON_GetObjectItem(acc, "type")) : NULL;
+        if (nm && nm[0]) {
+            snprintf(username, sizeof(username), "%s", nm);
+            if (ty && strcmp(ty, "microsoft") == 0)
+                snprintf(account, sizeof(account), "%s", nm);
+        }
+        cJSON_Delete(root);
+    }
+    int mem = config_int("memory_mb", 4096);
+    int w = config_int("width", 854), h = config_int("height", 480);
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddStringToObject(args, "instance", inst);
+    cJSON_AddStringToObject(args, "version", version);
+    cJSON_AddStringToObject(args, "account", account);
+    cJSON_AddStringToObject(args, "username", username);
+    cJSON_AddNumberToObject(args, "memory_mb", mem > 0 ? mem : 4096);
+    cJSON_AddNumberToObject(args, "width", w > 0 ? w : 854);
+    cJSON_AddNumberToObject(args, "height", h > 0 ? h : 480);
+    {
+        char ports[16];
+        snprintf(ports, sizeof(ports), "%d", port);
+        cJSON *xa = cJSON_CreateArray();
+        cJSON_AddItemToArray(xa, cJSON_CreateString("--server"));
+        cJSON_AddItemToArray(xa, cJSON_CreateString(host));
+        cJSON_AddItemToArray(xa, cJSON_CreateString("--port"));
+        cJSON_AddItemToArray(xa, cJSON_CreateString(ports));
+        cJSON_AddItemToObject(args, "extra_game_args", xa);
+    }
+    cJSON *r = start_task("启动游戏", "launch_game", args);
+    cJSON_Delete(args);
+    return r;
 }
 
 static cJSON *rpc_get_instances(void) {
@@ -1205,6 +1381,9 @@ cJSON *backend_call(const char *method, cJSON *params) {
         return start_task("检查模组更新", method, params);
     if (strcmp(method, "terracotta_prepare") == 0)
         return start_task("准备陶瓦联机", method, params);
+    if (strcmp(method, "terracotta_enter_world") == 0
+        || strcmp(method, "terracotta_direct_connect") == 0)
+        return terracotta_launch_into(method, params);
 
     /* Align remaining RPC with Python bridge/api.py (native first, then py_rpc). */
     {

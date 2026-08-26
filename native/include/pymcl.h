@@ -258,6 +258,7 @@ int delete_instance_file(const char *instance, const char *subdir, const char *f
 typedef void (*sse_emit_fn)(const char *event, cJSON *data);
 void backend_init(sse_emit_fn emit);
 cJSON *backend_call(const char *method, cJSON *params);
+int backend_game_alive(void);
 void backend_shutdown(void);
 int server_run(const char *host, int port, const char *token);
 cJSON *py_rpc_call(const char *method, cJSON *params);
