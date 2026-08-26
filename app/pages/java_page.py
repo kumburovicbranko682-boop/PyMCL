@@ -64,6 +64,7 @@ class JavaPage(QWidget):
         self.setObjectName("javaPage")
         self.backend = backend
         self._vendors = []
+        self._scanning = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 20, 28, 20)
@@ -134,22 +135,41 @@ class JavaPage(QWidget):
     def reload(self, scan_system: bool = False):
         local = self.backend.get_java_list(scan_system=False)
         self._fill(local)
-        if not scan_system:
+        if not scan_system or self._scanning:
             return
         call_async = getattr(self.backend, "call_async", None)
         if callable(call_async):
+            self._set_scanning(True)
             call_async(
                 lambda: self.backend.get_java_list(True),
-                self._fill,
+                self._on_scan_done,
                 self._on_scan_err,
             )
             return
         try:
-            self._fill(self.backend.get_java_list(scan_system=True))
+            self._on_scan_done(self.backend.get_java_list(scan_system=True))
         except Exception as exc:
             self._on_scan_err(exc)
 
+    def _set_scanning(self, busy: bool):
+        self._scanning = busy
+        self.refresh_btn.setEnabled(not busy)
+        self.refresh_btn.setText(tr("检测中…") if busy else tr("重新检测"))
+
+    def _on_scan_done(self, javas):
+        self._set_scanning(False)
+        self._fill(javas)
+        n = len(list(javas or []))
+        InfoBar.success(
+            tr("检测完成"),
+            tr("共找到 {0} 个 Java").format(n) if n else tr("未检测到 Java，请从下方下载"),
+            parent=self,
+            position=InfoBarPosition.TOP,
+            duration=3000,
+        )
+
     def _on_scan_err(self, err):
+        self._set_scanning(False)
         InfoBar.error(
             tr("扫描 Java 失败"),
             str(err or tr("未知错误")),
