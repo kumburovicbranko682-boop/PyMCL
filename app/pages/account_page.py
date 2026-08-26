@@ -150,7 +150,9 @@ class AccountPage(QWidget):
                 item.widget().deleteLater()
         rows = self.backend.get_account_rows()
         if not rows:
-            self.list_box.addWidget(CaptionLabel(tr("还没有正版或皮肤站账号")))
+            # 这个列表收录所有类型（含离线），文案别只提两种；顺便指路。
+            self.list_box.addWidget(CaptionLabel(
+                tr("还没有账号——在下面登录微软 / 皮肤站，或直接保存一个离线账号")))
         for row in rows:
             card = QWidget()
             card.setObjectName("accCard")
@@ -190,7 +192,8 @@ class AccountPage(QWidget):
             bar.addWidget(del_btn)
             self.list_box.addWidget(card)
         active = next((r for r in rows if r.get("active")), None) or (rows[0] if rows else None)
-        self.skin_name.setText(active["name"] if active else "Steve")
+        # 没有账号就老实写「未登录」，别顶着一个不存在的「Steve」假装登录过
+        self.skin_name.setText(active["name"] if active else tr("未登录"))
         self._load_skin(active["body"] if active else "")
 
     def restyle(self):
