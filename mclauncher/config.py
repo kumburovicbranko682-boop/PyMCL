@@ -29,7 +29,8 @@ DEFAULT_CONFIG = {
     "curseforge_api_key": "$2a$10$o8pygPrhvKBHuuh5imL2W.LCNFhB15zBYAExXx/TqTx/Zp5px2lxu",
     # GitHub raw/releases 国内镜像前缀（会拼在原始 https URL 前面）
     "github_proxy_prefixes": [
-        "https://gitproxy.mrhjx.cn/",
+        "https://ghfast.top/",
+        "https://gh.llkk.cc/",
         "https://ghproxy.vip/",
         "https://gh-proxy.com/",
         "https://v6.gh-proxy.org/",
@@ -64,7 +65,8 @@ DEFAULT_CONFIG = {
     "default_isolation": "none",
     "default_jvm_args": "",
     "default_priority": "normal",
-    "update_url": "https://pymcl.dev/update.json",
+    # 自定义更新清单地址；留空 = GitHub Releases（旧默认 pymcl.dev 已失效，出现时自动忽略）
+    "update_url": "",
     "theme_color": "#2E9B6B",
     "ui_dark": False,
     "ui_background": "",
