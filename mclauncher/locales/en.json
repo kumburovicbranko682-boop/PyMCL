@@ -979,5 +979,6 @@
   "实例 {0}": "Instance {0}",
   "实例 {0} · 点击「启动游戏」进入世界": "Instance {0} · press “Launch Game” to play",
   "未检测到 Java：可重新检测本机，或从下方下载": "No Java found: rescan this machine, or download one below",
-  "设置已生效": "Settings applied"
+  "设置已生效": "Settings applied",
+  "完成后可在启动器目录的 exports 文件夹找到 {0}.mrpack": "When it finishes, look for {0}.mrpack in the launcher's exports folder"
 }

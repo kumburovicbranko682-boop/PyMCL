@@ -774,8 +774,9 @@ class SettingsPage(QWidget):
         from mclauncher.config import CONFIG
         name = CONFIG.get("default_instance") or "default"
         self.backend.export_modpack(name)
-        InfoBar.success(tr("开始导出"), f"实例 {name} → exports/", parent=self,
-                        position=InfoBarPosition.TOP, duration=3000)
+        InfoBar.success(tr("开始导出"),
+                        tr("完成后可在启动器目录的 exports 文件夹找到 {0}.mrpack").format(name),
+                        parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def _test_ai(self):
         # 只拿页面上当前填的值去试连，不落盘。

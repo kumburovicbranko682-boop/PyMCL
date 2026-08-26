@@ -4,8 +4,9 @@
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    CaptionLabel, FluentIcon as FIF, MessageBox, ScrollArea, SimpleCardWidget,
-    StrongBodyLabel, SubtitleLabel, TransparentToolButton,
+    CaptionLabel, FluentIcon as FIF, InfoBar, InfoBarPosition, MessageBox,
+    ScrollArea, SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
+    TransparentToolButton,
 )
 
 from mclauncher.config import CONFIG
@@ -54,7 +55,8 @@ class InstanceCard(SimpleCardWidget):
         java_btn.clicked.connect(lambda: page.pick_java(info["name"]))
         rename_btn.clicked.connect(lambda: page.rename(info["name"]))
         delete_btn.clicked.connect(lambda: page.delete(info["name"]))
-        export_btn.clicked.connect(lambda: page.export_pack(info["name"]))
+        export_btn.clicked.connect(
+            lambda checked=False, b=export_btn: page.export_pack(info["name"], b))
         saves_btn.clicked.connect(lambda: page.open_saves(info["name"]))
         actions.addStretch(1)
         actions.addWidget(open_btn)
@@ -172,8 +174,16 @@ class InstancePage(QWidget):
                 MessageBox(tr("重命名失败"), str(e), self).exec()
             self.reload()
 
-    def export_pack(self, name: str):
+    def export_pack(self, name: str, source=None):
+        # 导出跑在后台任务里，点击处必须给「开始了、去哪找结果」的反馈，
+        # 否则这颗按钮看起来像坏的。
+        win = self.window()
+        if source is not None and hasattr(win, "fly_to_tasks"):
+            win.fly_to_tasks(source, name)
         self.backend.export_modpack(name)
+        InfoBar.success(tr("开始导出"),
+                        tr("完成后可在启动器目录的 exports 文件夹找到 {0}.mrpack").format(name),
+                        parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def pick_java(self, name: str):
         if self._picking_java:
