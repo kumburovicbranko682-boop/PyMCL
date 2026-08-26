@@ -2,7 +2,7 @@
 """版本页：版本卡片网格 + 加载器安装 + 已安装管理。"""
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     Action, BodyLabel, CaptionLabel, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
     MessageBox, Pivot, PushButton, CheckBox, RoundMenu, ScrollArea, SearchLineEdit,
@@ -30,7 +30,7 @@ class VersionCard(SimpleCardWidget):
         colors = {"release": "#2FA36B", "snapshot": "#E8862E", "old_alpha": "#7C5CD6", "old_beta": "#7C5CD6"}
         top.addWidget(Pill(labels.get(vtype, vtype), colors.get(vtype, "#E8862E")))
         layout.addLayout(top)
-        layout.addWidget(CaptionLabel(f'发布于 {info["date"]}'))
+        layout.addWidget(CaptionLabel(tr("发布于 {0}").format(info["date"])))
         layout.addStretch(1)
 
         row = QHBoxLayout()
@@ -103,6 +103,8 @@ class VersionPage(QWidget):
         self.scroll.setWidget(self.grid_host)
         root.addWidget(self.scroll, 3)
 
+        # 已安装卡片按内容取高（上限 240px 内部滚动），不再固定占页面
+        # 1/4 的死空间——没装版本时那是一大块空白，版本网格反而被压扁。
         installed_card = SimpleCardWidget(self)
         ic_layout = QVBoxLayout(installed_card)
         ic_layout.setContentsMargins(20, 14, 20, 14)
@@ -117,10 +119,23 @@ class VersionPage(QWidget):
         head.addWidget(self.repair_btn)
         head.addWidget(self.uninstall_btn)
         ic_layout.addLayout(head)
-        self.installed_area = QVBoxLayout()
+        self.installed_scroll = ScrollArea()
+        self.installed_scroll.setWidgetResizable(True)
+        self.installed_scroll.setFrameShape(QFrame.NoFrame)
+        # 卡片内滚动区保持透明，主题刷新时不要刷成页面底色
+        self.installed_scroll.setProperty("pymclTransparentScroll", True)
+        self.installed_scroll.setStyleSheet(
+            "ScrollArea { background: transparent; border: none; }")
+        self.installed_scroll.setMaximumHeight(240)
+        inst_host = QWidget()
+        inst_host.setStyleSheet("background: transparent;")
+        self.installed_area = QVBoxLayout(inst_host)
+        self.installed_area.setContentsMargins(0, 0, 0, 0)
         self.installed_area.setSpacing(6)
-        ic_layout.addLayout(self.installed_area)
-        root.addWidget(installed_card, 1)
+        self.installed_area.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
+        self.installed_scroll.setWidget(inst_host)
+        ic_layout.addWidget(self.installed_scroll)
+        root.addWidget(installed_card)
 
         self.search.textChanged.connect(self._on_filter_changed)
         self.pivot.currentItemChanged.connect(self._on_filter_changed)
@@ -196,6 +211,7 @@ class VersionPage(QWidget):
         while self.grid.count():
             item = self.grid.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
 
         text = self.search.text().strip().lower()
@@ -221,7 +237,7 @@ class VersionPage(QWidget):
         for i, v in enumerate(shown):
             self.grid.addWidget(VersionCard(v, self._install), i // cols, i % cols)
         if len(rows) > self._limit:
-            more = PushButton(f"加载更多（还有 {len(rows) - self._limit}）")
+            more = PushButton(tr("加载更多（还有 {0}）").format(len(rows) - self._limit))
             more.clicked.connect(self._more)
             self.grid.addWidget(more, (len(shown) + cols - 1) // cols, 0, 1, cols)
 
@@ -229,16 +245,24 @@ class VersionPage(QWidget):
         while self.installed_area.count():
             item = self.installed_area.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
             elif item.layout():
                 while item.layout().count():
                     sub = item.layout().takeAt(0)
                     if sub.widget():
+                        sub.widget().hide()
                         sub.widget().deleteLater()
 
         self._installed_checks = []
         instance = self.instance_box.currentText() or "default"
-        for v in self.backend.get_installed_versions(instance, include_hidden=self._show_hidden):
+        installed = self.backend.get_installed_versions(
+            instance, include_hidden=self._show_hidden)
+        if not installed:
+            hint = CaptionLabel(tr("还没有安装版本，从上方选择一个版本开始"))
+            self.installed_area.addWidget(hint)
+            return
+        for v in installed:
             row = QHBoxLayout()
             cb = CheckBox(v)
             low = v.lower()
@@ -320,7 +344,9 @@ class VersionPage(QWidget):
         except Exception as e:
             MessageBox(tr("创建失败"), str(e), self).exec()
             return
-        MessageBox(tr("已创建"), f"桌面快捷方式：\n{path}\n\n双击即可直接启动该版本。", self).exec()
+        MessageBox(tr("已创建"),
+                   tr("桌面快捷方式：\n{0}\n\n双击即可直接启动该版本。").format(path),
+                   self).exec()
 
     def _open_folder(self, instance, version, which):
         try:
@@ -366,7 +392,9 @@ class VersionPage(QWidget):
             box = MessageBox(tr("未选择"), tr("请先勾选要卸载的版本"), self)
             box.exec()
             return
-        box = MessageBox(tr("确认卸载"), f"将卸载 {len(selected)} 个版本：\n" + "\n".join(selected), self)
+        box = MessageBox(tr("确认卸载"),
+                         tr("将卸载 {0} 个版本：").format(len(selected))
+                         + "\n" + "\n".join(selected), self)
         if box.exec():
             for spec in selected:
                 try:
@@ -390,7 +418,7 @@ class VersionPage(QWidget):
             inst, vid = spec.split(" / ", 1) if " / " in spec else (
                 self.instance_box.currentText() or "default", spec)
             self.backend.repair_version(inst, vid)
-        InfoBar.success(tr("已开始修复"), f"{len(selected)} 个版本", parent=self,
+        InfoBar.success(tr("已开始修复"), tr("{0} 个版本").format(len(selected)), parent=self,
                         position=InfoBarPosition.TOP, duration=2500)
 
     def resizeEvent(self, event):
@@ -401,3 +429,16 @@ class VersionPage(QWidget):
         if cols == self._cols:
             return
         self._resize_timer.start(120)
+
+    def showEvent(self, event):
+        """页面在懒构造时只有 100px 宽，列数按那个宽度算出来是 1，
+        整页版本卡挤成居中一条。首次真正显示后布局才有真实宽度，
+        这里补一次列数校验，避免「压扁单列」闪现或滞留。"""
+        super().showEvent(event)
+        QTimer.singleShot(0, self._recheck_cols)
+
+    def _recheck_cols(self):
+        if not self._all_versions:
+            return
+        if grid_columns(self.scroll, self, 240) != self._cols:
+            self._refill()

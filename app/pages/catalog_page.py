@@ -462,8 +462,12 @@ class PclCatalogPage(QWidget):
     def _clear_list(self):
         while self.list_layout.count():
             item = self.list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
+            w = item.widget()
+            if w is not None:
+                # 先 hide 再 deleteLater：出了布局的控件在延迟删除前仍按旧几何
+                # 绘制，搜索时「正在搜索…」会和旧的空态/结果行叠在一起。
+                w.hide()
+                w.deleteLater()
 
     def _show_idle(self):
         self._search_token += 1
@@ -511,7 +515,8 @@ class PclCatalogPage(QWidget):
         if token != self._search_token:
             return
         self._clear_list()
-        self.list_layout.addWidget(EmptyState(self.spec["icon"], f"搜索失败: {err}"))
+        self.list_layout.addWidget(
+            EmptyState(self.spec["icon"], tr("搜索失败: {0}").format(err)))
         self.list_layout.addStretch(1)
 
     def _on_search_ok(self, token, results, type_f):
@@ -657,20 +662,20 @@ class PclCatalogPage(QWidget):
         if fn == "delete_modpack":
             box = MessageBox(
                 tr("删除整合包实例"),
-                f"将删除整个实例「{inst}」及其文件，不可恢复。",
+                tr("将删除整个实例「{0}」及其文件，不可恢复。").format(inst),
                 self,
             )
             box.yesButton.setText(tr("删除实例"))
         elif fn == "delete_save":
             box = MessageBox(
                 tr("删除世界存档"),
-                f"将永久删除世界「{filename}」，其中的建筑与游戏进度都无法恢复。\n"
-                + tr("建议先在「存档管理」里备份。"),
+                tr("将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。").format(filename)
+                + "\n" + tr("建议先在「存档管理」里备份。"),
                 self,
             )
             box.yesButton.setText(tr("永久删除"))
         elif fn:
-            box = MessageBox(tr("删除确认"), f"将删除「{filename}」。", self)
+            box = MessageBox(tr("删除确认"), tr("将删除「{0}」。").format(filename), self)
             box.yesButton.setText(tr("删除"))
         else:
             box = None

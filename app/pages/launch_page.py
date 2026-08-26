@@ -136,6 +136,7 @@ class LaunchPage(QWidget):
         while self.news_host.count():
             item = self.news_host.takeAt(0)
             if item.widget():
+                item.widget().hide()
                 item.widget().deleteLater()
         mode = CONFIG.get("homepage_mode") or "news"
         if mode == "blank":
@@ -176,6 +177,7 @@ class LaunchPage(QWidget):
             while self.news_host.count():
                 item = self.news_host.takeAt(0)
                 if item.widget():
+                    item.widget().hide()
                     item.widget().deleteLater()
             self._fill_news(rows or [])
 

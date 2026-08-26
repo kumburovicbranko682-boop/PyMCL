@@ -954,5 +954,17 @@
   "无法移出": "Cannot move out",
   "该分区只剩这一个子页，移走会变空栏；先在「自定义分区」里补充其它子页": "This is the last sub-page in its section; moving it would leave the section empty. Add other pages in “Customize sections” first.",
   "界面动画": "Interface animations",
-  "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant"
+  "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant",
+  "实例 {0}": "Instance {0}",
+  "实例 {0} · 点击「启动游戏」进入世界": "Instance {0} · Click \"Launch\" to enter the world",
+  "发布于 {0}": "Released {0}",
+  "加载更多（还有 {0}）": "Load more ({0} remaining)",
+  "搜索失败: {0}": "Search failed: {0}",
+  "将删除整个实例「{0}」及其文件，不可恢复。": "The entire instance \"{0}\" and its files will be deleted. This cannot be undone.",
+  "将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。": "The world \"{0}\" will be permanently deleted. Builds and progress cannot be recovered.",
+  "将删除「{0}」。": "\"{0}\" will be deleted.",
+  "桌面快捷方式：\n{0}\n\n双击即可直接启动该版本。": "Desktop shortcut:\n{0}\n\nDouble-click it to launch this version directly.",
+  "将卸载 {0} 个版本：": "About to uninstall {0} version(s):",
+  "{0} 个版本": "{0} version(s)",
+  "还没有安装版本，从上方选择一个版本开始": "No versions installed yet — pick one above to get started"
 }
