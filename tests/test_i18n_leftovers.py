@@ -54,6 +54,9 @@ class I18nLeftoverTests(unittest.TestCase):
             "实例 {0} → exports/",
             "导入任务已启动: {0}",
             "内存已设为 {0} MB，保存设置后生效",
+            "加载更多（还有 {0}）",
+            "桌面快捷方式：\n{0}\n\n双击即可直接启动该版本。",
+            "将卸载 {0} 个版本：\n",
         ]
         for loc in ("en.json", "zh_CN.json"):
             data = json.loads((ROOT / "mclauncher" / "locales" / loc).read_text(encoding="utf-8"))
@@ -72,6 +75,10 @@ class I18nLeftoverTests(unittest.TestCase):
             ("app/pages/settings_page.py", 'f"你的系统'),
             ("app/pages/settings_page.py", 'f"内存已设为'),
             ("app/pages/file_pick.py", "or '任意'"),
+            ("app/pages/version_page.py", 'f"加载更多'),
+            ("app/pages/version_page.py", 'f"桌面快捷方式'),
+            ("app/pages/version_page.py", 'f"将卸载'),
+            ("app/pages/version_page.py", 'f"{len(selected)} 个版本"'),
         ]
         for rel, needle in cases:
             src = (ROOT / rel).read_text(encoding="utf-8")

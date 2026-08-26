@@ -239,7 +239,7 @@ class VersionPage(QWidget):
         for i, v in enumerate(shown):
             self.grid.addWidget(VersionCard(v, self._install), i // cols, i % cols)
         if len(rows) > self._limit:
-            more = PushButton(f"加载更多（还有 {len(rows) - self._limit}）")
+            more = PushButton(tr("加载更多（还有 {0}）").format(len(rows) - self._limit))
             more.clicked.connect(self._more)
             self.grid.addWidget(more, (len(shown) + cols - 1) // cols, 0, 1, cols)
 
@@ -350,7 +350,8 @@ class VersionPage(QWidget):
         except Exception as e:
             MessageBox(tr("创建失败"), str(e), self).exec()
             return
-        MessageBox(tr("已创建"), f"桌面快捷方式：\n{path}\n\n双击即可直接启动该版本。", self).exec()
+        MessageBox(tr("已创建"),
+                   tr("桌面快捷方式：\n{0}\n\n双击即可直接启动该版本。").format(path), self).exec()
 
     def _open_folder(self, instance, version, which):
         try:
@@ -396,7 +397,8 @@ class VersionPage(QWidget):
             box = MessageBox(tr("未选择"), tr("请先勾选要卸载的版本"), self)
             box.exec()
             return
-        box = MessageBox(tr("确认卸载"), f"将卸载 {len(selected)} 个版本：\n" + "\n".join(selected), self)
+        box = MessageBox(tr("确认卸载"),
+                         tr("将卸载 {0} 个版本：\n").format(len(selected)) + "\n".join(selected), self)
         if box.exec():
             for spec in selected:
                 try:
@@ -420,7 +422,7 @@ class VersionPage(QWidget):
             inst, vid = spec.split(" / ", 1) if " / " in spec else (
                 self.instance_box.currentText() or "default", spec)
             self.backend.repair_version(inst, vid)
-        InfoBar.success(tr("已开始修复"), f"{len(selected)} 个版本", parent=self,
+        InfoBar.success(tr("已开始修复"), tr("{0} 个版本").format(len(selected)), parent=self,
                         position=InfoBarPosition.TOP, duration=2500)
 
     def resizeEvent(self, event):
