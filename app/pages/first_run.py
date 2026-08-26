@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 """首次运行向导：游戏目录 / 下载源 / 内存 / 隔离。"""
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QWidget
-from qfluentwidgets import BodyLabel, ComboBox, LineEdit, MessageBoxBase, SpinBox, SubtitleLabel
+from qfluentwidgets import (
+    BodyLabel, CaptionLabel, ComboBox, LineEdit, MessageBoxBase, SpinBox, SubtitleLabel,
+)
 
 from mclauncher.config import CONFIG
 from mclauncher.i18n import tr
+from mclauncher.version_settings import ISOLATION_HINTS, ISOLATION_LABELS
 
 
 class FirstRunDialog(MessageBoxBase):
@@ -41,9 +44,16 @@ class FirstRunDialog(MessageBoxBase):
         self.viewLayout.addWidget(self.memory)
 
         self.iso = ComboBox()
-        self.iso.addItems([tr("关闭（共用实例目录）"), tr("隔离存档"), tr("隔离 Mod 与配置"), tr("隔离全部")])
+        self._iso_keys = {tr(v): k for k, v in ISOLATION_LABELS.items()}
+        self.iso.addItems([tr(v) for v in ISOLATION_LABELS.values()])
         self.viewLayout.addWidget(BodyLabel(tr("新版本默认隔离"), self))
         self.viewLayout.addWidget(self.iso)
+        # 「隔离」对新手是纯行话：随选项实时解释这一档会发生什么
+        self.iso_hint = CaptionLabel("", self)
+        self.iso_hint.setWordWrap(True)
+        self.iso.currentTextChanged.connect(self._update_iso_hint)
+        self._update_iso_hint()
+        self.viewLayout.addWidget(self.iso_hint)
 
         self.yesButton.setText(tr("开始使用"))
         self.cancelButton.setText(tr("以后再说"))
@@ -54,19 +64,17 @@ class FirstRunDialog(MessageBoxBase):
         if path:
             self.game_dir.setText(path)
 
+    def _update_iso_hint(self, *_a):
+        key = self._iso_keys.get(self.iso.currentText(), "none")
+        self.iso_hint.setText(tr(ISOLATION_HINTS.get(key, "")))
+
     def apply(self):
         src = {tr("自动（官方慢则 BMCLAPI）"): "auto", tr("仅官方"): "official", tr("仅 BMCLAPI"): "bmclapi"}
-        iso = {
-            tr("关闭（共用实例目录）"): "none",
-            tr("隔离存档"): "saves",
-            tr("隔离 Mod 与配置"): "mods",
-            tr("隔离全部"): "all",
-        }
         data = self.backend.get_settings()
         data.update({
             "download_source": src.get(self.src.currentText(), "auto"),
             "default_memory_mb": self.memory.value(),
-            "default_isolation": iso.get(self.iso.currentText(), "none"),
+            "default_isolation": self._iso_keys.get(self.iso.currentText(), "none"),
             "first_run": False,
         })
         self.backend.save_settings(data)

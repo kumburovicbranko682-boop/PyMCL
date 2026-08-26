@@ -99,6 +99,15 @@ class SettingsPage(QWidget):
             tr("安装新版本时写入该版本的隔离模式，可稍后在版本设置改"),
             list(iso_map.values()),
             iso_map.get(settings.get("default_isolation") or "none", iso_map["none"]))
+        # 档位对用户是行话：卡片描述随选项实时换成这一档的人话解释
+        from mclauncher.version_settings import ISOLATION_HINTS
+
+        def _update_iso_desc(*_a):
+            key = self._iso_keys.get(self.iso_box.currentText(), "none")
+            self.iso_card.setContent(tr(ISOLATION_HINTS.get(key, "")))
+
+        self.iso_box.currentTextChanged.connect(_update_iso_desc)
+        _update_iso_desc()
         iso_group.addSettingCard(self.iso_card)
         game_card = SettingCard(FIF.FOLDER, tr("游戏目录"), tr("实例与版本所在文件夹"))
         self.game_dir = LineEdit(game_card)

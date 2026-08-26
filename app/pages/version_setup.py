@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """单版本设置：隔离 / JVM / 登录 / Nide8 / 窗口。"""
 from qfluentwidgets import (
-    BodyLabel, CheckBox, ComboBox, LineEdit, MessageBoxBase, SubtitleLabel, TextEdit,
+    BodyLabel, CaptionLabel, CheckBox, ComboBox, LineEdit, MessageBoxBase, SubtitleLabel, TextEdit,
 )
 from PySide6.QtWidgets import QFormLayout, QWidget
 
 from mclauncher.gc import LABELS as GC_LABELS
-from mclauncher.version_settings import FULLSCREEN_MODES, ISOLATION_LABELS
+from mclauncher.version_settings import FULLSCREEN_MODES, ISOLATION_HINTS, ISOLATION_LABELS
 from mclauncher.i18n import tr
 from ..pcl_chrome import form_label, paint_theme_surfaces
 
@@ -32,6 +32,12 @@ class VersionSetupDialog(MessageBoxBase):
         self.iso.addItems(list(ISOLATION_LABELS.values()))
         cur = ISOLATION_LABELS.get(data.get("isolation") or "none", ISOLATION_LABELS["none"])
         self.iso.setCurrentText(cur)
+        # 与首次向导/设置页共用一份档位解释，随选项联动
+        self.iso_hint = CaptionLabel("", self)
+        self.iso_hint.setWordWrap(True)
+        self._iso_inv = {v: k for k, v in ISOLATION_LABELS.items()}
+        self.iso.currentTextChanged.connect(self._update_iso_hint)
+        self._update_iso_hint()
 
         self.memory = LineEdit()
         self.memory.setPlaceholderText(tr("留空则用启动页滑条"))
@@ -130,6 +136,7 @@ class VersionSetupDialog(MessageBoxBase):
         self.priority.setCurrentText(data.get("process_priority") or "normal")
 
         form.addRow(form_label(tr("隔离")), self.iso)
+        form.addRow("", self.iso_hint)
         form.addRow(form_label(tr("内存 MB")), self.memory)
         form.addRow(form_label("Java"), self.java)
         form.addRow(form_label("GC"), self.gc)
@@ -155,6 +162,10 @@ class VersionSetupDialog(MessageBoxBase):
         self.widget.setMinimumWidth(540)
         # 对话框里保持实底，不透出主窗背景图
         paint_theme_surfaces(form_host, allow_transparent=False)
+
+    def _update_iso_hint(self, *_a):
+        key = self._iso_inv.get(self.iso.currentText(), "none")
+        self.iso_hint.setText(tr(ISOLATION_HINTS.get(key, "")))
 
     def _fill_java(self, opts):
         self._java_opts = opts or []

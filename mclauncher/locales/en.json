@@ -954,5 +954,9 @@
   "界面动画": "Interface animations",
   "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant",
   "请先到「下载 → 原版游戏」安装一个版本。": "Install a version first: Download → Vanilla Game.",
-  "请先选择版本（到「下载 → 原版游戏」安装）": "Select a version first (install one in Download → Vanilla Game)"
+  "请先选择版本（到「下载 → 原版游戏」安装）": "Select a version first (install one in Download → Vanilla Game)",
+  "所有版本共用这个实例的存档、Mod 和设置": "All versions share this instance's saves, mods and settings",
+  "每个版本有自己的存档；Mod 和设置仍与实例共用": "Each version keeps its own saves; mods and settings stay shared",
+  "每个版本有自己的 Mod 和设置；存档仍与实例共用": "Each version keeps its own mods and settings; saves stay shared",
+  "存档、Mod、设置全部独立，互不影响": "Saves, mods and settings are fully separate per version"
 }
