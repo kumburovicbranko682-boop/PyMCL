@@ -348,7 +348,29 @@ class LaunchPage(QWidget):
         self.version_box.blockSignals(False)
         self._sync_banner()
 
+    def _set_install_mode(self, on: bool):
+        """零版本空状态：启动按钮变身「安装游戏」，点了直接去下载页。"""
+        if getattr(self, "_install_mode", None) == on:
+            return
+        self._install_mode = on
+        from qfluentwidgets import FluentIcon as FIF
+        if on:
+            self.launch_btn.setText(tr("安装游戏"))
+            self.launch_btn.setIcon(FIF.DOWNLOAD)
+        else:
+            self.launch_btn.setText(tr("启动游戏"))
+            self.launch_btn.setIcon(FIF.PLAY)
+
     def _sync_banner(self):
+        if self.version_box.count() == 0:
+            # 以前这里写「点击『启动游戏』进入世界」，可全新用户根本没有
+            # 版本可启动，点了只会撞上一个让他自己找路的报错框。
+            self._set_install_mode(True)
+            self.banner.set_info(
+                tr("还没有安装游戏"),
+                tr("点右边的「安装游戏」挑一个 Minecraft 版本，装好就能启动"))
+            return
+        self._set_install_mode(False)
         version = self.version_box.currentText() or "—"
         instance = self.instance_box.currentText() or "default"
         pack_name = ""
@@ -369,6 +391,15 @@ class LaunchPage(QWidget):
     def _on_launch(self):
         from qfluentwidgets import MessageBox
 
+        if not self.version_box.currentText():
+            # 没有可启动的版本：直接带去安装页，而不是弹一个
+            # 「请先到下载页」却不给路的死胡同框。
+            self.nav_to("version")
+            InfoBar.info(
+                tr("先安装一个版本"),
+                tr("挑一个 Minecraft 版本点「安装」，装好就能启动"),
+                parent=self.window(), position=InfoBarPosition.TOP, duration=4000)
+            return
         self._flush_launch_defaults()
         instance = self.instance_box.currentText() or "default"
         version = self.version_box.currentText()
