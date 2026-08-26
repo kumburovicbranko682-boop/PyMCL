@@ -52,6 +52,8 @@ def install_game(installer: Installer, version: str, loader: str = "无",
         vid = installer.install_forge(mc, extra.get("forge_version") or lv)
     elif primary == "neoforge":
         vid = installer.install_neoforge(mc, extra.get("neoforge_version") or lv)
+    elif primary == "cleanroom":
+        vid = installer.install_cleanroom(mc, extra.get("cleanroom_version") or lv)
     elif primary not in ("", "无", "none"):
         raise InstallError(f"未知加载器: {loader}")
     else:
@@ -71,8 +73,8 @@ def install_game(installer: Installer, version: str, loader: str = "无",
                 raise
 
     if want_of:
-        if primary in ("fabric", "quilt", "neoforge"):
-            installer._note("OptiFine 不能与 Fabric / Quilt / NeoForge 同装，已跳过")
+        if primary in ("fabric", "quilt", "neoforge", "cleanroom"):
+            installer._note("OptiFine 不能与 Fabric / Quilt / NeoForge / Cleanroom 同装，已跳过")
         elif primary == "forge":
             from . import optifine as optifine_mod
             mods = installer.instance.path / "mods"

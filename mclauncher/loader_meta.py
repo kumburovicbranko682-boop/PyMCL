@@ -81,6 +81,11 @@ def list_loader_versions(dm: DownloadManager | None, mc_version: str, loader: st
         if mc in vers:
             return [{"id": mc, "label": mc, "stable": True}]
         return []
+    if kind == "cleanroom":
+        from . import cleanroom as cr
+        if mc != cr.MC_VERSION:
+            return []
+        return cr.list_versions(dm)
     return []
 
 

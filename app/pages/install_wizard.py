@@ -33,7 +33,11 @@ class InstallWizardDialog(MessageBoxBase):
         row0.addWidget(self.name_edit, 1)
         lay.addLayout(row0)
         self.primary = ComboBox()
-        self.primary.addItems([tr("无（原版）"), "Fabric", "Forge", "Quilt", "NeoForge"])
+        loaders = [tr("无（原版）"), "Fabric", "Forge", "Quilt", "NeoForge"]
+        if mc_version == "1.12.2":
+            # Cleanroom：1.12.2 专属的现代化 Forge 分支（HMCL 3.7 同款）
+            loaders.append("Cleanroom")
+        self.primary.addItems(loaders)
         self.loader_ver = ComboBox()
         self.loader_ver.setMinimumWidth(280)
         self.loader_ver.addItem(tr("最新"))

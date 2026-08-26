@@ -377,6 +377,9 @@ def detect_loader(instance: Instance):
             return "quilt"
         if "neoforge" in low:
             return "neoforge"
+        if "cleanroom" in low:
+            # Cleanroom 是 Forge 1.12.2 分支，装的就是 Forge 模组
+            return "forge"
         if "forge" in low:
             return "forge"
     return None

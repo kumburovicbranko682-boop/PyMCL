@@ -2510,7 +2510,8 @@ class BackendAPI(QObject):
         if mods_dir.is_dir():
             jar_count = sum(1 for p in mods_dir.iterdir() if p.suffix.lower() == ".jar")
         looks_loader = any(tok in version.lower() for tok in (
-            "forge", "fabric", "quilt", "neoforge", "optifine", "liteloader"))
+            "forge", "fabric", "quilt", "neoforge", "optifine", "liteloader",
+            "cleanroom"))
         if jar_count and not looks_loader:
             log(f"警告: mods 里有 {jar_count} 个 jar，但当前版本是原版，不会加载模组")
 

@@ -1004,11 +1004,15 @@ class Installer:
         try:
             data = self._forge_processor_data(installer_jar, profile, vanilla_jar, tmp_data)
             self._prefetch_mojmaps(data, vanilla)
-            java_exe = java_mod.java_for_installer("forge", self.dm, on_progress=self.on_progress)
             procs = [p for p in (profile.get("processors") or [])
                      if "client" in (p.get("sides") or ["client"])]
-            self._note(f"开始运行 {len(procs)} 个 Forge 客户端处理器")
-            self._run_install_profile_processors(profile, data, java_exe, force=force)
+            if procs:
+                # 没有处理器（如 Cleanroom）就不要为了跑处理器去找/下 Java
+                java_exe = java_mod.java_for_installer("forge", self.dm, on_progress=self.on_progress)
+                self._note(f"开始运行 {len(procs)} 个 Forge 客户端处理器")
+                self._run_install_profile_processors(profile, data, java_exe, force=force)
+            else:
+                self._note("安装器没有处理器步骤，跳过")
         finally:
             shutil.rmtree(tmp_data, ignore_errors=True)
 
@@ -1334,6 +1338,10 @@ class Installer:
     def install_liteloader(self, mc_version, force=False):
         from . import liteloader as liteloader_mod
         return liteloader_mod.install(self, mc_version, force=force)
+
+    def install_cleanroom(self, mc_version, version=None, force=False):
+        from . import cleanroom as cleanroom_mod
+        return cleanroom_mod.install(self, mc_version, version=version, force=force)
 
     # ================================================================ 卸载
 
