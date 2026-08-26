@@ -330,28 +330,91 @@ static const char *detect_loader(const char *inst) {
     return r;
 }
 
-static char *detect_mc(const char *inst) {
-    cJSON *m = instance_meta(inst);
-    const char *mc = cJSON_GetStringValue(cJSON_GetObjectItem(m, "mc_version"));
-    char *r = NULL;
-    if (mc && mc[0]) {
-        /* strip loader suffix */
-        char buf[64]; snprintf(buf, sizeof(buf), "%s", mc);
-        char *d = strchr(buf, '-'); if (d) *d = 0;
-        r = pymcl_strdup(buf);
+/* 从文本提取 MC 版本号，对齐 mclauncher/mods.py _mc_version_from_text：
+ * 识别老式 1.x(.y) 与年式 (20–99).x(.y) 及 -snapshot/-rc/-pre 后缀；
+ * 模组/加载器自身版本（主版本 3–19）不算。老式优先、带负向后顾
+ * （"1.21.11-forge" 不会被截成 21.11，"26.1.2" 中间的 1.2 不算）。 */
+static int mc_from_text(const char *text, char *out, size_t n) {
+    if (!text || !*text) return -1;
+    for (int pass = 0; pass < 2; pass++) {
+        for (const char *s = text; *s; s++) {
+            if (*s < '0' || *s > '9') continue;
+            if (s > text && ((s[-1] >= '0' && s[-1] <= '9') || s[-1] == '.')) continue;
+            int v[3] = { 0, 0, -1 }, k = 0;
+            const char *p = s;
+            while (k < 3 && *p >= '0' && *p <= '9') {
+                int val = 0;
+                while (*p >= '0' && *p <= '9') { val = val * 10 + (*p - '0'); p++; if (val > 99999) { val = -1; break; } }
+                if (val < 0) { k = 0; break; }
+                v[k++] = val;
+                if (*p == '.' && p[1] >= '0' && p[1] <= '9') { p++; continue; }
+                break;
+            }
+            if (k < 2) continue;
+            int a = v[0];
+            if (pass == 0 ? a != 1 : (a < 20 || a > 99)) continue;
+            size_t len = (size_t)(p - s);
+            if (len + 1 > n) continue;
+            memcpy(out, s, len);
+            out[len] = 0;
+            /* 年式预发布后缀（26.3-snapshot-10 / 26.2-rc-2 / 26.2-pre-1）原样带上 */
+            if (pass == 1 && *p == '-') {
+                const char *tags[] = { "-snapshot", "-rc", "-pre" };
+                for (int i = 0; i < 3; i++) {
+                    size_t tl = strlen(tags[i]);
+                    if (_strnicmp(p, tags[i], tl) != 0) continue;
+                    const char *q = p + tl;
+                    if (*q == '-') q++;
+                    while (*q >= '0' && *q <= '9') q++;
+                    size_t full = (size_t)(q - s);
+                    if (full + 1 <= n) { memcpy(out, s, full); out[full] = 0; }
+                    break;
+                }
+            }
+            return 0;
+        }
     }
+    return -1;
+}
+
+static char *detect_mc(const char *inst) {
+    /* 对齐 mclauncher/mods.py detect_mc_version：优先整合包元数据里的
+     * 干净 mc_version，其次 meta.mc_version 提取；都没有再扫已装版本。
+     * 以前 meta.mc_version（常存加载器版本 id，如
+     * fabric-loader-0.16.9-1.21.4）在第一个 '-' 截断得到 "fabric"，
+     * Modrinth 装模组按它过滤 game_versions 永远不命中，静默装上
+     * 最新文件——MC 版本对不上，进游戏就崩。 */
+    cJSON *m = instance_meta(inst);
+    char buf[64];
+    char *r = NULL;
+    const char *cands[2] = {
+        cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetObjectItem(m, "modpack"), "mc_version")),
+        cJSON_GetStringValue(cJSON_GetObjectItem(m, "mc_version")),
+    };
+    for (int i = 0; i < 2 && !r; i++)
+        if (cands[i] && mc_from_text(cands[i], buf, sizeof(buf)) == 0)
+            r = pymcl_strdup(buf);
     cJSON_Delete(m);
     if (r) return r;
+    /* 已装版本里取最高的 MC 版本（年式 26.x 数值上高于 1.x），
+     * 而不是目录列表的第一项。 */
     cJSON *ids = NULL;
     instance_installed_ids(inst, &ids);
-    if (cJSON_GetArraySize(ids) > 0) {
-        const char *v = cJSON_GetArrayItem(ids, 0)->valuestring;
-        char buf[64]; snprintf(buf, sizeof(buf), "%s", v);
-        char *d = strchr(buf, '-'); if (d) *d = 0;
-        r = pymcl_strdup(buf);
+    int ba = -1, bb = -1, bc = -1;
+    char best[64] = {0};
+    cJSON *it;
+    cJSON_ArrayForEach(it, ids) {
+        if (!cJSON_IsString(it)) continue;
+        if (mc_from_text(it->valuestring, buf, sizeof(buf)) != 0) continue;
+        int a = 0, b = 0, c = 0;
+        if (mc_version_tuple(buf, &a, &b, &c) != 0) continue;
+        if (a > ba || (a == ba && (b > bb || (b == bb && c > bc)))) {
+            ba = a; bb = b; bc = c;
+            snprintf(best, sizeof(best), "%s", buf);
+        }
     }
     cJSON_Delete(ids);
-    return r;
+    return best[0] ? pymcl_strdup(best) : NULL;
 }
 
 static int install_modrinth_mod(const char *inst, const char *slug, pymcl_ctx *ctx) {
