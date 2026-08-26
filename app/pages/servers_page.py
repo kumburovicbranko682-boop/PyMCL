@@ -9,13 +9,14 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    BodyLabel, ComboBox, FluentIcon as FIF, InfoBar, MessageBox, PushButton,
-    StrongBodyLabel, TransparentPushButton,
+    BodyLabel, ComboBox, FluentIcon as FIF, InfoBar, LineEdit, MessageBox,
+    MessageBoxBase, PushButton, StrongBodyLabel, SubtitleLabel,
+    TransparentPushButton,
 )
 
 from mclauncher.config import CONFIG
 from ..pcl_chrome import Theme
-from ..widgets import InputDialog, EmptyState
+from ..widgets import EmptyState
 from mclauncher.i18n import tr
 
 # 整条链都得用 getattr：当前 qfluentwidgets 已经没有 FIF.WORLD，
@@ -24,6 +25,46 @@ _GLOBE_ICON = (getattr(FIF, "GLOBE", None) or getattr(FIF, "WORLD", None)
                or FIF.CLOUD_DOWNLOAD)
 
 _PORT_RE = re.compile(r"^\d{1,5}$")
+
+
+def parse_server_address(text: str) -> tuple[str, int]:
+    """"host" 或 "host:port" → (host, port)。端口缺省/非法时用 25565。"""
+    text = (text or "").strip()
+    host, port = text, 25565
+    if ":" in text:
+        head, tail = text.rsplit(":", 1)
+        if _PORT_RE.match(tail) and 0 < int(tail) <= 65535:
+            host, port = head.strip(), int(tail)
+    return host, port
+
+
+class _ServerDialog(MessageBoxBase):
+    """一个框填完：名称（可选）+ 地址（可带 :端口）。
+
+    以前添加要连过 3 个模态框（名称 → 地址 → 端口），端口几乎总是默认
+    25565 也必须单独点一次；编辑则要连过 2 个还会把端口丢回默认。
+    """
+
+    def __init__(self, title: str, name: str = "", address: str = "", parent=None):
+        super().__init__(parent)
+        self.viewLayout.addWidget(SubtitleLabel(title, self))
+        self.name_edit = LineEdit(self)
+        self.name_edit.setPlaceholderText(tr("名称（可选）"))
+        self.name_edit.setText(name)
+        self.addr_edit = LineEdit(self)
+        self.addr_edit.setPlaceholderText(tr("example.com 或 IP，可带 :端口"))
+        self.addr_edit.setText(address)
+        self.viewLayout.addWidget(BodyLabel(tr("名称"), self))
+        self.viewLayout.addWidget(self.name_edit)
+        self.viewLayout.addWidget(BodyLabel(tr("地址"), self))
+        self.viewLayout.addWidget(self.addr_edit)
+        self.yesButton.setText(tr("保存"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(420)
+
+    def values(self) -> tuple[str, str, int]:
+        host, port = parse_server_address(self.addr_edit.text())
+        return self.name_edit.text().strip(), host, port
 
 
 class ServerPage(QWidget):
@@ -160,47 +201,42 @@ class ServerPage(QWidget):
             self.table.setCellWidget(i, 4, btn_w)
 
     def _on_add(self):
-        dlg = InputDialog(tr("添加服务器"), tr("服务器名称"), placeholder=tr("可选"))
+        dlg = _ServerDialog(tr("添加服务器"), parent=self)
         if not dlg.exec():
             return
-        name = dlg.value()
-        ip_dlg = InputDialog(tr("添加服务器"), tr("服务器地址"), placeholder=tr("example.com 或 IP"))
-        if not ip_dlg.exec():
+        name, ip, port = dlg.values()
+        if not ip:
+            InfoBar.error(tr("缺少地址"), tr("请填写服务器地址"), duration=3000, parent=self)
             return
-        ip = ip_dlg.value()
-        port_dlg = InputDialog(tr("添加服务器"), tr("端口"), text="25565", placeholder=tr("默认 25565"))
-        if not port_dlg.exec():
-            return
-        port_text = port_dlg.value()
-        port = int(port_text) if _PORT_RE.match(port_text) else 25565
         try:
             self.backend.add_server(self._instance, name, ip, port)
-            InfoBar.success(tr("已添加"), f"服务器 {name or ip} 已添加", duration=2000, parent=self)
+            InfoBar.success(tr("已添加"), tr("服务器 {0} 已添加").format(name or ip),
+                            duration=2000, parent=self)
             self.reload(self._instance)
         except Exception as e:
             InfoBar.error(tr("添加失败"), str(e), duration=3000, parent=self)
 
     def _on_edit(self, index: int):
         s = self._servers[index]
-        dlg = InputDialog(tr("编辑服务器"), tr("服务器名称"), text=s.get("name", ""))
+        port0 = int(s.get("port", 25565) or 25565)
+        addr = s.get("ip", "") if port0 == 25565 else f"{s.get('ip', '')}:{port0}"
+        dlg = _ServerDialog(tr("编辑服务器"), name=s.get("name", ""), address=addr, parent=self)
         if not dlg.exec():
             return
-        name = dlg.value()
-        ip_dlg = InputDialog(tr("编辑服务器"), tr("服务器地址"), text=s.get("ip", ""))
-        if not ip_dlg.exec():
+        name, ip, port = dlg.values()
+        if not ip:
+            InfoBar.error(tr("缺少地址"), tr("请填写服务器地址"), duration=3000, parent=self)
             return
-        ip = ip_dlg.value()
         try:
-            self.backend.update_server(self._instance, index, name=name, ip=ip,
-                                       port=s.get("port", 25565))
-            InfoBar.success(tr("已更新"), f"服务器已更新", duration=2000, parent=self)
+            self.backend.update_server(self._instance, index, name=name, ip=ip, port=port)
+            InfoBar.success(tr("已更新"), tr("服务器已更新"), duration=2000, parent=self)
             self.reload(self._instance)
         except Exception as e:
             InfoBar.error(tr("更新失败"), str(e), duration=3000, parent=self)
 
     def _on_delete(self, index: int):
         s = self._servers[index]
-        box = MessageBox(tr("确认删除"), f"删除服务器 {s.get('name', '?')}？", self)
+        box = MessageBox(tr("确认删除"), tr("删除服务器 {0}？").format(s.get("name", "?")), self)
         if box.exec():
             try:
                 self.backend.delete_server(self._instance, index)
@@ -217,7 +253,7 @@ class ServerPage(QWidget):
             with open(text, "r", encoding="utf-8") as f:
                 data = f.read()
             n = self.backend.import_servers(self._instance, data)
-            InfoBar.success(tr("导入完成"), f"已导入 {n} 个服务器", duration=2000, parent=self)
+            InfoBar.success(tr("导入完成"), tr("已导入 {0} 个服务器").format(n), duration=2000, parent=self)
             self.reload(self._instance)
         except Exception as e:
             InfoBar.error(tr("导入失败"), str(e), duration=3000, parent=self)
@@ -234,6 +270,6 @@ class ServerPage(QWidget):
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(text)
-            InfoBar.success(tr("已导出"), f"已保存到 {path}", duration=2000, parent=self)
+            InfoBar.success(tr("已导出"), tr("已保存到 {0}").format(path), duration=2000, parent=self)
         except Exception as e:
             InfoBar.error(tr("导出失败"), str(e), duration=3000, parent=self)
