@@ -66,7 +66,7 @@ check("替换" in page.update_btn.toolTip(),
       "tooltip must say files get replaced")
 
 calls = []
-backend.start_mod_updates = lambda inst: (calls.append(inst), "task-1")[1]
+backend.start_mod_updates = lambda inst, ver="": (calls.append(inst), "task-1")[1]
 
 def fake_confirm(parent, inst):
     fake_confirm.asked.append(inst)

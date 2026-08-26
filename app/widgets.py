@@ -70,16 +70,17 @@ def prompt_feedback_consent(parent) -> bool:
     return ok
 
 
-def confirm_mod_update(parent, instance: str) -> bool:
+def confirm_mod_update(parent, target: str) -> bool:
     """「检查并更新」动手前必须确认：它会替换 jar 并删除旧文件。
 
+    target 是屏幕上正看着的目录（实例名，或「实例 / 版本」）。
     模组页和「下载 → Mod → 已安装」共用这一份文案，
     免得两个入口对同一件事说两种话。"""
     from qfluentwidgets import MessageBox
     box = MessageBox(
         tr("检查并更新模组"),
         tr("会联网检查「{0}」已启用模组的新版本，发现更新就直接下载替换，旧文件会被删除。\n\n"
-           "新版本可能与当前存档或其他模组不兼容，不放心可先备份 mods 文件夹。").format(instance),
+           "新版本可能与当前存档或其他模组不兼容，不放心可先备份 mods 文件夹。").format(target),
         parent,
     )
     box.yesButton.setText(tr("开始更新"))

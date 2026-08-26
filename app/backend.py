@@ -1264,10 +1264,12 @@ class BackendAPI(QObject):
         from mclauncher.mod_update import check_updates
         return check_updates(self._instance(instance))
 
-    def start_mod_updates(self, instance: str) -> str:
+    def start_mod_updates(self, instance: str, version: str = "") -> str:
         # 任务标题也要说实话：这个任务查到更新会直接替换文件，
-        # 不是只读的「检查」。
-        return self.start_task(f"检查并更新模组 {instance}", self._mod_update_impl, instance)
+        # 不是只读的「检查」。传了 version 就更新该版本的独立 mods
+        # 目录——必须和页面上正看着的目录一致，不能永远只动共享目录。
+        label = f"{instance} / {version}" if version else instance
+        return self.start_task(f"检查并更新模组 {label}", self._mod_update_impl, instance, version)
 
     def apply_mod_update(self, instance: str, row: dict) -> str:
         from mclauncher.mod_update import apply_update
@@ -2081,17 +2083,18 @@ class BackendAPI(QObject):
         log(f"已导出: {path}")
         return path
 
-    def _mod_update_impl(self, progress, log, instance):
+    def _mod_update_impl(self, progress, log, instance, version=""):
         from mclauncher.mod_update import apply_update, check_updates
         inst = self._instance(instance)
         dm = self._dm(progress, log)
-        rows = check_updates(inst, dm=dm)
+        mods_path = self._mods_folder(inst, version) if version else None
+        rows = check_updates(inst, dm=dm, mods_path=mods_path)
         if not rows:
             log(tr("已装模组都是最新"))
             return tr("没有可更新的模组")
         for i, row in enumerate(rows):
             log(f"更新 {row.get('name')} {row.get('current')} → {row.get('latest')}")
-            apply_update(inst, row, dm=dm)
+            apply_update(inst, row, dm=dm, mods_path=mods_path)
             progress(i + 1, len(rows), row.get("name") or "")
         return f"已更新 {len(rows)} 个模组"
 

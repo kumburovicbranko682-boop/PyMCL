@@ -697,10 +697,12 @@ class PclCatalogPage(QWidget):
 
     def _check_updates(self):
         inst = self._current_instance()
+        # 「已安装」列表切到某版本的独立 mods 目录时，更新的也得是那个目录
+        ver = self._installed_version()
         from ..widgets import confirm_mod_update
-        if not confirm_mod_update(self, inst):
+        if not confirm_mod_update(self, f"{inst} / {ver}" if ver else inst):
             return
-        self.backend.start_mod_updates(inst)
+        self.backend.start_mod_updates(inst, ver)
 
     def _install(self, item, tile=None):
         if isinstance(item, str):

@@ -320,11 +320,14 @@ class ModManagerPage(QWidget):
 
     def _check_updates(self):
         inst = self._current_instance()
+        # 更新目标必须是屏幕上正看着的目录：切到「某版本 · 独立 mods」
+        # 时不能悄悄回头去动实例共享目录。
+        ver = self._current_version()
         # 会替换/删除文件的批量动作，和删除单个模组一样要先问一声
-        if not confirm_mod_update(self, inst):
+        if not confirm_mod_update(self, f"{inst} / {ver}" if ver else inst):
             return
         try:
-            self.backend.start_mod_updates(inst)
+            self.backend.start_mod_updates(inst, ver)
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
