@@ -104,6 +104,108 @@ class ExportPackDialog(MessageBoxBase):
         self.widget.setMinimumWidth(420)
 
 
+class LoaderSwitchDialog(MessageBoxBase):
+    """更换 / 移除加载器（对标 HMCL 版本设置的「自动安装」）。"""
+
+    LOADERS = [
+        ("", "原版（移除加载器）"), ("fabric", "Fabric"), ("quilt", "Quilt"),
+        ("forge", "Forge"), ("neoforge", "NeoForge"),
+        ("optifine", "OptiFine"), ("liteloader", "LiteLoader"),
+    ]
+
+    def __init__(self, backend, comps: dict, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self._rows: list[dict] = []
+        self._gen = 0
+        mc = comps.get("mc") or ""
+        self._mc = mc
+        cur = comps.get("loader") or ""
+        cur_lv = comps.get("loader_version") or ""
+        self._cur_lv = cur_lv
+
+        self.viewLayout.addWidget(SubtitleLabel(tr("更换 / 移除加载器"), self))
+        from mclauncher.version_components import LOADER_LABELS
+        cur_label = LOADER_LABELS.get(cur, cur) if cur else tr("原版")
+        cur_text = f"{cur_label} {cur_lv}".strip()
+        self.viewLayout.addWidget(BodyLabel(
+            f"Minecraft {mc} · " + tr("当前: {l}").format(l=cur_text), self))
+        in_place = comps.get("version") != mc
+        hint = CaptionLabel(
+            tr("原地更换，mods、设置与存档保留；不选版本号则装最新稳定版。") if in_place
+            else tr("原版规范目录不能原地加装，会生成新版本并保留原版。"), self)
+        hint.setWordWrap(True)
+        self.viewLayout.addWidget(hint)
+
+        self.loader_box = ComboBox(self)
+        for key, label in self.LOADERS:
+            self.loader_box.addItem(tr(label) if not key else label)
+        keys = [k for k, _ in self.LOADERS]
+        self.loader_box.setCurrentIndex(keys.index(cur) if cur in keys else 0)
+        self.viewLayout.addWidget(self.loader_box)
+
+        self.ver_box = ComboBox(self)
+        self.viewLayout.addWidget(self.ver_box)
+        self.loader_box.currentIndexChanged.connect(self._reload_versions)
+        self._reload_versions()
+
+        self.yesButton.setText(tr("更换"))
+        self.cancelButton.setText(tr("取消"))
+        self.widget.setMinimumWidth(460)
+
+    def _loader_key(self) -> str:
+        return self.LOADERS[self.loader_box.currentIndex()][0]
+
+    def _reload_versions(self, *_a):
+        key = self._loader_key()
+        self._rows = []
+        self.ver_box.clear()
+        if key in ("", "liteloader"):
+            self.ver_box.setEnabled(False)
+            return
+        self._gen += 1
+        gen = self._gen
+        self.ver_box.setEnabled(False)
+        self.ver_box.addItem(tr("加载版本列表…"))
+
+        def ok(rows):
+            import shiboken6
+            if not shiboken6.isValid(self.ver_box) or gen != self._gen:
+                return
+            self.ver_box.clear()
+            self._rows = list(rows or [])
+            for r in self._rows:
+                label = str(r.get("label") or r.get("id") or "")
+                if not r.get("stable", True):
+                    label += " " + tr("(测试版)")
+                self.ver_box.addItem(label)
+            self.ver_box.setEnabled(bool(self._rows))
+            if not self._rows:
+                self.ver_box.addItem(tr("该 MC 版本没有可用构建"))
+            for i, r in enumerate(self._rows):
+                if self._cur_lv and str(r.get("id")) == self._cur_lv:
+                    self.ver_box.setCurrentIndex(i)
+                    break
+
+        def err(message):
+            import shiboken6
+            if not shiboken6.isValid(self.ver_box) or gen != self._gen:
+                return
+            self.ver_box.clear()
+            self.ver_box.addItem(tr("版本列表获取失败，确认后装最新稳定版"))
+            self.ver_box.setEnabled(False)
+
+        self.backend.call_async(
+            lambda: self.backend.list_loader_versions(self._mc, key), ok, err)
+
+    def payload(self) -> tuple[str, str]:
+        key = self._loader_key()
+        idx = self.ver_box.currentIndex()
+        if key and 0 <= idx < len(self._rows):
+            return key, str(self._rows[idx].get("id") or "")
+        return key, ""
+
+
 class AssetExtractDialog(MessageBoxBase):
     """提取游戏资源（对标 PCL2 百宝箱）：音乐 / 音效 / 语言文件按真实文件名导出。"""
 
@@ -475,12 +577,31 @@ class VersionPage(QWidget):
         add(tr("存档管理…"), lambda: self._saves(instance, version))
         add(tr("重命名"), lambda: self._rename(instance, version))
         add(tr("复制"), lambda: self._copy(instance, version))
+        add(tr("更换 / 移除加载器…"), lambda: self._switch_loader(instance, version))
         add(tr("隐藏 / 取消隐藏"), lambda: self._hide(instance, version))
         add(tr("创建桌面快捷方式"), lambda: self._shortcut(instance, version))
         add(tr("导出启动脚本"), lambda: self.backend.export_launch_script(instance, version))
         add(tr("导出整合包…"), lambda: self._export_pack(instance, version))
         add(tr("提取游戏资源…"), lambda: self._extract_assets(instance, version))
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _switch_loader(self, instance, version):
+        try:
+            comps = self.backend.get_version_components(instance, version)
+        except Exception as e:
+            MessageBox(tr("无法识别版本组件"), str(e), self.window()).exec()
+            return
+        if not comps.get("mc"):
+            MessageBox(tr("无法识别版本组件"),
+                       tr("无法确定该版本对应的 Minecraft 版本"), self.window()).exec()
+            return
+        dlg = LoaderSwitchDialog(self.backend, comps, self.window())
+        if not dlg.exec():
+            return
+        loader, lv = dlg.payload()
+        self.backend.switch_loader(instance, version, loader, lv)
+        InfoBar.success(tr("已开始更换加载器"), tr("进度见下载任务，完成后版本列表自动刷新。"),
+                        parent=self, position=InfoBarPosition.TOP, duration=4000)
 
     def _extract_assets(self, instance, version):
         try:

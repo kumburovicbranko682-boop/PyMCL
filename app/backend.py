@@ -548,6 +548,40 @@ class BackendAPI(QObject):
         self._emit_ui_changed()
         return out
 
+    def get_version_components(self, instance: str, version: str) -> dict:
+        """识别已装版本的 Minecraft 版本与加载器：{mc, loader, loader_version}。"""
+        from mclauncher import version_components as vc
+        return vc.components_of(self._instance(instance), version)
+
+    def switch_loader(self, instance: str, version: str, loader: str,
+                      loader_version: str = "") -> str:
+        """给已装版本换 / 装 / 移除加载器（原地，保留 mods 与设置）。返回任务 ID。"""
+        return self.start_task(
+            tr("更换加载器 {v}").format(v=version),
+            self._switch_loader_impl, instance, version, loader, loader_version)
+
+    def _switch_loader_impl(self, progress, log, instance, version, loader, loader_version):
+        from mclauncher import version_components as vc
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        res = vc.switch_loader(
+            inst, version, loader, loader_version, dm=dm,
+            on_progress=dm.on_progress, cancel=dm.cancel,
+            extra={"skip_assets": bool(CONFIG.get("skip_assets"))})
+        self._emit_ui_changed()
+        new_loader = res.get("loader") or ""
+        label = vc.LOADER_LABELS.get(new_loader, new_loader)
+        lv = res.get("loader_version") or ""
+        if not res.get("in_place"):
+            msg = tr("已生成新版本 {n}（{l} {lv}），原版本保留").format(
+                n=res.get("version"), l=label, lv=lv).rstrip()
+        elif new_loader:
+            msg = tr("{v} 已更换为 {l} {lv}").format(v=version, l=label, lv=lv).rstrip()
+        else:
+            msg = tr("{v} 已移除加载器，还原为原版").format(v=version)
+        log(msg)
+        return msg
+
     def open_version_folder(self, instance: str, version: str = "", which: str = "root") -> str:
         from mclauncher import version_ops as vops
         return vops.open_folder(self._instance(instance), version, which)
