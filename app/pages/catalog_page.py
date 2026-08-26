@@ -384,7 +384,8 @@ class PclCatalogPage(QWidget):
             b.setFixedHeight(28)
             b.setCheckable(True)
         self.mode_search.setChecked(True)
-        self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查更新"))
+        # 后端任务会把查到的更新直接装上（_mod_update_impl），按钮名要说实话
+        self.update_btn = TransparentPushButton(FIF.SYNC, tr("检查并更新"))
         self.installed_ver_box = ComboBox()
         self.installed_ver_box.setFixedWidth(160)
         self.installed_ver_box.addItem(tr("实例目录"))
@@ -702,7 +703,20 @@ class PclCatalogPage(QWidget):
 
     def _check_updates(self):
         inst = self._current_instance()
-        self.backend.start_mod_updates(inst)
+        try:
+            self.backend.start_mod_updates(inst)
+        except Exception as e:
+            InfoBar.error(tr("检查更新失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+            return
+        win = self.window()
+        if hasattr(win, "fly_to_tasks"):
+            win.fly_to_tasks(self.update_btn, tr("更新"))
+        InfoBar.success(
+            tr("已开始检查并更新"),
+            tr("进度见「下载任务」；查到的更新会直接装进 mods 文件夹"),
+            parent=self, position=InfoBarPosition.TOP, duration=4000,
+        )
 
     def _install(self, item, tile=None):
         if isinstance(item, str):
