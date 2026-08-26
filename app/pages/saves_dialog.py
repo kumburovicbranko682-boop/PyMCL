@@ -21,7 +21,7 @@ class SavesDialog(MessageBoxBase):
         self.backend = backend
         self.instance = instance
         self.version = version
-        self.viewLayout.addWidget(SubtitleLabel(f"存档 · {instance}", self))
+        self.viewLayout.addWidget(SubtitleLabel(tr("存档 · {0}").format(instance), self))
         self.kind = ComboBox()
         self.kind.addItems([tr("存档"), tr("备份"), tr("截图"), tr("崩溃报告"), tr("日志")])
         self.list = ListWidget()
@@ -169,7 +169,9 @@ class SavesDialog(MessageBoxBase):
         except Exception as e:
             MessageBox(tr("备份失败"), str(e), self).exec()
             return
-        MessageBox(tr("已开始备份"), f"「{name}」正在打包，可到下载任务页看进度。", self).exec()
+        MessageBox(tr("已开始备份"),
+                   tr("「{0}」正在打包，可到下载任务页看进度。").format(name),
+                   self).exec()
 
     def _restore(self):
         name = self._selected_name()
@@ -177,7 +179,8 @@ class SavesDialog(MessageBoxBase):
             return
         box = MessageBox(
             tr("还原备份"),
-            f"从「{name}」还原存档？\n若同名存档已存在，会另存为「原名-还原」，不会覆盖。",
+            tr("从「{0}」还原存档？").format(name) + "\n"
+            + tr("若同名存档已存在，会另存为「原名-还原」，不会覆盖。"),
             self,
         )
         if not box.exec():

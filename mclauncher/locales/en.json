@@ -983,5 +983,15 @@
   "完成后可在启动器目录的 exports 文件夹找到 {0}.mrpack": "When it finishes, look for {0}.mrpack in the launcher's exports folder",
   "{0} 个版本": "{0} versions",
   "确定删除实例「{0}」？其中的存档与配置将一并移除。": "Delete instance “{0}”? Its saves and settings will be removed too.",
-  "实例「{0}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。": "The Java used to launch instance “{0}”. Auto picks by game version (17 for 1.19+, 8 for legacy versions)."
+  "实例「{0}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。": "The Java used to launch instance “{0}”. Auto picks by game version (17 for 1.19+, 8 for legacy versions).",
+  "发布于 {0}": "Released {0}",
+  "安装 {0}": "Install {0}",
+  "版本设置 · {0}": "Version Settings · {0}",
+  "存档 · {0}": "Worlds · {0}",
+  "「{0}」正在打包，可到下载任务页看进度。": "“{0}” is being packed — watch progress in Download Tasks.",
+  "从「{0}」还原存档？": "Restore the world from “{0}”?",
+  "若同名存档已存在，会另存为「原名-还原」，不会覆盖。": "If a world with the same name exists, it is saved as “name-restored” instead of overwriting.",
+  "将删除整个实例「{0}」及其文件，不可恢复。": "This deletes the whole instance “{0}” and its files. It cannot be undone.",
+  "将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。": "This permanently deletes the world “{0}”; its builds and progress cannot be recovered.",
+  "将删除「{0}」。": "This deletes “{0}”."
 }

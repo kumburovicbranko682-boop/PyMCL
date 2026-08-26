@@ -30,7 +30,7 @@ class VersionCard(SimpleCardWidget):
         colors = {"release": "#2FA36B", "snapshot": "#E8862E", "old_alpha": "#7C5CD6", "old_beta": "#7C5CD6"}
         top.addWidget(Pill(labels.get(vtype, vtype), colors.get(vtype, "#E8862E")))
         layout.addLayout(top)
-        layout.addWidget(CaptionLabel(f'发布于 {info["date"]}'))
+        layout.addWidget(CaptionLabel(tr("发布于 {0}").format(info["date"])))
         layout.addStretch(1)
 
         row = QHBoxLayout()
