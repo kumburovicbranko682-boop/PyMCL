@@ -117,6 +117,12 @@ const char *pymcl_arch(void);
 int pymcl_is_windows(void);
 void pymcl_native_arch_token(char *out, size_t n);
 
+/* servers_io.c —— 服务器导入/导出与时长汇总的纯逻辑（与 Python 端对拍） */
+int pymcl_servers_import_text(cJSON *servers, const char *text);
+int pymcl_servers_import_json(cJSON *servers, cJSON *data);
+char *pymcl_servers_export_text(cJSON *servers);
+double pymcl_playtime_total(cJSON *playtime_root);
+
 /* ---------- root / config ---------- */
 extern char g_root[PYMCL_PATH];
 void pymcl_set_root(const char *root);

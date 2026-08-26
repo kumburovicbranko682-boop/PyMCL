@@ -28,6 +28,7 @@ methods = [
     "get_all_playtime", "list_servers", "authlib_presets", "get_version_list",
     "preflight_launch", "ai_list_chats", "terracotta_snapshot", "help_articles",
     "format_playtime", "add_offline_account",
+    "get_total_playtime", "feedback_history", "export_servers", "import_servers",
 ]
 ok = 0
 fail = []
@@ -39,6 +40,11 @@ for m in methods:
         params = {"seconds": 3661}
     if m == "add_offline_account":
         params = {"username": "_c_align_probe"}
+    if m == "export_servers":
+        params = {"instance": "default"}
+    if m == "import_servers":
+        # 空文本导入 0 条：验证方法可达且不写盘，不污染 default 实例
+        params = {"instance": "default", "text": ""}
     try:
         res = rpc(m, params)
         if res.get("error"):

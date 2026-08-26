@@ -558,6 +558,47 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         if (emit) emit("ui_changed", cJSON_CreateObject());
         return ret;
     }
+    if (strcmp(method, "import_servers") == 0) {
+        /* EziApp 服务器页的「导入」以前在纯 C 桥下直接 unknown method；
+         * 即使装了 Python，一次性 py_rpc 也只是碰巧和这里共用同一份
+         * servers.json。逻辑对齐 bridge/api.py：先试 JSON 数组再按行解析。 */
+        const char *inst = pstr(params, "instance", "default");
+        const char *text = pstr(params, "text", "");
+        char path[PYMCL_PATH];
+        servers_path(inst, path, sizeof(path));
+        cJSON *arr = pymcl_read_json(path);
+        if (!cJSON_IsArray(arr)) { cJSON_Delete(arr); arr = cJSON_CreateArray(); }
+        const char *head = text;
+        while (*head == ' ' || *head == '\t' || *head == '\r' || *head == '\n'
+               || *head == '\v' || *head == '\f') head++;
+        cJSON *data = (*head == '[') ? cJSON_Parse(text) : NULL;
+        int imported;
+        if (cJSON_IsArray(data)) imported = pymcl_servers_import_json(arr, data);
+        else imported = pymcl_servers_import_text(arr, text);
+        cJSON_Delete(data);
+        if (imported > 0) {
+            if (pymcl_write_json(path, arr) != 0) {
+                cJSON_Delete(arr);
+                pymcl_set_error("写入 servers.json 失败: %s", path);
+                return NULL;
+            }
+            if (emit) emit("ui_changed", cJSON_CreateObject());
+        }
+        cJSON_Delete(arr);
+        return cJSON_CreateNumber(imported);
+    }
+    if (strcmp(method, "export_servers") == 0) {
+        char path[PYMCL_PATH];
+        servers_path(pstr(params, "instance", "default"), path, sizeof(path));
+        cJSON *arr = pymcl_read_json(path);
+        if (!cJSON_IsArray(arr)) { cJSON_Delete(arr); arr = cJSON_CreateArray(); }
+        char *txt = pymcl_servers_export_text(arr);
+        cJSON_Delete(arr);
+        if (!txt) { pymcl_set_error("导出服务器列表失败"); return NULL; }
+        cJSON *ret = cJSON_CreateString(txt);
+        free(txt);
+        return ret;
+    }
 
     /* ---- playtime ---- */
     if (strcmp(method, "get_all_playtime") == 0) {
@@ -574,6 +615,17 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
             insts = cJSON_CreateObject();
         }
         return insts;
+    }
+    if (strcmp(method, "get_total_playtime") == 0) {
+        /* EziApp 时长页把 get_all_playtime 和 get_total_playtime 放进同一个
+         * Promise.all；以前后者 unknown method，整页报「加载游玩时长失败」，
+         * 尽管数据就躺在 playtime.json 里。 */
+        char path[PYMCL_PATH];
+        playtime_path(path, sizeof(path));
+        cJSON *j = pymcl_read_json(path);
+        double total = pymcl_playtime_total(j);
+        cJSON_Delete(j);
+        return cJSON_CreateNumber(total);
     }
     if (strcmp(method, "format_playtime") == 0) {
         long long sec = 0;
@@ -771,6 +823,17 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         cJSON *o = cJSON_CreateObject();
         cJSON_AddBoolToObject(o, "ok", 1);
         return o;
+    }
+
+    if (strcmp(method, "feedback_history") == 0) {
+        /* 与 mclauncher/feedback.py 共用根目录的 feedback_history.json：
+         * py_rpc 路径提交成功后写的就是这份文件。以前该方法 unknown，
+         * EziApp 反馈页在 Promise.all 里直接整页挂掉，连提交表单都进不去。 */
+        char path[PYMCL_PATH];
+        pymcl_path_join(path, sizeof(path), g_root, "feedback_history.json");
+        cJSON *rows = pymcl_read_json(path);
+        if (!cJSON_IsArray(rows)) { cJSON_Delete(rows); rows = cJSON_CreateArray(); }
+        return rows;
     }
 
     /* ---- feedback / help / news / update / cleaner / AI / terracotta ---- */
