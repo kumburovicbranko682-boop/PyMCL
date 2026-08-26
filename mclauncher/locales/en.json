@@ -1314,5 +1314,9 @@
   "开始下载最新正式版 {0}": "Downloading the latest release {0}",
   "下载完成，正在启动 {0}": "Download finished, launching {0}",
   "还没有安装版本": "No version installed yet",
-  "点击「开始游戏」自动下载最新正式版并进入游戏": "Click \"Start Game\" to auto-download the latest release and jump in"
+  "点击「开始游戏」自动下载最新正式版并进入游戏": "Click \"Start Game\" to auto-download the latest release and jump in",
+  "种子地图": "Seed Map",
+  "在浏览器打开 Chunk Base 种子地图（自动带上种子与游戏版本）": "Open the Chunk Base seed map in your browser (seed and game version pre-filled)",
+  "无法打开种子地图": "Could not open seed map",
+  "存档不存在：{0}": "World not found: {0}"
 }

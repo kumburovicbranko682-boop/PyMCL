@@ -39,6 +39,28 @@ def _safe_child(folder: Path, name: str, what: str = "存档") -> Path:
 GAME_MODES = {0: "生存", 1: "创造", 2: "冒险", 3: "旁观"}
 DIFFICULTIES = {0: "和平", 1: "简单", 2: "普通", 3: "困难"}
 
+CHUNKBASE_APPS = ("seed-map", "stronghold-finder", "biome-finder", "slime-finder")
+
+
+def chunkbase_url(seed, mc_version: str = "", app: str = "seed-map") -> str:
+    """Chunk Base 在线工具链接（HMCL 世界管理「Chunk Base」同款入口）。
+
+    seed 必填（level.dat 里的数字种子，可为负）；mc_version 是正式版号
+    （如 1.21.4）时带上 platform=java_1_21_4，快照等其他格式交给网站默认。
+    """
+    from urllib.parse import quote
+
+    seed = str(seed or "").strip()
+    if not seed:
+        raise SaveError("这个存档的 level.dat 里没有种子信息")
+    if app not in CHUNKBASE_APPS:
+        app = "seed-map"
+    frag = f"seed={quote(seed, safe='-')}"
+    m = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?", str(mc_version or "").strip())
+    if m:
+        frag += "&platform=java_" + "_".join(g for g in m.groups() if g)
+    return f"https://www.chunkbase.com/apps/{app}#{frag}"
+
 
 def level_summary(save_dir) -> dict:
     """解析 level.dat（NBT）：世界名、版本、模式、难度、种子、上次游玩。

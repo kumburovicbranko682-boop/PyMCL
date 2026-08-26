@@ -198,10 +198,13 @@ class SavesDialog(MessageBoxBase):
         self.open_btn = PushButton(tr("打开"))
         self.del_btn = PushButton(tr("删除存档"))
         self.dp_btn = PushButton(tr("把数据包装进所选存档"))
+        self.map_btn = PushButton(tr("种子地图"))
+        self.map_btn.setToolTip(tr("在浏览器打开 Chunk Base 种子地图（自动带上种子与游戏版本）"))
         row.addWidget(self.play_btn)
         row.addWidget(self.open_btn)
         row.addWidget(self.del_btn)
         row.addWidget(self.dp_btn)
+        row.addWidget(self.map_btn)
         row2 = QHBoxLayout()
         self.edit_btn = PushButton(tr("编辑世界"))
         self.edit_btn.setToolTip(tr("改世界名 / 游戏模式 / 难度 / 允许作弊（写入 level.dat）"))
@@ -234,6 +237,7 @@ class SavesDialog(MessageBoxBase):
         self.restore_btn.clicked.connect(self._restore)
         self.export_btn.clicked.connect(self._export)
         self.wdp_btn.clicked.connect(self._world_datapacks)
+        self.map_btn.clicked.connect(self._seed_map)
         self.reload()
 
     def _set_actions(self, kind: str):
@@ -243,6 +247,7 @@ class SavesDialog(MessageBoxBase):
         self.del_btn.setEnabled(is_save or is_backup)
         self.del_btn.setText(tr("删除备份") if is_backup else tr("删除存档"))
         self.dp_btn.setEnabled(is_save)
+        self.map_btn.setEnabled(is_save)
         self.edit_btn.setEnabled(is_save)
         self.nbt_btn.setEnabled(is_save)
         self.backup_btn.setEnabled(is_save)
@@ -414,6 +419,20 @@ class SavesDialog(MessageBoxBase):
             MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
             return
         WorldDatapacksDialog(self.backend, self.instance, name, self.version, self).exec()
+
+    def _seed_map(self):
+        name = self._selected_name()
+        if not name:
+            MessageBox(tr("未选择"), tr("请先在列表里选一个存档。"), self).exec()
+            return
+        try:
+            url = self.backend.world_seed_map_url(self.instance, name, self.version)
+        except Exception as e:
+            MessageBox(tr("无法打开种子地图"), str(e), self).exec()
+            return
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(url))
 
     def _edit_world(self):
         name = self._selected_name()

@@ -614,6 +614,15 @@ class BackendAPI(QObject):
         from mclauncher import saves as saves_mod
         return saves_mod.list_saves(self._instance(instance), version)
 
+    def world_seed_map_url(self, instance: str, save_name: str, version: str = "") -> str:
+        """存档的 Chunk Base 种子地图链接（HMCL 世界管理同款快速入口）。"""
+        from mclauncher import saves as saves_mod
+        rows = self.list_saves(instance, version)
+        row = next((r for r in rows if r.get("name") == save_name), None)
+        if row is None:
+            raise saves_mod.SaveError(tr("存档不存在：{0}").format(save_name))
+        return saves_mod.chunkbase_url(row.get("seed") or "", row.get("mc_version") or "")
+
     def list_schematics(self, instance: str, version: str = "") -> list:
         """原理图列表（HMCL 同款）：Litematica / WorldEdit / 结构方块文件。"""
         from mclauncher import schematics as sch
