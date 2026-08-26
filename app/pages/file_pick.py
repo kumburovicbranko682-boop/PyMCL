@@ -94,8 +94,16 @@ class FilePickDialog(MessageBoxBase):
         scroll.setWidget(inner)
         self.viewLayout.addWidget(scroll)
 
+        status_row = QHBoxLayout()
         self.status = BodyLabel(tr("正在加载版本列表…"))
-        self.viewLayout.addWidget(self.status)
+        self.retry_btn = TransparentPushButton(FIF.SYNC, tr("重试"))
+        self.retry_btn.hide()
+        self.retry_btn.clicked.connect(self._start_fetch)
+        status_row.addWidget(self.status, 1)
+        status_row.addWidget(self.retry_btn, 0)
+        shost = QWidget(self)
+        shost.setLayout(status_row)
+        self.viewLayout.addWidget(shost)
         self.yesButton.setText(tr("安装所选"))
         self.cancelButton.setText(tr("取消"))
         latest = TransparentPushButton(FIF.DOWNLOAD, tr("安装最新"))
@@ -103,7 +111,7 @@ class FilePickDialog(MessageBoxBase):
         self.buttonLayout.insertWidget(0, latest, 1, Qt.AlignVCenter)
         self.widget.setMinimumWidth(640)
 
-        extra = {
+        self._fetch_extra = {
             "kind": kind,
             "source": self.item.get("source") or "",
             "slug": self.item.get("slug"),
@@ -111,18 +119,24 @@ class FilePickDialog(MessageBoxBase):
             "name": self.item.get("name"),
             "game_version": "" if (not game_version or str(game_version).startswith(tr("全部"))) else game_version,
         }
-        call_async = getattr(backend, "call_async", None)
-        if callable(call_async):
-            call_async(lambda e=extra: backend.list_catalog_files(e),
-                       guard(self, self._on_ok), guard(self, self._on_err))
-        else:
-            try:
-                self._on_ok(backend.list_catalog_files(extra))
-            except Exception as exc:
-                self._on_err(exc)
+        self._start_fetch()
 
         self.gv.currentTextChanged.connect(self._on_filter)
         self.loader.currentTextChanged.connect(self._on_filter)
+
+    def _start_fetch(self):
+        self.retry_btn.hide()
+        self.status.setText(tr("正在加载版本列表…"))
+        extra = self._fetch_extra
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(lambda e=extra: self.backend.list_catalog_files(e),
+                       guard(self, self._on_ok), guard(self, self._on_err))
+        else:
+            try:
+                self._on_ok(self.backend.list_catalog_files(extra))
+            except Exception as exc:
+                self._on_err(exc)
 
     def _reload_targets(self):
         if self.target_box is None or self.target_inst_box is None:
@@ -148,7 +162,8 @@ class FilePickDialog(MessageBoxBase):
         super().accept()
 
     def _on_err(self, err):
-        self.status.setText(f"加载失败: {err}")
+        self.status.setText(tr("加载失败") + f": {err}")
+        self.retry_btn.show()
 
     def _on_ok(self, rows):
         self._rows = list(rows or [])
@@ -166,7 +181,7 @@ class FilePickDialog(MessageBoxBase):
         if want and want in gvs:
             self.gv.setCurrentText(want)
         self.gv.blockSignals(False)
-        self.status.setText(f"{len(self._rows)} 个文件")
+        self.status.setText(tr("共 {0} 个文件").format(len(self._rows)))
         self._limit = self.PAGE
         self._refill()
 
@@ -206,11 +221,11 @@ class FilePickDialog(MessageBoxBase):
             self.list_layout.addWidget(BodyLabel(tr("没有匹配的文件，试试放宽筛选。")))
         rest = len(matched) - len(shown)
         if rest > 0:
-            more = PushButton(f"加载更多（还有 {rest}）")
+            more = PushButton(tr("加载更多（还有 {0}）").format(rest))
             more.clicked.connect(self._more)
             self.list_layout.addWidget(more)
         self.list_layout.addStretch(1)
-        self.status.setText(f"{len(matched)} 个匹配 / 共 {len(self._rows)} 个文件")
+        self.status.setText(tr("{0} 个匹配 / 共 {1} 个文件").format(len(matched), len(self._rows)))
 
     def _more(self):
         self._limit += self.PAGE

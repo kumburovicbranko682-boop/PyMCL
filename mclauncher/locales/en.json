@@ -1022,5 +1022,7 @@
   "该分区只剩这一个子页，移走会变空栏；先在「自定义分区」里补充其它子页": "This is the last sub-page in its section; moving it would leave the section empty. Add other pages in “Customize sections” first.",
   "界面动画": "Interface animations",
   "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant",
-  "；安装新版本时写入，可稍后在版本设置改": "; applied to newly installed versions, changeable later in version setup"
+  "；安装新版本时写入，可稍后在版本设置改": "; applied to newly installed versions, changeable later in version setup",
+  "共 {0} 个文件": "{0} files",
+  "{0} 个匹配 / 共 {1} 个文件": "{0} matched / {1} files total"
 }
