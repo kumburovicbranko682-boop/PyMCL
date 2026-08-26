@@ -282,7 +282,10 @@ WORLD_SPEC = {
 
 
 def _version_filter_items(backend) -> list[str]:
-    """版本筛选项：读缓存清单生成 release 列表（最新在前），缓存空则联网，再退经典版本。"""
+    """版本筛选项：只读本地缓存清单，避免打开目录页时同步联网卡住 UI。
+
+    缓存为空（还没拉过版本列表）时退回经典版本；输入框可自行填写 26.x。
+    """
     try:
         from mclauncher.manifest import CLASSIC_CATALOG_VERSIONS, catalog_release_ids
     except ImportError:
@@ -292,13 +295,7 @@ def _version_filter_items(backend) -> list[str]:
         rows = backend.get_version_list() or []
     except Exception:
         rows = []
-    ids = catalog_release_ids(rows)
-    if not ids:
-        try:
-            ids = catalog_release_ids(backend.fetch_version_list() or [])
-        except Exception:
-            ids = []
-    return ids or list(CLASSIC_CATALOG_VERSIONS)
+    return catalog_release_ids(rows) or list(CLASSIC_CATALOG_VERSIONS)
 
 
 class PclCatalogPage(QWidget):
