@@ -116,5 +116,54 @@ class MotionMasterSwitchTests(unittest.TestCase):
             _close(win)
 
 
+class CatBarIndicatorTests(unittest.TestCase):
+    """下载分类横条的绿色下划线动画也要听总开关的。"""
+
+    def _bar(self):
+        from PySide6.QtWidgets import QWidget
+        from app.pages.download_hub import DownloadCatBar
+        host = QWidget()
+        host.resize(800, 60)
+        bar = DownloadCatBar(host)
+        bar.resize(800, 48)
+        pages = [QWidget(host), QWidget(host)]
+        bar.add_item("原版游戏", pages[0])
+        bar.add_item("Mod", pages[1])
+        host.show()
+        _app.processEvents()
+        self.addCleanup(host.deleteLater)
+        return bar, pages
+
+    def test_indicator_jumps_when_motion_off(self):
+        from PySide6.QtCore import QAbstractAnimation
+        CONFIG.set("ui_motion", False)
+        CONFIG.save()
+        try:
+            bar, pages = self._bar()
+            bar.select_page(pages[0])
+            _app.processEvents()
+            bar.select_page(pages[1])
+            _app.processEvents()
+            self.assertNotEqual(bar._ind_anim.state(), QAbstractAnimation.Running,
+                                "界面动画关闭时下划线不应播动画")
+            btn, _ = bar._buttons[id(pages[1])]
+            self.assertEqual(bar._indicator.geometry(), bar._indicator_rect(btn),
+                             "关动画时下划线应直接落到目标位置")
+        finally:
+            CONFIG.set("ui_motion", True)
+            CONFIG.save()
+
+    def test_indicator_animates_when_motion_on(self):
+        from PySide6.QtCore import QAbstractAnimation
+        CONFIG.set("ui_motion", True)
+        CONFIG.save()
+        bar, pages = self._bar()
+        bar.select_page(pages[0])
+        _app.processEvents()
+        bar.select_page(pages[1])
+        self.assertEqual(bar._ind_anim.state(), QAbstractAnimation.Running,
+                         "界面动画开启时下划线应有平滑过渡")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
