@@ -32,8 +32,10 @@ class FirstRunDialog(MessageBoxBase):
         self.viewLayout.addWidget(BodyLabel(tr("游戏 / 实例目录"), self))
         self.viewLayout.addWidget(host)
 
+        from mclauncher.source import DOWNLOAD_SOURCE_LABELS
         self.src = ComboBox()
-        self.src.addItems([tr("自动（官方慢则 BMCLAPI）"), tr("仅官方"), tr("仅 BMCLAPI")])
+        self._src_keys = {tr(v): k for k, v in DOWNLOAD_SOURCE_LABELS.items()}
+        self.src.addItems([tr(v) for v in DOWNLOAD_SOURCE_LABELS.values()])
         self.viewLayout.addWidget(BodyLabel(tr("文件下载源"), self))
         self.viewLayout.addWidget(self.src)
 
@@ -69,10 +71,9 @@ class FirstRunDialog(MessageBoxBase):
         self.iso_hint.setText(tr(ISOLATION_HINTS.get(key, "")))
 
     def apply(self):
-        src = {tr("自动（官方慢则 BMCLAPI）"): "auto", tr("仅官方"): "official", tr("仅 BMCLAPI"): "bmclapi"}
         data = self.backend.get_settings()
         data.update({
-            "download_source": src.get(self.src.currentText(), "auto"),
+            "download_source": self._src_keys.get(self.src.currentText(), "auto"),
             "default_memory_mb": self.memory.value(),
             "default_isolation": self._iso_keys.get(self.iso.currentText(), "none"),
             "first_run": False,

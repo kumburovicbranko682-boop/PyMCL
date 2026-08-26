@@ -297,7 +297,9 @@ class SettingsPage(QWidget):
         self.limit_card, self.limit_spin = _spin_card(
             FIF.CLOUD_DOWNLOAD, tr("下载限速 (KB/s)"), tr("0 表示不限制"),
             0, 102400, int(settings.get("download_limit_kbps") or 0))
-        src_map = {"auto": tr("自动（官方>4秒改 BMCLAPI）"), "official": tr("仅官方"), "bmclapi": tr("仅 BMCLAPI")}
+        from mclauncher.source import DOWNLOAD_SOURCE_LABELS
+        # 与首次向导共用同一份档位名称（精确的 4 秒规则写在下面卡片描述里）
+        src_map = {k: tr(v) for k, v in DOWNLOAD_SOURCE_LABELS.items()}
         comm_map = {"auto": tr("自动"), "official": tr("仅官方"), "mcim": tr("仅 MCIM")}
         self._src_keys = {v: k for k, v in src_map.items()}
         self._comm_keys = {v: k for k, v in comm_map.items()}

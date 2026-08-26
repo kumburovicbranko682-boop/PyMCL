@@ -60,6 +60,15 @@ from mclauncher.config import CONFIG
 check(CONFIG.get("default_isolation") == "all",
       f"apply should store the picked level, got {CONFIG.get('default_isolation')!r}")
 
+# 下载源共用标签表后，向导的选择仍要正确落盘
+from mclauncher.source import DOWNLOAD_SOURCE_LABELS
+dlg2 = FirstRunDialog(win.backend, win)
+dlg2.game_dir.setText("")
+dlg2.src.setCurrentText(DOWNLOAD_SOURCE_LABELS["bmclapi"])
+dlg2.apply()
+check(CONFIG.get("download_source") == "bmclapi",
+      f"wizard source pick should persist, got {CONFIG.get('download_source')!r}")
+
 # --- 版本设置对话框：同一份解释 ---
 vdir = home / ".minecraft" / "default" / "versions" / "1.21.1"
 vdir.mkdir(parents=True)

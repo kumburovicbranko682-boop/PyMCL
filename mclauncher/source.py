@@ -41,6 +41,15 @@ def _cfg(key, default=None):
     return CONFIG.get(key, default)
 
 
+# 下载源三个档位的用户可见名称：首次向导和设置页共用这一份，
+# 同一个档位不允许出现两种说法。
+DOWNLOAD_SOURCE_LABELS = {
+    "auto": "自动（官方慢则 BMCLAPI）",
+    "official": "仅官方",
+    "bmclapi": "仅 BMCLAPI",
+}
+
+
 def download_mode() -> str:
     mode = str(_cfg("download_source", "auto") or "auto").strip().lower()
     return mode if mode in ("auto", "official", "bmclapi") else "auto"

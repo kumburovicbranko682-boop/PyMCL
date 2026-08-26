@@ -53,6 +53,15 @@ class CopyMatchesUiTest(unittest.TestCase):
                 for phrase in _GHOST_PHRASES:
                     self.assertNotIn(phrase, key, f"{name} 还留着幽灵页面词条: {key}")
 
+    def test_download_source_labels_are_shared(self):
+        """首次向导与设置页必须共用 DOWNLOAD_SOURCE_LABELS，不许各写一份。"""
+        for rel in ("app/pages/first_run.py", "app/pages/settings_page.py"):
+            src = (ROOT / rel).read_text(encoding="utf-8")
+            self.assertIn("DOWNLOAD_SOURCE_LABELS", src,
+                          f"{rel} 应引用共享的下载源标签表")
+            self.assertNotIn("官方>4秒", src,
+                             f"{rel} 不应再内嵌另一种「自动」说法")
+
     def test_referenced_names_match_sidebar(self):
         """「下载 → 原版游戏」不是随口一说：必须与主窗侧栏/横条命名一致。"""
         src = (ROOT / "app" / "main_window.py").read_text(encoding="utf-8")

@@ -753,7 +753,6 @@
   "背景已更新": "Background updated",
   "自动": "Auto",
   "自动选择": "Auto",
-  "自动（官方>4秒改 BMCLAPI）": "Auto (BMCLAPI if official >4s)",
   "自动（官方慢则 BMCLAPI）": "Auto (BMCLAPI when official is slow)",
   "自定义 NewAPI": "Custom NewAPI",
   "自定义主页": "Custom Home Page",
