@@ -522,18 +522,37 @@ class GameProcess:
         watch_window_title(self.proc, window_title)
         self.on_line = on_line
         self.started_at = _time.time()
-        self.lines = collections.deque(maxlen=200)
+        # 2000 行够日志窗口回看；崩溃分析仍然只取尾部
+        self.lines = collections.deque(maxlen=2000)
+        self.total_lines = 0
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
 
     def last_lines(self):
         return list(self.lines)
 
+    def tail(self, since: int = 0) -> dict:
+        """增量取日志：since 为已读到的绝对行号。
+
+        返回 {start, total, lines}，start 是 lines[0] 的绝对行号。
+        环形缓冲丢掉的早期行拿不回来，start 可能大于 since。"""
+        lines = list(self.lines)
+        total = int(self.total_lines)
+        start = total - len(lines)
+        since = max(0, int(since or 0))
+        if since >= total:
+            return {"start": total, "total": total, "lines": []}
+        if since > start:
+            lines = lines[since - start:]
+            start = since
+        return {"start": start, "total": total, "lines": lines}
+
     def _reader(self):
         try:
             for line in self.proc.stdout:
                 line = line.rstrip("\n")
                 self.lines.append(line)
+                self.total_lines += 1
                 if self.on_line:
                     try:
                         self.on_line(line)

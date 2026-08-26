@@ -292,6 +292,9 @@ class RunningGameCard(SimpleCardWidget):
         self.meta = CaptionLabel("")
         info.addWidget(self.meta)
         lay.addLayout(info, 1)
+        self.log_btn = PushButton(FIF.DOCUMENT, tr("日志"))
+        self.log_btn.clicked.connect(self._show_log)
+        lay.addWidget(self.log_btn)
         self.kill_btn = PushButton(FIF.CLOSE, tr("结束游戏进程"))
         self.kill_btn.clicked.connect(self._kill)
         lay.addWidget(self.kill_btn)
@@ -303,6 +306,9 @@ class RunningGameCard(SimpleCardWidget):
                 tr("已运行 {t}").format(t=_fmt_uptime(row.get("uptime"))),
                 f"PID {row.get('pid')}" if row.get("pid") else ""]
         self.meta.setText("  ·  ".join(b for b in bits if b))
+
+    def _show_log(self):
+        self.page.open_game_log(self.row)
 
     def _kill(self):
         box = MessageBox(
@@ -329,6 +335,7 @@ class TasksPage(QWidget):
         self._cards: dict[str, TaskCard] = {}
         self._done: set[str] = set()
         self._running_cards: dict[str, RunningGameCard] = {}
+        self._log_windows: dict[str, QWidget] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 20, 28, 20)
@@ -385,6 +392,25 @@ class TasksPage(QWidget):
     # ------------------------------------------------------------------
     # 运行中的游戏
     # ------------------------------------------------------------------
+    def open_game_log(self, row: dict):
+        """打开（或激活）某个运行中游戏的实时日志窗口。"""
+        from .game_log_window import GameLogWindow
+        tid = str(row.get("task_id") or "")
+        win = self._log_windows.get(tid)
+        if win is not None:
+            try:
+                win.show()
+                win.raise_()
+                win.activateWindow()
+                return
+            except RuntimeError:  # 已被销毁
+                self._log_windows.pop(tid, None)
+        win = GameLogWindow(self.backend, tid, row.get("version") or "",
+                            parent=self.window())
+        self._log_windows[tid] = win
+        win.destroyed.connect(lambda *_: self._log_windows.pop(tid, None))
+        win.show()
+
     def reload_running(self):
         try:
             rows = self.backend.list_running_games() or []

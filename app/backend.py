@@ -3011,6 +3011,23 @@ class BackendAPI(QObject):
         rows.sort(key=lambda r: r["started_at"])
         return rows
 
+    def game_log(self, task_id: str = "", since: int = 0) -> dict:
+        """运行中游戏的增量日志（HMCL 日志窗口同款）。
+
+        task_id 留空取最近启动的游戏。返回 {start, total, lines, running}；
+        since 传上次的 total 即可只拿新行。"""
+        with self._game_lock:
+            if task_id:
+                entry = self._game_procs.get(task_id) or {}
+                proc = entry.get("proc")
+            else:
+                proc = self._game_proc
+        if proc is None:
+            return {"start": 0, "total": 0, "lines": [], "running": False}
+        out = proc.tail(since)
+        out["running"] = proc.poll() is None
+        return out
+
     def kill_game(self, task_id: str = "") -> int:
         """结束运行中的游戏；task_id 留空结束全部。返回结束的个数。
 
