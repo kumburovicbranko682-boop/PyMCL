@@ -230,8 +230,7 @@ class MainWindow(FluentWindowBase):
         self.side.widthCommitted.connect(self._on_side_width)
         self.side.pinAtRequested.connect(self._pin_nav_at)
         self.side.reorderRequested.connect(self._on_sidebar_reorder)
-        self.side.editLayoutRequested.connect(
-            lambda: self.launch_page.canvas.set_edit_mode(True))
+        self.side.editLayoutRequested.connect(self._edit_home_layout)
 
         self.hBoxLayout.setContentsMargins(0, TITLE_H, 0, 0)
         self.hBoxLayout.addWidget(self.side)
@@ -513,8 +512,7 @@ class MainWindow(FluentWindowBase):
         self.side.widthCommitted.connect(self._on_side_width)
         self.side.pinAtRequested.connect(self._pin_nav_at)
         self.side.reorderRequested.connect(self._on_sidebar_reorder)
-        self.side.editLayoutRequested.connect(
-            lambda: self.launch_page.canvas.set_edit_mode(True))
+        self.side.editLayoutRequested.connect(self._edit_home_layout)
         self.hBoxLayout.insertWidget(0, self.side)
         self._create_task_badge()
         # 恢复选中态；原来的键被隐藏时回落到第一个可见项
@@ -953,6 +951,16 @@ class MainWindow(FluentWindowBase):
             if inner is not None and inner is not page:
                 key = self._by_obj.get(id(inner)) or key
         return key
+
+    def _edit_home_layout(self):
+        """侧栏底部「编辑布局」：编辑的是启动页画布。
+
+        从别的页点它必须先把启动页带到眼前——否则编辑模式在
+        看不见的画布上默默打开，按钮看起来像坏的，之后切回
+        启动页还会莫名处于编辑状态。
+        """
+        self.switchTo("launch")
+        self.launch_page.canvas.set_edit_mode(True)
 
     def switchTo(self, interface):
         if isinstance(interface, str):
