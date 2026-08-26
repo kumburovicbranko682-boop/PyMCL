@@ -38,7 +38,11 @@ class VersionPageRetryTests(unittest.TestCase):
         self.assertEqual(len(calls), 1, "构造时应发起一次版本清单拉取")
         self.assertEqual(calls[0], backend.fetch_version_list)
 
-        # 模拟拉取失败（干净目录里没有磁盘缓存 → 走空状态分支）
+        # 空状态分支要求 _all_versions 为空。全量跑测试时所有模块共享
+        # 同一个 PYMCL_HOME（setdefault 只有第一个生效），前面测试的后台
+        # 线程可能已把版本清单缓存写进共享目录，构造时读到缓存就不为空。
+        # 这里显式清空，保证测的是「没有任何版本数据 + 拉取失败」这条路。
+        page._all_versions = []
         page._on_versions_err("模拟断网")
         _app.processEvents()
 
