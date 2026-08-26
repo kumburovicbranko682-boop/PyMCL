@@ -87,7 +87,75 @@ def prepare(instance, version_id, extra_game_args=None, memory_mb=None):
         "gpu_mode": gpu.resolve_mode(settings),
         "renderer": gpu.resolve_renderer(settings),
         "show_log": resolve_show_log(settings),
+        "env_vars": parse_env_vars(settings.get("env_vars") or ""),
+        "use_system_glfw": bool(settings.get("use_system_glfw")),
+        "use_system_openal": bool(settings.get("use_system_openal")),
+        "natives_dir": str(settings.get("natives_dir") or "").strip(),
     }
+
+
+def parse_env_vars(text) -> dict:
+    """把版本设置「环境变量」文本解析成 dict（HMCL 同款语义）。
+
+    按引号感知分词（和 JVM 参数一样），每个词按第一个 = 拆键值；
+    没有 = 的词视为值为空串的变量。如: A=1 "B=hello world" C
+    """
+    out = {}
+    for token in split_args(text):
+        key, _sep, value = token.partition("=")
+        key = key.strip()
+        if key:
+            out[key] = value
+    return out
+
+
+#: HMCL LibraryAnalyzer 同款：按库坐标推断已装加载器，导出 INST_* 标记
+_LOADER_ENV_MARKS = (
+    ("INST_CLEANROOM", ("com.cleanroommc:cleanroom",)),
+    ("INST_NEOFORGE", ("net.neoforged:neoforge", "net.neoforged.fancymodloader")),
+    ("INST_FORGE", ("net.minecraftforge:forge", "net.minecraftforge:fmlloader")),
+    ("INST_LITELOADER", ("com.mumfrey:liteloader",)),
+    ("INST_FABRIC", ("net.fabricmc:fabric-loader",)),
+    ("INST_QUILT", ("org.quiltmc:quilt-loader",)),
+    ("INST_OPTIFINE", ("optifine:optifine",)),
+)
+
+
+def loader_env_flags(resolved) -> list:
+    """从 resolved 版本 json 的库列表推断 INST_FORGE/INST_FABRIC 等标记名。"""
+    names = " ".join(
+        str(lib.get("name") or "").lower()
+        for lib in (resolved or {}).get("libraries") or []
+    )
+    return [flag for flag, marks in _LOADER_ENV_MARKS
+            if any(m in names for m in marks)]
+
+
+def game_env(prep, gpu_env=None, *, instance=None, version_id="",
+             java_exe="", game_dir=None, resolved=None):
+    """组装游戏进程环境：INST_*（HMCL 同款）→ 显卡增量 → 版本设置「环境变量」。
+
+    用户显式写的变量优先级最高（HMCL putAll 在最后）。没有任何增量时
+    返回 None，调用方按「继承启动器环境」处理。"""
+    merged = {}
+    if instance is not None and version_id:
+        vdir = instance.versions_dir() / version_id
+        merged.update({
+            "INST_NAME": str(version_id),
+            "INST_ID": str(version_id),
+            "INST_DIR": str(vdir),
+            "INST_MC_DIR": str(game_dir or instance.path),
+            "INST_JAVA": str(java_exe or ""),
+        })
+        for flag in loader_env_flags(resolved):
+            merged[flag] = "1"
+    merged.update(gpu_env or {})
+    merged.update((prep or {}).get("env_vars") or {})
+    if not merged:
+        return None
+    env = os.environ.copy()
+    env.update(merged)
+    return env
 
 
 def resolve_show_log(settings: dict | None) -> bool:

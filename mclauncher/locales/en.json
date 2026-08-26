@@ -1330,5 +1330,17 @@
   "游戏未在运行，无法导出运行栈": "Game is not running; cannot export thread dump",
   "游戏进程号无效": "Invalid game process id",
   "没有找到 jstack / jcmd 诊断工具（JRE 不自带）。请安装一个 JDK，或在 Java 管理页添加一个 JDK 后重试。": "No jstack / jcmd diagnostic tool found (JREs do not ship them). Install a JDK, or add one on the Java management page, then retry.",
-  "导出游戏运行栈失败：所有诊断工具都无法连接游戏进程。": "Failed to export the game thread dump: no diagnostic tool could attach to the game process."
+  "导出游戏运行栈失败：所有诊断工具都无法连接游戏进程。": "Failed to export the game thread dump: no diagnostic tool could attach to the game process.",
+  "KEY=VALUE，空格分隔，值含空格用引号": "KEY=VALUE, space-separated; quote values with spaces",
+  "附加到游戏进程的环境变量，如 MESA_GL_VERSION_OVERRIDE=4.6 MANGOHUD=1": "Extra environment variables for the game process, e.g. MESA_GL_VERSION_OVERRIDE=4.6 MANGOHUD=1",
+  "自定义 natives 目录，留空自动解压到版本目录": "Custom natives directory; leave empty to auto-extract into the version folder",
+  "java.library.path 指向该目录，适合自编译 LWJGL 本地库": "Points java.library.path at this directory; useful for self-built LWJGL natives",
+  "使用系统 GLFW（仅 Linux，解决 Wayland 崩溃等）": "Use system GLFW (Linux only; fixes Wayland crashes etc.)",
+  "使用系统 OpenAL（仅 Linux）": "Use system OpenAL (Linux only)",
+  "环境变量": "Environment Variables",
+  "本地库路径": "Natives Path",
+  "使用系统 GLFW：跳过捆绑库，回落系统安装的 libglfw": "Using system GLFW: skipping bundled library, falling back to system libglfw",
+  "使用系统 OpenAL：跳过捆绑库，回落系统安装的 libopenal": "Using system OpenAL: skipping bundled library, falling back to system libopenal",
+  "自定义本地库目录: ": "Custom natives directory: ",
+  "环境变量: ": "Environment variables: "
 }

@@ -52,6 +52,11 @@ DEFAULTS = {
     "window_height": None,
     "skip_assets": False,
     "offline_skin": "default",
+    # HMCL「高级设置」同款：游戏进程环境变量 + 系统 GLFW/OpenAL + 自定义 natives 目录
+    "env_vars": "",
+    "use_system_glfw": False,
+    "use_system_openal": False,
+    "natives_dir": "",
 }
 
 # UI 历史上写过 "maximize"，启动链早期只认 "fullscreen"，两边对不上导致全屏静默失效。

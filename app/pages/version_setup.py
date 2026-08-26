@@ -170,6 +170,22 @@ class VersionSetupDialog(MessageBoxBase):
         self.priority.addItems(["low", "normal", "high"])
         self.priority.setCurrentText(data.get("process_priority") or "normal")
 
+        # HMCL「高级设置」同款疑难杂症区
+        self.env = LineEdit()
+        self.env.setPlaceholderText(tr("KEY=VALUE，空格分隔，值含空格用引号"))
+        self.env.setToolTip(tr("附加到游戏进程的环境变量，如 MESA_GL_VERSION_OVERRIDE=4.6 MANGOHUD=1"))
+        self.env.setText(data.get("env_vars") or "")
+
+        self.natives = LineEdit()
+        self.natives.setPlaceholderText(tr("自定义 natives 目录，留空自动解压到版本目录"))
+        self.natives.setToolTip(tr("java.library.path 指向该目录，适合自编译 LWJGL 本地库"))
+        self.natives.setText(data.get("natives_dir") or "")
+
+        self.sys_glfw = CheckBox(tr("使用系统 GLFW（仅 Linux，解决 Wayland 崩溃等）"))
+        self.sys_glfw.setChecked(bool(data.get("use_system_glfw")))
+        self.sys_openal = CheckBox(tr("使用系统 OpenAL（仅 Linux）"))
+        self.sys_openal.setChecked(bool(data.get("use_system_openal")))
+
         form.addRow(form_label(tr("隔离")), self.iso)
         form.addRow(form_label(tr("内存 MB")), self.memory)
         form.addRow(form_label("Java"), self.java)
@@ -194,6 +210,10 @@ class VersionSetupDialog(MessageBoxBase):
         form.addRow("", self.wait)
         form.addRow(form_label(tr("退出后")), self.post)
         form.addRow(form_label(tr("优先级")), self.priority)
+        form.addRow(form_label(tr("环境变量")), self.env)
+        form.addRow(form_label(tr("本地库路径")), self.natives)
+        form.addRow("", self.sys_glfw)
+        form.addRow("", self.sys_openal)
         self.viewLayout.addWidget(form_host)
         self.yesButton.setText(tr("保存"))
         self.cancelButton.setText(tr("取消"))
@@ -293,6 +313,10 @@ class VersionSetupDialog(MessageBoxBase):
             "window_width": size_of(self.win_w),
             "window_height": size_of(self.win_h),
             "offline_skin": skin,
+            "env_vars": self.env.text().strip(),
+            "natives_dir": self.natives.text().strip(),
+            "use_system_glfw": self.sys_glfw.isChecked(),
+            "use_system_openal": self.sys_openal.isChecked(),
         }
 
     def save(self) -> dict:

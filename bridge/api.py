@@ -758,12 +758,16 @@ class BackendAPI:
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
         from mclauncher import launcher
+        from mclauncher import launch_flow, version_settings as _vs
         java_exe = "自动选择" if java in ("自动选择", "") else java
+        vs_data = _vs.load(inst, version)
         cmd, _natives, _vdir, _gdir = launcher.build_launch_command(
             inst, version, props, java_exe, memory_mb=memory_mb,
-            width=width, height=height)
-        from mclauncher import launch_flow, version_settings as _vs
-        wrapper = str(_vs.load(inst, version).get("wrapper") or "").strip()
+            width=width, height=height,
+            use_system_glfw=bool(vs_data.get("use_system_glfw")),
+            use_system_openal=bool(vs_data.get("use_system_openal")),
+            natives_dir_override=str(vs_data.get("natives_dir") or "").strip() or None)
+        wrapper = str(vs_data.get("wrapper") or "").strip()
         if wrapper:
             cmd = launch_flow.apply_wrapper(cmd, wrapper)
         return cmd
@@ -2249,6 +2253,12 @@ class BackendAPI:
                 props = dict(props)
                 props["nide8_id"] = prep["nide8_id"]
         width, height = launch_flow.resolve_resolution(prep, width, height)
+        if prep.get("use_system_glfw"):
+            log("使用系统 GLFW：跳过捆绑库，回落系统安装的 libglfw")
+        if prep.get("use_system_openal"):
+            log("使用系统 OpenAL：跳过捆绑库，回落系统安装的 libopenal")
+        if prep.get("natives_dir"):
+            log(f"自定义本地库目录: {prep['natives_dir']}")
         cmd, _natives, _vdir, game_dir = build_launch_command(
             inst, version, props, java_exe,
             memory_mb=memory_mb, width=width, height=height,
@@ -2256,6 +2266,9 @@ class BackendAPI:
             extra_jvm_args=prep["jvm_args"],
             game_directory=game_dir,
             authlib_api=props.get("authlib_api"),
+            use_system_glfw=prep.get("use_system_glfw", False),
+            use_system_openal=prep.get("use_system_openal", False),
+            natives_dir_override=prep.get("natives_dir") or None,
         )
         if prep.get("wrapper"):
             cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
@@ -2265,10 +2278,11 @@ class BackendAPI:
             prep.get("gpu_mode"), java_exe, prep.get("renderer"))
         for line in (gpu_note or "").splitlines():
             log(line)
-        env = None
-        if gpu_env:
-            env = os.environ.copy()
-            env.update(gpu_env)
+        env = launch_flow.game_env(
+            prep, gpu_env, instance=inst, version_id=version,
+            java_exe=java_exe, game_dir=game_dir, resolved=resolved)
+        if prep.get("env_vars"):
+            log("环境变量: " + " ".join(sorted(prep["env_vars"])))
         log(f"实际启动: {cmd[0]}")
         log("正在启动游戏进程…")
         progress(3, 4, "游戏启动中")
@@ -2461,12 +2475,15 @@ class BackendAPI:
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
             authlib_api=props.get("authlib_api"),
+            use_system_glfw=prep.get("use_system_glfw", False),
+            use_system_openal=prep.get("use_system_openal", False),
+            natives_dir_override=prep.get("natives_dir") or None,
         )
         if prep.get("wrapper"):
             cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
         if not dest:
             dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.bat")
-        path = vops.export_launch_bat(Path(dest), cmd, gdir)
+        path = vops.export_launch_bat(Path(dest), cmd, gdir, env=prep.get("env_vars"))
         log(f"已写出 {path}")
         return path
 
@@ -2873,6 +2890,9 @@ class BackendAPI:
             extra_game_args=prep["extra_game_args"],
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
+            use_system_glfw=prep.get("use_system_glfw", False),
+            use_system_openal=prep.get("use_system_openal", False),
+            natives_dir_override=prep.get("natives_dir") or None,
         )
         return " ".join(cmd)
 

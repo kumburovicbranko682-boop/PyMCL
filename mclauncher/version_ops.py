@@ -168,7 +168,7 @@ def open_folder(instance: Instance, version_id: str = "", which: str = "root") -
     return str(path)
 
 
-def export_launch_bat(dest: Path, cmd: list, cwd) -> str:
+def export_launch_bat(dest: Path, cmd: list, cwd, env: dict | None = None) -> str:
     dest = Path(dest)
     utils.ensure_dir(dest.parent)
     lines = [
@@ -176,6 +176,9 @@ def export_launch_bat(dest: Path, cmd: list, cwd) -> str:
         "chcp 65001 >nul",
         f'cd /d "{cwd}"',
     ]
+    # 版本设置「环境变量」也进脚本（HMCL makeLaunchScript 同款）
+    for key, value in (env or {}).items():
+        lines.append(f'set "{key}={value}"')
     quoted = []
     for a in cmd:
         s = str(a)

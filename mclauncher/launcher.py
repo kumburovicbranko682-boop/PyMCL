@@ -4,6 +4,7 @@ import ctypes
 import os
 import subprocess
 import threading
+from pathlib import Path
 
 from . import APP_ID, LAUNCHER_NAME, LAUNCHER_VERSION
 from . import java as java_mod
@@ -300,13 +301,19 @@ def build_launch_command(instance, version_id, account_props, java_exe,
                          memory_mb=4096, width=None, height=None,
                          extra_game_args=None, extra_jvm_args=None,
                          game_directory=None, authlib_api=None,
-                         server="", server_port=0):
+                         server="", server_port=0,
+                         use_system_glfw=False, use_system_openal=False,
+                         natives_dir_override=None):
     """
     构建启动命令。返回 (cmd, natives_dir, version_dir, game_dir)。
     account_props: {'name', 'uuid', 'token', 'user_type', 'xuid'}
     server/server_port: 启动后直连的服务器。1.20+ 使用 Quick Play
     （--quickPlayMultiplayer），老版本回退 --server/--port。extra_game_args
     里带的 --server/--port 也会被提取并按同样逻辑处理。
+    use_system_glfw / use_system_openal: 不解压捆绑 GLFW/OpenAL，回落系统库
+    （HMCL「使用系统 GLFW/OpenAL」同款，Linux 下解决 Wayland 崩溃等问题）。
+    natives_dir_override: 自定义本地库目录（HMCL「自定义 natives 路径」），
+    指定后跳过解压，java.library.path 直接指向该目录。
     """
     vjson = instance.version_json(version_id)
     if not vjson:
@@ -334,16 +341,25 @@ def build_launch_command(instance, version_id, account_props, java_exe,
     assets_id = assets_idx.get("id", "legacy")
     assets_dir = instance.assets_dir()
     libs_dir = instance.libraries_dir()
-    natives_dir = extract_natives(instance, resolved, version_id)
-    needs_natives = any(
-        select_native_classifier(lib)
-        for lib in resolved.get("libraries") or []
-        if lib.get("clientreq") is not False and utils.check_rules(lib.get("rules"))
-    )
-    if needs_natives and not natives_present(natives_dir):
-        raise LaunchError(
-            "缺少 LWJGL 本地库（natives）。请重新安装该 Minecraft 版本后再启动。"
+    custom_natives = str(natives_dir_override or "").strip()
+    if custom_natives:
+        # 自定义目录由用户负责内容完整（HMCL 同款），不解压也不做 lwjgl 检查
+        natives_dir = Path(custom_natives)
+        if not natives_dir.is_dir():
+            raise LaunchError(f"自定义本地库目录不存在: {natives_dir}")
+    else:
+        natives_dir = extract_natives(instance, resolved, version_id,
+                                      skip_glfw=use_system_glfw,
+                                      skip_openal=use_system_openal)
+        needs_natives = any(
+            select_native_classifier(lib)
+            for lib in resolved.get("libraries") or []
+            if lib.get("clientreq") is not False and utils.check_rules(lib.get("rules"))
         )
+        if needs_natives and not natives_present(natives_dir):
+            raise LaunchError(
+                "缺少 LWJGL 本地库（natives）。请重新安装该 Minecraft 版本后再启动。"
+            )
 
     # ---- classpath（同名库保留后出现的路径，位置仍在第一次出现处）
     cp_by_id = {}
