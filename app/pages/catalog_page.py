@@ -128,10 +128,16 @@ class PclResultRow(QFrame):
             info.addWidget(d)
         meta = QHBoxLayout()
         meta.setSpacing(14)
-        meta.addWidget(_meta_chip(FIF.GAME, str(ver)))
-        meta.addWidget(_meta_chip(FIF.DOWNLOAD, fmt_downloads(item.get("downloads"))))
-        meta.addWidget(_meta_chip(FIF.UP, str(updated)))
-        meta.addWidget(_meta_chip(FIF.GLOBE, _src_label(item.get("source"))))
+        # 缺的数据直接不摆：精选推荐没有下载数/更新时间，
+        # 一排「图标 + —」是纯噪声
+        for fif, text in (
+            (FIF.GAME, str(ver)),
+            (FIF.DOWNLOAD, fmt_downloads(item.get("downloads"))),
+            (FIF.UP, str(updated)),
+            (FIF.GLOBE, _src_label(item.get("source"))),
+        ):
+            if text != "—":
+                meta.addWidget(_meta_chip(fif, text))
         meta.addStretch(1)
         info.addLayout(meta)
         layout.addLayout(info, 1)
