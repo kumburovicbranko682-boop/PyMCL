@@ -68,6 +68,7 @@ public sealed partial class SettingsPage : UserControl
             HomeBox.SelectedIndex = s.HomepageMode == "custom" ? 1 : s.HomepageMode == "blank" ? 2 : 0;
         if (HomePath != null) HomePath.Text = s.CustomHomepage ?? "";
         if (AutoUpd != null) AutoUpd.IsOn = s.AutoCheckUpdate;
+        if (MultiSw != null) MultiSw.IsOn = s.AllowMultiInstance;
         if (FlyAnimSw != null) FlyAnimSw.IsOn = s.UiFlyAnimation;
         if (FlyDurSpin != null) FlyDurSpin.Value = s.UiFlyDurationMs > 0 ? s.UiFlyDurationMs : 620;
         RootLabel.Text = "启动器主目录: " + s.Root;
@@ -128,6 +129,7 @@ public sealed partial class SettingsPage : UserControl
                     homepage_mode = TagOf(HomeBox, "news"),
                     custom_homepage = HomePath?.Text?.Trim() ?? "",
                     auto_check_update = AutoUpd.IsOn,
+                    allow_multi_instance = MultiSw?.IsOn ?? false,
                     ui_fly_animation = FlyAnimSw?.IsOn ?? true,
                     ui_fly_duration_ms = SpinValue(FlyDurSpin, 620),
                 },

@@ -70,6 +70,7 @@ public sealed class SettingsDto
     [JsonPropertyName("gc_preset")] public string GcPreset { get; set; } = "auto";
     [JsonPropertyName("download_limit_kbps")] public int DownloadLimitKbps { get; set; }
     [JsonPropertyName("auto_check_update")] public bool AutoCheckUpdate { get; set; } = true;
+    [JsonPropertyName("allow_multi_instance")] public bool AllowMultiInstance { get; set; }
     [JsonPropertyName("custom_homepage")] public string CustomHomepage { get; set; } = "";
     [JsonPropertyName("homepage_mode")] public string HomepageMode { get; set; } = "news";
     [JsonPropertyName("window_mode")] public string WindowMode { get; set; } = "window";

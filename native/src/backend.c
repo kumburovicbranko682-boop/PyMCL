@@ -8,11 +8,16 @@ static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static int g_task_n;
 static HANDLE g_game;
 static char g_launch_id[32];
+/* 正在飞的 launch_game 任务数（多开检查的闸门）。只看 g_game 不够：
+ * 它要等 game_spawn 成功才被赋值，而启动准备（解析/下载 Java、预检）
+ * 可能要几分钟，期间连点两次「启动」就会开出两个游戏。 */
+static int g_nlaunch;
 
 typedef struct {
     char id[32];
     char title[256];
     int cancelled;
+    int gate_held;
     pthread_t th;
     char method[64];
     cJSON *args;
@@ -152,6 +157,16 @@ static void finish_task(task_t *t, int ok, const char *msg) {
     cJSON_Delete(t->args);
     t->args = NULL;
     free(t);
+}
+
+/* 释放多开闸门；幂等，错误路径和正常路径都能安全调用。 */
+static void launch_gate_release(task_t *t) {
+    pthread_mutex_lock(&g_mu);
+    if (t->gate_held) {
+        t->gate_held = 0;
+        g_nlaunch--;
+    }
+    pthread_mutex_unlock(&g_mu);
 }
 
 static const char *pstr(cJSON *a, const char *k, const char *def) {
@@ -412,7 +427,21 @@ static void *task_run(void *p) {
         int w = pint(t->args, "width", 854);
         int h = pint(t->args, "height", 480);
         const char *java = pstr(t->args, "java", PYMCL_JAVA_AUTO);
+        /* 多开检查（对齐 bridge/api.py::_launch_game_impl）。以前 C 桥
+         * 没有这一步：游戏已在运行时 WinUI/WPF/EziApp 再点「启动」会
+         * 静默再开一个游戏。闸门从任务开始持到游戏进程被回收，另一个
+         * 启动任务还在准备阶段（g_game 尚未赋值）时也会被拦住。 */
+        int already;
+        pthread_mutex_lock(&g_mu);
+        already = g_nlaunch > 0
+            || (g_game && WaitForSingleObject(g_game, 0) == WAIT_TIMEOUT);
+        g_nlaunch++;
+        t->gate_held = 1;
+        pthread_mutex_unlock(&g_mu);
         if (!ver[0]) { pymcl_set_error("请先选择版本"); }
+        else if (already && !config_bool("allow_multi_instance", 0)) {
+            pymcl_set_error("游戏正在运行中\n若要同时运行多个游戏，请到设置开启「允许多开」");
+        }
         else {
             cJSON *vset = load_version_settings(inst, ver);
             const char *bound = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "login_account"));
@@ -602,9 +631,11 @@ static void *task_run(void *p) {
                         GetExitCodeProcess(proc, &code);
                         /* 先把 g_game 摘下来再关句柄：backend_game_alive /
                          * cancel_task 在别的线程探测 g_game，不能让它们
-                         * 摸到已经 CloseHandle 的句柄。 */
+                         * 摸到已经 CloseHandle 的句柄。闸门也在这里放掉：
+                         * 后面的崩溃分析可能跑 45s，不该挡住用户重开游戏。 */
                         pthread_mutex_lock(&g_mu);
                         if (g_game == proc) g_game = NULL;
+                        if (t->gate_held) { t->gate_held = 0; g_nlaunch--; }
                         pthread_mutex_unlock(&g_mu);
                         CloseHandle(rd); CloseHandle(proc);
                         long scode = (long)code;
@@ -658,6 +689,8 @@ static void *task_run(void *p) {
             }
             cJSON_Delete(vset);
         }
+        /* 兜底：版本缺失 / 账号不存在 / 进程没拉起来等提前退出的路径。 */
+        launch_gate_release(t);
     } else if (strcmp(t->method, "start_microsoft_login") == 0) {
         cJSON *acc = NULL;
         ok = ms_login(&ctx, on_login_code, t, &acc) == 0;
@@ -1012,6 +1045,9 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_AddBoolToObject(o, "feedback_heartbeat", config_bool("feedback_heartbeat", 1));
         cJSON_AddStringToObject(o, "feedback_url", config_str("feedback_url", ""));
         cJSON_AddBoolToObject(o, "auto_check_update", config_bool("auto_check_update", 1));
+        /* 多开开关。启动被拒时报错文案指向这个设置项，键不带出去
+         * 设置页就永远渲染不出开关，用户会被指去一个不存在的地方。 */
+        cJSON_AddBoolToObject(o, "allow_multi_instance", config_bool("allow_multi_instance", 0));
         cJSON_AddBoolToObject(o, "ui_fly_animation", config_bool("ui_fly_animation", 1));
         cJSON_AddNumberToObject(o, "ui_fly_duration_ms", config_int("ui_fly_duration_ms", 620));
         cJSON_AddBoolToObject(o, "ui_dark", config_bool("ui_dark", 0));
@@ -1068,6 +1104,8 @@ cJSON *backend_call(const char *method, cJSON *params) {
             config_set_bool("feedback_consent", cJSON_IsTrue(cJSON_GetObjectItem(d, "feedback_consent")));
         if (cJSON_IsBool(cJSON_GetObjectItem(d, "feedback_heartbeat")))
             config_set_bool("feedback_heartbeat", cJSON_IsTrue(cJSON_GetObjectItem(d, "feedback_heartbeat")));
+        if (cJSON_IsBool(cJSON_GetObjectItem(d, "allow_multi_instance")))
+            config_set_bool("allow_multi_instance", cJSON_IsTrue(cJSON_GetObjectItem(d, "allow_multi_instance")));
         if (cJSON_IsBool(cJSON_GetObjectItem(d, "ui_fly_animation")))
             config_set_bool("ui_fly_animation", cJSON_IsTrue(cJSON_GetObjectItem(d, "ui_fly_animation")));
         if (cJSON_IsBool(cJSON_GetObjectItem(d, "ui_dark")))

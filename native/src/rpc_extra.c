@@ -328,6 +328,21 @@ static void format_playtime(long long sec, char *out, size_t n) {
 cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
     if (!method) return NULL;
 
+    /* ---- 多开 / 游戏运行状态（对齐 bridge/api.py） ----
+     * 这三个方法以前落到一次性 py_rpc：子进程里 _game_proc 恒为 None，
+     * is_game_running 永远回 false；set/allow 则在纯 C 安装下直接报
+     * 「需要 Python」。游戏进程和 config.json 都在原生侧，就地回答。 */
+    if (strcmp(method, "is_game_running") == 0)
+        return cJSON_CreateBool(backend_game_alive());
+    if (strcmp(method, "allow_multi_instance") == 0)
+        return cJSON_CreateBool(config_bool("allow_multi_instance", 0));
+    if (strcmp(method, "set_multi_instance") == 0) {
+        config_set_bool("allow_multi_instance",
+                        cJSON_IsTrue(cJSON_GetObjectItem(params, "allow")));
+        config_save();
+        return cJSON_CreateTrue();
+    }
+
     /* ---- accounts ---- */
     if (strcmp(method, "get_account_rows") == 0) {
         cJSON *root = accounts_load();

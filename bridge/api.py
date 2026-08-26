@@ -769,6 +769,10 @@ class BackendAPI:
             "custom_homepage": CONFIG.get("custom_homepage") or "",
             "homepage_mode": CONFIG.get("homepage_mode") or "news",
             "window_mode": CONFIG.get("window_mode") or "window",
+            # 多开开关（对齐 app/backend.py）。启动被拒的报错让用户
+            # 「到设置开启允许多开」，这个键不带出去，桥上的设置页
+            # 根本渲染不出那个开关。
+            "allow_multi_instance": bool(CONFIG.get("allow_multi_instance", False)),
             "game_dir": str(CONFIG.instances_dir),
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
@@ -837,6 +841,8 @@ class BackendAPI:
             patch["download_limit_kbps"] = int(data.get("download_limit_kbps") or 0)
         if "auto_check_update" in data:
             patch["auto_check_update"] = bool(data.get("auto_check_update"))
+        if "allow_multi_instance" in data:
+            patch["allow_multi_instance"] = bool(data.get("allow_multi_instance"))
         if "skip_assets" in data:
             patch["skip_assets"] = bool(data.get("skip_assets"))
         if "ui_dark" in data:
