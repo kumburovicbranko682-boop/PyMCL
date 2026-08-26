@@ -137,8 +137,9 @@ class CrashDialog(QDialog):
         try:
             dest.write_text(tail, encoding="utf-8")
             open_path(dest)
-        except OSError:
-            pass
+        except OSError as exc:
+            InfoBar.error(tr("无法打开"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
 
     def _export(self):
         if not self.report:
@@ -146,8 +147,9 @@ class CrashDialog(QDialog):
         try:
             path = export_report(self.report)
             open_path(path)
-        except OSError:
-            pass
+        except OSError as exc:
+            InfoBar.error(tr("导出失败"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
 
     def _send(self):
         backend = self.backend or getattr(self.parent(), "backend", None)
@@ -192,7 +194,7 @@ def show_launcher_error(parent, kind: str, text: str, log_file: str = ""):
             "title": title,
             "headline": tr("未捕获异常已写入日志"),
             "detail": (text or "")[-8000:],
-            "help": f"完整日志：{log_file}" if log_file else HELP_FOOTER,
+            "help": tr("完整日志：{0}").format(log_file) if log_file else HELP_FOOTER,
             "direct_file": log_file,
             "files": [log_file] if log_file else [],
             "output_tail": text or "",
