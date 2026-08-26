@@ -29,12 +29,12 @@ class InstanceCard(SimpleCardWidget):
         name_box = QVBoxLayout()
         name_box.setSpacing(2)
         name_box.addWidget(StrongBodyLabel(info["name"]))
-        name_box.addWidget(CaptionLabel(f'{info["versions"]} 个版本'))
+        name_box.addWidget(CaptionLabel(tr("{0} 个版本").format(info["versions"])))
         top.addLayout(name_box, 1)
         top.addWidget(Pill(tr("默认") if info["name"] == CONFIG.get("default_instance") else tr("实例"), "#4C8BF5"))
         layout.addLayout(top)
         layout.addWidget(CaptionLabel(str(info.get("mc") or "")))
-        layout.addWidget(CaptionLabel(f"Java · {info.get('java_label') or '自动选择'}"))
+        layout.addWidget(CaptionLabel("Java · " + (info.get("java_label") or tr("自动选择"))))
         layout.addStretch(1)
 
         actions = QHBoxLayout()
@@ -157,7 +157,9 @@ class InstancePage(QWidget):
             self.reload()
 
     def delete(self, name: str):
-        box = MessageBox(tr("删除实例"), f"确定删除实例「{name}」？其中的存档与配置将一并移除。", self)
+        box = MessageBox(tr("删除实例"),
+                         tr("确定删除实例「{0}」？其中的存档与配置将一并移除。").format(name),
+                         self)
         if box.exec():
             try:
                 self.backend.delete_instance(name)
@@ -197,7 +199,7 @@ class InstancePage(QWidget):
             current = self.backend.java_combo_label_for(name, opts)
             dlg = ComboDialog(
                 tr("选择 Java"),
-                f"实例「{name}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。",
+                tr("实例「{0}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。").format(name),
                 labels, current, self,
             )
             if dlg.exec():

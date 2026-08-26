@@ -49,6 +49,34 @@ class VisibleStringsEnglishTests(unittest.TestCase):
                               f"英文界面下 {key!r} 渲染出了中文: {text!r}")
             self.assertIn(str(must_contain), text)
 
+    def test_instance_card_english(self):
+        """实例卡的版本计数、Java 行、删除确认句、选 Java 说明句必须走翻译。"""
+        for key, args in [
+            ("{0} 个版本", (2,)),
+            ("确定删除实例「{0}」？其中的存档与配置将一并移除。", ("default",)),
+            ("实例「{0}」启动时使用的 Java。自动选择会按游戏版本匹配（1.19+ 用 17，远古版用 8）。",
+             ("default",)),
+        ]:
+            text = i18n.tr(key).format(*args)
+            self.assertIsNone(_CJK.search(text),
+                              f"英文界面下 {key!r} 渲染出了中文: {text!r}")
+
+        from PySide6.QtWidgets import QLabel
+        from app.pages.instance_page import InstanceCard
+
+        class _P:
+            pass
+
+        card = InstanceCard({"name": "default", "versions": 2, "mc": "1.21.1",
+                             "java_label": ""}, _P())
+        texts = " ".join(lab.text() for lab in card.findChildren(QLabel))
+        self.assertIsNone(_CJK.search(texts),
+                          f"英文界面下实例卡冒中文: {texts!r}")
+        self.assertIn("versions", texts)
+        self.assertIn("Auto", texts)
+        card.deleteLater()
+        _app.processEvents()
+
     def test_download_dock_title_english(self):
         from app.backend import BackendAPI
         from app.pages.tasks_page import DownloadDock
