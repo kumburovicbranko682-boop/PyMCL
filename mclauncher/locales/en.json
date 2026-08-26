@@ -993,5 +993,19 @@
   "若同名存档已存在，会另存为「原名-还原」，不会覆盖。": "If a world with the same name exists, it is saved as “name-restored” instead of overwriting.",
   "将删除整个实例「{0}」及其文件，不可恢复。": "This deletes the whole instance “{0}” and its files. It cannot be undone.",
   "将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。": "This permanently deletes the world “{0}”; its builds and progress cannot be recovered.",
-  "将删除「{0}」。": "This deletes “{0}”."
+  "将删除「{0}」。": "This deletes “{0}”.",
+  "安装整合包 {0}": "Install Modpack {0}",
+  "安装模组 {0}": "Install Mod {0}",
+  "安装光影 {0}": "Install Shader {0}",
+  "安装资源包 {0}": "Install Resource Pack {0}",
+  "安装数据包 {0}": "Install Data Pack {0}",
+  "安装世界 {0}": "Install World {0}",
+  "导出启动脚本 {0}": "Export launch script {0}",
+  "备份存档 {0}": "Back up world {0}",
+  "下载 Java {0}": "Download Java {0}",
+  "下载 Java {0}（{1}）": "Download Java {0} ({1})",
+  "启动游戏 {0}": "Launch Game {0}",
+  "修复 {0}": "Repair {0}",
+  "导出整合包 {0}": "Export modpack {0}",
+  "检查模组更新 {0}": "Check mod updates {0}"
 }

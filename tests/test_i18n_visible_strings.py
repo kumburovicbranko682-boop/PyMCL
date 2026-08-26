@@ -86,6 +86,58 @@ class VisibleStringsEnglishTests(unittest.TestCase):
         card.deleteLater()
         _app.processEvents()
 
+    def test_task_titles_english(self):
+        """后端任务标题（任务页 / 底部下载条每次装东西都看得到）必须走翻译。"""
+        cases = {
+            ("安装整合包 {0}", "AllTheMods.mrpack"): "AllTheMods.mrpack",
+            ("安装模组 {0}", "sodium.jar"): "sodium.jar",
+            ("安装光影 {0}", "BSL.zip"): "BSL.zip",
+            ("安装资源包 {0}", "Faithful.zip"): "Faithful.zip",
+            ("安装数据包 {0}", "dp.zip"): "dp.zip",
+            ("安装世界 {0}", "world.zip"): "world.zip",
+            ("导出启动脚本 {0}", "1.21.1"): "1.21.1",
+            ("备份存档 {0}", "w1"): "w1",
+            ("下载 Java {0}", 17): "17",
+            ("下载 Java {0}（{1}）", (17, "adoptium")): "adoptium",
+            ("启动游戏 {0}", "1.21.1"): "1.21.1",
+            ("修复 {0}", "1.21.1"): "1.21.1",
+            ("导出整合包 {0}", "default"): "default",
+            ("检查模组更新 {0}", "default"): "default",
+        }
+        for (key, arg), must_contain in cases.items():
+            args = arg if isinstance(arg, tuple) else (arg,)
+            text = i18n.tr(key).format(*args)
+            self.assertIsNone(_CJK.search(text),
+                              f"英文界面下任务标题 {key!r} 冒中文: {text!r}")
+            self.assertIn(str(must_contain), text)
+
+    def test_task_title_prefix_contracts(self):
+        """任务图标表和下载计数都按 tr(前缀) 匹配标题开头，两种语言都不能裂。"""
+        pairs = [
+            ("安装整合包 {0}", "安装整合包"),
+            ("安装模组 {0}", "安装模组"),
+            ("安装光影 {0}", "安装光影"),
+            ("安装资源包 {0}", "安装资源包"),
+            ("下载 Java {0}", "下载 Java"),
+            ("下载 Java {0}（{1}）", "下载 Java"),
+            ("启动游戏 {0}", "启动游戏"),
+        ]
+        for lang in ("en", "zh_CN"):
+            i18n.set_language(lang)
+            for template, prefix in pairs:
+                self.assertTrue(
+                    i18n.tr(template).startswith(i18n.tr(prefix)),
+                    f"[{lang}] {template!r} 的译文不再以 {prefix!r} 的译文开头，"
+                    "任务图标/下载计数会匹配不上")
+        i18n.set_language("en")
+
+        from app.backend import BackendAPI
+        launch = i18n.tr("启动游戏 {0}").format("1.21.1")
+        self.assertFalse(BackendAPI.is_download_title(launch),
+                         "启动任务不该算进下载计数")
+        install = i18n.tr("安装模组 {0}").format("sodium.jar")
+        self.assertTrue(BackendAPI.is_download_title(install))
+
     def test_download_dock_title_english(self):
         from app.backend import BackendAPI
         from app.pages.tasks_page import DownloadDock
