@@ -7,8 +7,7 @@
 """
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QVariantAnimation
-from PySide6.QtGui import QVector3D
-from PySide6.QtWidgets import QGraphicsOpacityEffect, QGraphicsScale
+from PySide6.QtWidgets import QGraphicsOpacityEffect
 from qfluentwidgets import ProgressBar
 
 from .motion_prefs import ui_motion_ok
@@ -101,29 +100,27 @@ def tween(setter, start, end, ms: int = 240, on_done=None):
     return a
 
 
-def pop(widget, scale: float = 1.35, ms: int = 260):
-    """缩放脉冲（角标计数变化）：transform 缩放，不动布局。
+def pop(widget, ms: int = 260):
+    """透明度脉冲（角标计数变化时提醒一眼）。结束移除 effect。
 
+    QWidget 不支持 QGraphicsTransform 缩放（那是 QGraphicsItem 的能力），
+    要真缩放只能动布局；角标只需要「引起注意」，闪一下就够。
     上一个脉冲还没放完就跳过（下载计数高频变化时会连成一片抖动）。
     """
     if not ui_motion_ok() or not widget.isVisible():
         return
     if getattr(widget, "_mcl_anims", None):
         return
-    sc = QGraphicsScale(widget)
-    sc.setOrigin(QVector3D(widget.width() / 2, widget.height() / 2, 0))
-    widget.setGraphicsEffect(sc)
-    gx = QPropertyAnimation(sc, b"x", widget)
-    gy = QPropertyAnimation(sc, b"y", widget)
-    for a in (gx, gy):
-        a.setDuration(ms)
-        a.setStartValue(scale)
-        a.setEndValue(1.0)
-        a.setEasingCurve(QEasingCurve.OutBack)
-    gx.finished.connect(lambda: widget.setGraphicsEffect(None))
-    _keep(widget, gx, gy)
-    gx.start()
-    gy.start()
+    eff = QGraphicsOpacityEffect(widget)
+    widget.setGraphicsEffect(eff)
+    a = QPropertyAnimation(eff, b"opacity", widget)
+    a.setDuration(ms)
+    a.setStartValue(0.25)
+    a.setEndValue(1.0)
+    a.setEasingCurve(QEasingCurve.OutCubic)
+    a.finished.connect(lambda: widget.setGraphicsEffect(None))
+    _keep(widget, a)
+    a.start()
 
 
 class SmoothProgressBar(ProgressBar):
