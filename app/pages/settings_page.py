@@ -473,6 +473,12 @@ class SettingsPage(QWidget):
         self.color_edit.editingFinished.connect(self._on_theme_color_committed)
         # 背景图同理：手输路径回车/失焦就应用，不必先点「保存设置」
         self.bg_edit.editingFinished.connect(self._on_bg_committed)
+        # 动效两个开关也立即生效：旁边的深色开关是即时的，这两个若非得
+        # 再点「保存设置」，用户切完动画照播，只会以为开关坏了
+        self.motion_sw.checkedChanged.connect(
+            lambda on: self.backend.save_settings({"ui_motion": bool(on)}))
+        self.fly_sw.checkedChanged.connect(
+            lambda on: self.backend.save_settings({"ui_fly_animation": bool(on)}))
 
     def refresh_from_config(self):
         """把磁盘上的最新设置推回控件。

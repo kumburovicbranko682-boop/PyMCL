@@ -76,6 +76,22 @@ win._place_download_dock()
 check(win._dock_anim is not None,
       "dock should animate again once ui_motion is back on")
 
+# --- 设置页的两个动效开关必须即时生效，不能等「保存设置」 ---
+sp = win.settings_page
+app.processEvents()
+sp.motion_sw.setChecked(False)
+app.processEvents()
+check(CONFIG.get("ui_motion") is False,
+      "flipping the motion switch must apply immediately")
+sp.fly_sw.setChecked(False)
+app.processEvents()
+check(CONFIG.get("ui_fly_animation") is False,
+      "flipping the fly-animation switch must apply immediately")
+sp.motion_sw.setChecked(True)
+app.processEvents()
+check(CONFIG.get("ui_motion") is True,
+      "turning the motion switch back on must apply immediately")
+
 win.close()
 app.processEvents()
 del win
