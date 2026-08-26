@@ -50,7 +50,8 @@ class CrashDialog(QDialog):
         body.setPlainText(text)
         root.addWidget(body, 1)
 
-        hint = CaptionLabel(self.report.get("help") or HELP_FOOTER, self)
+        # help 可能是分析引擎拼的长文，tr() 未命中会原样返回，包一层无副作用
+        hint = CaptionLabel(tr(self.report.get("help") or HELP_FOOTER), self)
         hint.setWordWrap(True)
         root.addWidget(hint)
 
@@ -60,7 +61,7 @@ class CrashDialog(QDialog):
             act_row = QHBoxLayout()
             act_row.setSpacing(8)
             for action in actions:
-                btn = PushButton(tr(action.get("label") or action.get("id") or "修复"), self)
+                btn = PushButton(self._action_label(action), self)
                 btn.clicked.connect(lambda _=False, a=action, b=btn: self._run_action(a, b))
                 act_row.addWidget(btn)
             act_row.addStretch(1)
@@ -90,6 +91,13 @@ class CrashDialog(QDialog):
         btns.addWidget(self.send_btn)
         btns.addWidget(self.ok_btn)
         root.addLayout(btns)
+
+    @staticmethod
+    def _action_label(action: dict) -> str:
+        # 「下载 Java 17」这类带数字的动态 label 查不到翻译表，按 id 用模板拼
+        if (action or {}).get("id") == "need_java" and action.get("major"):
+            return tr("下载 Java {0}").format(action["major"])
+        return tr(action.get("label") or action.get("id") or "修复")
 
     def _relaunch(self):
         self.want_relaunch = True
