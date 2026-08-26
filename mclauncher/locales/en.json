@@ -778,14 +778,12 @@
   "该实例没有已安装整合包": "This instance has no installed modpacks",
   "语言": "Language",
   "语言已切换": "Language changed",
-  "请先到「启动」页安装一个版本。": "Install a version on the Launch page first.",
   "请先勾选要修复的版本": "Select versions to repair first",
   "请先勾选要卸载的版本": "Select versions to uninstall first",
   "请先启动游戏，进入单人世界，按 ESC，选择对局域网开放。": "Launch the game, open a singleplayer world, press ESC, then Open to LAN.",
   "请先在列表里选一个存档。": "Select a save in the list first.",
   "请先安装并选择一个版本": "Install and select a version first",
   "请先选择版本": "Please select a version first",
-  "请先选择版本（到「版本」页安装）": "Select a version first (install on the Versions page)",
   "请到多人游戏双击「陶瓦联机大厅」。": "In Multiplayer, double-click Terracotta Lobby.",
   "请到游戏「多人游戏」双击「陶瓦联机大厅」。": "In-game Multiplayer, double-click Terracotta Lobby.",
   "请启动游戏，进入单人世界，按 ESC，选择对局域网开放。": "Launch the game, open a singleplayer world, press ESC, then Open to LAN.",
@@ -954,5 +952,7 @@
   "无法移出": "Cannot move out",
   "该分区只剩这一个子页，移走会变空栏；先在「自定义分区」里补充其它子页": "This is the last sub-page in its section; moving it would leave the section empty. Add other pages in “Customize sections” first.",
   "界面动画": "Interface animations",
-  "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant"
+  "换页过渡、布局编辑、进度条、横幅微光等动效；关闭则全部瞬时": "Page transitions, layout editing, progress and banner effects; off = instant",
+  "请先到「下载 → 原版游戏」安装一个版本。": "Install a version first: Download → Vanilla Game.",
+  "请先选择版本（到「下载 → 原版游戏」安装）": "Select a version first (install one in Download → Vanilla Game)"
 }

@@ -211,7 +211,7 @@ def _check_libraries(inst: Instance, resolved: dict, items: list[dict]) -> None:
         level = "error" if len(missing) >= 3 else "warn"
         items.append(_item(
             level, "libs_missing", "依赖库缺失",
-            f"缺少以下库文件，请到版本页点「修复」：\n - {sample}{more}"))
+            f"缺少以下库文件，请到「下载 → 原版游戏」的已安装列表点「修复」：\n - {sample}{more}"))
     if bad_hash:
         sample = "\n - ".join(bad_hash[:8])
         items.append(_item(

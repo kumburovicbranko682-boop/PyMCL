@@ -658,7 +658,7 @@ def install_mrpack_by_slug(dm: DownloadManager, slug, instance: Instance,
     if ptype != "modpack":
         raise ModpackError(
             f"「{title}」({slug}) 是 {ptype or '未知类型'}，不是整合包。"
-            "请到「模组」页安装，或换一个真正的整合包（机械动力可搜黄铜协奏曲 CBC）。"
+            "请到「下载 → Mod」搜索安装，或换一个真正的整合包（机械动力可搜黄铜协奏曲 CBC）。"
         )
     versions = modrinth_versions(dm, slug)
     if version_id:
@@ -1056,7 +1056,7 @@ def _install_plain_zip(dm: DownloadManager, tmpdir: Path, instance: Instance, pa
 
     loader_vid = None
     if not mc_version:
-        _emit(on_progress, "包里没有可识别的版本信息，未安装游戏版本，稍后请在版本页选择")
+        _emit(on_progress, "包里没有可识别的版本信息，未安装游戏版本，稍后请到「下载 → 原版游戏」自行安装")
     else:
         resolved = _resolve_pack_minecraft(dm, mc_version, on_progress) or mc_version
         _emit(on_progress, f"安装 Minecraft {resolved}")

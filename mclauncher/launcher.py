@@ -89,7 +89,7 @@ def _coerce_java_exe(resolved, java_exe):
     raise LaunchError(
         f"Java {got or '?'} 无法启动此版本（需要 Java {need}+）。"
         "Forge 1.17+ 会向 JVM 传入 --module-path，Java 8 会报 Unrecognized option: -p。"
-        "请到「Java」页下载 Java 17，启动页 Java 选「自动选择」。"
+        f"请到「下载 → Java」下载 Java {need or 17}，启动页 Java 选「自动选择」。"
     )
 
 
