@@ -238,7 +238,9 @@ class BackendAPI(QObject):
     @staticmethod
     def is_download_title(title: str) -> bool:
         t = str(title or "")
-        return not (t.startswith(tr("启动游戏")) or t.startswith(tr("微软登录")) or t.startswith(tr("皮肤站登录")))
+        # 登录 / 启动类任务不算下载：不进侧栏红点、不弹底部下载条
+        return not (t.startswith(tr("启动游戏")) or t.startswith(tr("微软登录"))
+                    or t.startswith(tr("皮肤站登录")) or t.startswith(tr("统一通行证登录")))
 
     def _download_task_count(self) -> int:
         n = 0
@@ -748,7 +750,7 @@ class BackendAPI(QObject):
                     username: str, memory_mb: int, width: int, height: int,
                     java: str = tr("自动选择"), extra_game_args=None) -> str:
         task_id = self.start_task(
-            f"启动游戏 {version}", self._launch_game_impl,
+            tr("启动游戏") + f" {version}", self._launch_game_impl,
             instance, version, account, username, memory_mb, width, height, java,
             extra_game_args,
         )
@@ -2247,7 +2249,7 @@ class BackendAPI(QObject):
     def install_java(self, major: int, vendor: str = "adoptium") -> str:
         """异步下载 Java 运行时。"""
         return self.start_task(
-            f"下载 {vendor} Java {major}",
+            tr("下载 Java") + f" {major} ({vendor})",
             self._install_java_impl, major, vendor,
         )
 
