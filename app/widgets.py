@@ -53,6 +53,34 @@ def bind_isolation_hint(combo, label):
     label.setText(isolation_hint(combo.currentText()))
 
 
+def fmt_downloads(n) -> str:
+    """下载量的紧凑显示，跟随界面语言：中文 万/亿，其余 K/M/B。
+
+    以前目录页和文件选择器各留一份且写死中文单位，英文界面里
+    Mod 卡片会冒出「1.2亿」这种英文用户看不懂的计数。
+    """
+    try:
+        n = int(n or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if not n:
+        return "—"
+    from mclauncher.i18n import current_language
+    if str(current_language()).startswith("zh"):
+        if n >= 100_000_000:
+            return f"{n / 100_000_000:.1f}".replace(".0", "") + "亿"
+        if n >= 10_000:
+            return f"{n / 10_000:.0f}万"
+        return str(n)
+    if n >= 1_000_000_000:
+        return f"{n / 1_000_000_000:.1f}".replace(".0", "") + "B"
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}".replace(".0", "") + "M"
+    if n >= 10_000:
+        return f"{n / 1_000:.0f}K"
+    return str(n)
+
+
 def prompt_feedback_consent(parent) -> bool:
     """首次（或未同意时）弹窗，必须手动点同意才会上传。"""
     from qfluentwidgets import MessageBox

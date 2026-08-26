@@ -12,16 +12,8 @@ from ..ui_alive import guard
 from mclauncher.i18n import tr
 
 
-def fmt_downloads(n) -> str:
-    try:
-        n = int(n or 0)
-    except (TypeError, ValueError):
-        return "—"
-    if n >= 100_000_000:
-        return f"{n / 100_000_000:.1f}亿".replace(".0", "")
-    if n >= 10_000:
-        return f"{n / 10_000:.0f}万"
-    return str(n) if n else "—"
+# 共享实现：跟随界面语言选数字单位（中文 万/亿，其余 K/M/B）
+from ..widgets import fmt_downloads  # noqa: E402
 
 
 class FilePickDialog(MessageBoxBase):
@@ -228,7 +220,7 @@ class FilePickDialog(MessageBoxBase):
         title.setStyleSheet(f"color: {Theme.title}; font-weight: 700; font-size: 13px; background: transparent;")
         meta = QLabel(
             f"{', '.join((row.get('game_versions') or [])[:4]) or '—'}  ·  "
-            f"{', '.join(row.get('loaders') or []) or '任意'}  ·  "
+            f"{', '.join(row.get('loaders') or []) or tr('任意')}  ·  "
             f"{row.get('date') or '—'}  ·  {fmt_downloads(row.get('downloads'))}  ·  "
             f"{row.get('release_type') or 'release'}"
         )

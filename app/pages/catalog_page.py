@@ -26,17 +26,8 @@ except ImportError:
             return default
 
 
-def fmt_downloads(n) -> str:
-    try:
-        n = int(n or 0)
-    except (TypeError, ValueError):
-        return "—"
-    if n >= 100_000_000:
-        s = f" {n / 100_000_000:.1f}亿"
-        return s.replace(".0", "").strip()
-    if n >= 10_000:
-        return f"{n / 10_000:.0f}万"
-    return str(n) if n else "—"
+# 共享实现：跟随界面语言选数字单位（中文 万/亿，其余 K/M/B）
+from ..widgets import fmt_downloads  # noqa: E402
 
 
 class PclCard(QFrame):

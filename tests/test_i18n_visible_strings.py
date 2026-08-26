@@ -138,6 +138,29 @@ class VisibleStringsEnglishTests(unittest.TestCase):
         install = i18n.tr("安装模组 {0}").format("sodium.jar")
         self.assertTrue(BackendAPI.is_download_title(install))
 
+    def test_download_counts_follow_language(self):
+        """下载量单位跟随语言：英文用 K/M/B，中文保留 万/亿。"""
+        from app.widgets import fmt_downloads
+        from app.pages import catalog_page, file_pick
+
+        # 两个页面必须用同一份实现，不许再各写一份中文单位
+        self.assertIs(catalog_page.fmt_downloads, fmt_downloads)
+        self.assertIs(file_pick.fmt_downloads, fmt_downloads)
+
+        i18n.set_language("en")
+        for n, expect in [(123_456_789, "M"), (2_000_000_000, "B"),
+                          (45_678, "K"), (999, "999")]:
+            text = fmt_downloads(n)
+            self.assertIsNone(_CJK.search(text),
+                              f"英文界面下下载量冒中文: {n} -> {text!r}")
+            self.assertIn(expect, text)
+
+        i18n.set_language("zh_CN")
+        self.assertIn("亿", fmt_downloads(123_456_789))
+        self.assertIn("万", fmt_downloads(45_678))
+        self.assertEqual(fmt_downloads(0), "—")
+        i18n.set_language("en")
+
     def test_download_dock_title_english(self):
         from app.backend import BackendAPI
         from app.pages.tasks_page import DownloadDock

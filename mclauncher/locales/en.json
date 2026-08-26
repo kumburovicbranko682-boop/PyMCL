@@ -1007,5 +1007,6 @@
   "启动游戏 {0}": "Launch Game {0}",
   "修复 {0}": "Repair {0}",
   "导出整合包 {0}": "Export modpack {0}",
-  "检查模组更新 {0}": "Check mod updates {0}"
+  "检查模组更新 {0}": "Check mod updates {0}",
+  "任意": "Any"
 }
