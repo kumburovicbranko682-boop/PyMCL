@@ -1051,6 +1051,9 @@ cJSON *backend_call(const char *method, cJSON *params) {
         cJSON_AddBoolToObject(o, "ui_fly_animation", config_bool("ui_fly_animation", 1));
         cJSON_AddNumberToObject(o, "ui_fly_duration_ms", config_int("ui_fly_duration_ms", 620));
         cJSON_AddBoolToObject(o, "ui_dark", config_bool("ui_dark", 0));
+        /* 全局默认 Java（对齐 bridge/api.py）。启动路径（本文件 ~505 行）
+         * 一直在读这个键，但它从没被带给 UI：Java 页永远显示「没有默认」。 */
+        cJSON_AddStringToObject(o, "default_java", config_str("default_java", ""));
         cJSON_AddStringToObject(o, "root", g_root);
         return o;
     }
@@ -1085,6 +1088,10 @@ cJSON *backend_call(const char *method, cJSON *params) {
                 "default_isolation", "default_jvm_args", "launcher_visibility",
                 "gc_preset", "download_source", "homepage_mode", "custom_homepage",
                 "feedback_url",
+                /* EziApp Java 页「设为默认」只发这一个键。以前不在白名单里：
+                 * RPC 返回 true、UI 提示成功，config.json 却一字未写，启动照旧
+                 * 用旧 Java——而启动器选 Java 时明明读 default_java（launch 路径）。 */
+                "default_java",
             };
             for (size_t i = 0; i < sizeof(str_keys) / sizeof(str_keys[0]); i++) {
                 cJSON *v = cJSON_GetObjectItem(d, str_keys[i]);
