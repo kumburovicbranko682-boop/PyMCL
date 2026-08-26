@@ -9,8 +9,20 @@ from pathlib import Path
 from . import utils
 from .downloader import DownloadManager
 from .instances import Instance
-MODRINTH_HASH = "https://api.modrinth.com/v2/version_file/{hash}"
 OVERRIDE_DIRS = ("config", "resourcepacks", "shaderpacks", "datapacks")
+
+
+def _modrinth_version_by_hash(dm: DownloadManager, digest: str):
+    """按 sha1 反查 Modrinth 版本：官方优先、MCIM 兜底（source 策略）。"""
+    from . import source
+    for base in source.modrinth_api_bases():
+        try:
+            hit = dm.fetch_json(f"{base}/version_file/{digest}", timeout=15, expand=False)
+            if isinstance(hit, dict):
+                return hit
+        except Exception:
+            continue
+    return None
 
 
 def _sha1(path: Path) -> str:
@@ -32,11 +44,7 @@ def export_mrpack(instance: Instance, dest: str | Path, dm: DownloadManager | No
             if on_note:
                 on_note(f"解析模组 {jar.name}", i, len(jars))
             digest = _sha1(jar)
-            hit = None
-            try:
-                hit = dm.fetch_json(MODRINTH_HASH.format(hash=digest), timeout=15)
-            except Exception:
-                hit = None
+            hit = _modrinth_version_by_hash(dm, digest)
             if isinstance(hit, dict):
                 primary = None
                 for f in hit.get("files") or []:

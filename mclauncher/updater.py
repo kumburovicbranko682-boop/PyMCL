@@ -11,7 +11,12 @@ from . import APP_VERSION, utils
 from .config import CONFIG
 from .downloader import DownloadManager
 
-DEFAULT_URL = "https://pymcl.dev/update.json"
+# 历史默认源 pymcl.dev 已失效（DNS 无法解析），默认改走 GitHub Releases。
+LEGACY_DEAD_HOSTS = ("pymcl.dev",)
+DEFAULT_URL = ""  # 空 = 使用 GitHub Releases
+GITHUB_LATEST_API = (
+    "https://api.github.com/repos/kumburovicbranko682-boop/PyMCL/releases/latest"
+)
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
@@ -33,15 +38,95 @@ def manifest_url() -> str:
     return str(CONFIG.get("update_url") or DEFAULT_URL).strip()
 
 
+def is_dead_update_url(url: str) -> bool:
+    """默认的 pymcl.dev 域名已失效：出现时直接走 GitHub 回退。"""
+    from urllib.parse import urlparse
+    host = urlparse(str(url or "")).netloc.lower()
+    return any(host == dead or host.endswith("." + dead) for dead in LEGACY_DEAD_HOSTS)
+
+
 def valid_sha256(value: str) -> bool:
     return bool(_SHA256_RE.fullmatch(str(value or "").strip()))
 
 
-def check(dm: DownloadManager | None = None) -> dict:
+def _sha256_from_text(text: str) -> str:
+    """从 release 描述里找 SHA-256：优先带 sha256 标注的，其次全文唯一的 64 位 hex。"""
+    text = str(text or "")
+    m = re.search(r"sha-?256[^0-9a-fA-F]{0,40}([0-9a-fA-F]{64})", text, re.I)
+    if m:
+        return m.group(1).lower()
+    hexes = {h.lower() for h in re.findall(r"\b[0-9a-fA-F]{64}\b", text)}
+    if len(hexes) == 1:
+        return next(iter(hexes))
+    return ""
+
+
+def manifest_from_github_release(rel) -> dict | None:
+    """GitHub /releases/latest 响应 -> 内部更新清单格式。
+
+    sha256 取自资产 digest 字段或 release 描述；两处都没有时留空，
+    check()/download() 的 SHA-256 门禁会拒绝自动下载（仅提示有新版本）。
+    """
+    if not isinstance(rel, dict):
+        return None
+    tag = str(rel.get("tag_name") or rel.get("name") or "").strip()
+    if not tag:
+        return None
+    version = tag.lstrip("vV").strip()
+    body = str(rel.get("body") or "")
+    url = ""
+    sha256 = ""
+    for asset in rel.get("assets") or []:
+        if not isinstance(asset, dict):
+            continue
+        name = str(asset.get("name") or "")
+        if not name.lower().endswith((".exe", ".zip")):
+            continue
+        url = str(asset.get("browser_download_url") or "")
+        digest = str(asset.get("digest") or "")
+        if digest.lower().startswith("sha256:"):
+            candidate = digest.split(":", 1)[1].strip()
+            if valid_sha256(candidate):
+                sha256 = candidate.lower()
+        break
+    if not sha256:
+        sha256 = _sha256_from_text(body)
+    return {
+        "version": version,
+        "notes": body[:4000],
+        "url": url,
+        "sha256": sha256,
+    }
+
+
+def _fetch_manifest(dm: DownloadManager):
+    """自定义 update_url 优先（死域名跳过）；失败/缺失回退 GitHub Releases。"""
     url = manifest_url()
+    last_err = None
+    if url and not is_dead_update_url(url):
+        try:
+            data = dm.fetch_json(url, timeout=12)
+            if isinstance(data, dict) and (data.get("version") or data.get("latest")):
+                return data
+        except Exception as exc:
+            last_err = exc
+    try:
+        # fetch_json 默认 expand：api.github.com 会先套 github_candidates 代理，再直连
+        rel = dm.fetch_json(GITHUB_LATEST_API, timeout=12)
+        data = manifest_from_github_release(rel)
+        if not data and isinstance(rel, dict) and (rel.get("version") or rel.get("latest")):
+            data = rel  # 兼容直接返回清单格式的镜像
+        if data:
+            return data
+        raise RuntimeError("GitHub release 响应缺少版本号")
+    except Exception as exc:
+        raise last_err or exc
+
+
+def check(dm: DownloadManager | None = None) -> dict:
     dm = dm or DownloadManager(threads=2)
     try:
-        data = dm.fetch_json(url, timeout=12)
+        data = _fetch_manifest(dm)
     except Exception as exc:
         return {
             "ok": False,
@@ -65,7 +150,7 @@ def check(dm: DownloadManager | None = None) -> dict:
         "latest": latest or APP_VERSION,
         "has_update": signed_update,
         "message": (
-            "更新清单缺少有效 SHA-256，已拒绝自动更新"
+            f"发现 {latest}，但更新包缺少有效 SHA-256，已拒绝自动下载"
             if integrity_error else (f"发现 {latest}" if has else "已是最新版本")
         ),
         "notes": str((data or {}).get("notes") or (data or {}).get("changelog") or ""),

@@ -213,10 +213,10 @@ int expand_urls(const char *url, char ***out, int *n) {
     int c = 0;
     if (is_github(url)) {
         static const char *px[] = {
-            "https://gitproxy.mrhjx.cn/", "https://ghproxy.vip/",
+            "https://ghfast.top/", "https://gh.llkk.cc/", "https://ghproxy.vip/",
             "https://gh-proxy.com/", "https://v6.gh-proxy.org/", "https://cdn.gh-proxy.com/",
         };
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             snprintf(tmp[c], sizeof(tmp[c]), "%s%s", px[i], url);
             c++;
         }

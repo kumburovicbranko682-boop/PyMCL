@@ -281,6 +281,23 @@ WORLD_SPEC = {
 }
 
 
+def _version_filter_items(backend) -> list[str]:
+    """版本筛选项：只读本地缓存清单，避免打开目录页时同步联网卡住 UI。
+
+    缓存为空（还没拉过版本列表）时退回经典版本；输入框可自行填写 26.x。
+    """
+    try:
+        from mclauncher.manifest import CLASSIC_CATALOG_VERSIONS, catalog_release_ids
+    except ImportError:
+        return ["1.20.1", "1.19.2", "1.18.2", "1.16.5", "1.12.2"]
+    rows = []
+    try:
+        rows = backend.get_version_list() or []
+    except Exception:
+        rows = []
+    return catalog_release_ids(rows) or list(CLASSIC_CATALOG_VERSIONS)
+
+
 class PclCatalogPage(QWidget):
     def __init__(self, backend, spec: dict, parent=None):
         super().__init__(parent)
@@ -320,7 +337,7 @@ class PclCatalogPage(QWidget):
         self.source_box = ComboBox()
         self.source_box.addItems([tr("全部"), "Modrinth", "CurseForge"])
         self.version_box = EditableComboBox()
-        self.version_box.addItems([tr("全部 (也可自行输入)"), "1.21.1", "1.20.1", "1.19.2", "1.18.2", "1.16.5", "1.12.2"])
+        self.version_box.addItems([tr("全部 (也可自行输入)")] + _version_filter_items(backend))
         self.version_box.setCurrentIndex(0)
         self.type_box = ComboBox()
         self.type_box.addItems(spec.get("types") or [tr("全部")])

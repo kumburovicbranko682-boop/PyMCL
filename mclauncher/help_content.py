@@ -19,7 +19,8 @@ ARTICLES: list[dict] = [
             "启动时默认自动匹配。也可在「下载 → Java」按版本下载：\n"
             "· Java 8：1.16 及更早\n"
             "· Java 17：1.18 – 1.20.4\n"
-            "· Java 21：1.20.5+\n"
+            "· Java 21：1.20.5 – 1.21.11\n"
+            "· Java 25：26.1 及更新（年式版本号）\n"
             "发行版推荐 Adoptium；也可用 Zulu / Microsoft。"
         ),
     },

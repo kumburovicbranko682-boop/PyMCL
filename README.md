@@ -171,7 +171,8 @@ PyMCL/                      ← 启动器主目录（可用环境变量 PYMCL_HO
 | --- | --- |
 | ≤ 1.16 | Java 8（远古版本在 Windows 上使用 32 位 Java 8） |
 | 1.17 ~ 1.20.4 | Java 17 |
-| 1.20.5+ | Java 21（Mojang 官方运行时，精确匹配） |
+| 1.20.5 ~ 1.21.11 | Java 21（Mojang 官方运行时，精确匹配） |
+| 26.1+（年式版本号） | Java 25 |
 | 快照 | 按 version JSON 的 component 自动选择 |
 
 优先使用 Mojang 官方运行时（与官方启动器完全一致），失败时回退 Adoptium Temurin；也可在“Java”页手动下载或在“启动”页手动指定。

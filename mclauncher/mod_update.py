@@ -10,7 +10,19 @@ from .downloader import DownloadManager
 from .instances import Instance
 from .mods import list_instance_mod_entries
 
-API = "https://api.modrinth.com/v2"
+
+def _mr_get(dm: DownloadManager, path: str, timeout=12):
+    """按 source 策略依次请求 Modrinth（官方优先、MCIM 兜底）。"""
+    from . import source
+    last = None
+    for base in source.modrinth_api_bases():
+        try:
+            return dm.fetch_json(f"{base}{path}", timeout=timeout, expand=False)
+        except Exception as exc:
+            last = exc
+    if last:
+        raise last
+    raise RuntimeError("Modrinth 不可用")
 
 
 def _game_mods(instance: Instance, mods_path: Path | None = None) -> Path:
@@ -43,7 +55,7 @@ def check_updates(instance: Instance, dm: DownloadManager | None = None,
 
 def _modrinth_update(dm, path: Path, digest: str, mc_version: str, loader: str, info: dict):
     try:
-        current = dm.fetch_json(f"{API}/version_file/{digest}", timeout=12)
+        current = _mr_get(dm, f"/version_file/{digest}")
     except Exception:
         return None
     if not isinstance(current, dict):
@@ -59,7 +71,7 @@ def _modrinth_update(dm, path: Path, digest: str, mc_version: str, loader: str, 
         q.append(f"loaders=[\"{loader}\"]")
     params = ("?" + "&".join(q)) if q else ""
     try:
-        versions = dm.fetch_json(f"{API}/project/{project}/version{params}", timeout=12)
+        versions = _mr_get(dm, f"/project/{project}/version{params}")
     except Exception:
         return None
     if not isinstance(versions, list) or not versions:

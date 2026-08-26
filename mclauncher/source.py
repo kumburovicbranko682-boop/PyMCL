@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""PCL 同款下载源：官方 / BMCLAPI / 自动测速；社区资源走 MCIM。"""
+"""PCL 同款下载源：官方 / BMCLAPI / 自动测速；社区资源官方优先、MCIM 兜底。"""
 
 from __future__ import annotations
 
@@ -103,11 +103,11 @@ def file_mirror_first() -> bool:
 
 
 def community_mirror_first() -> bool:
-    """社区资源：自动=MCIM 优先（PCL 同款），官方源兜底。"""
-    mode = community_mode()
-    if mode == "official":
-        return False
-    return True
+    """社区资源：自动=官方优先、MCIM 兜底（对齐 PCL 主线与 MCIM 官方建议）。
+
+    community_source=mcim 时才镜像优先；official 仅官方。
+    """
+    return community_mode() == "mcim"
 
 
 def warmup_async():
@@ -233,4 +233,9 @@ def describe() -> str:
         file_txt = "BMCLAPI优先"
     else:
         file_txt = "仅官方"
-    return f"文件:{file_txt} / 社区:{comm}"
+    comm_txt = {
+        "auto": "官方优先·MCIM兜底",
+        "mcim": "MCIM优先",
+        "official": "仅官方",
+    }.get(comm, comm)
+    return f"文件:{file_txt} / 社区:{comm_txt}"
