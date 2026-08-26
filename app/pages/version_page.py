@@ -329,8 +329,20 @@ class VersionPage(QWidget):
         add(tr("复制"), lambda: self._copy(instance, version))
         add(tr("隐藏 / 取消隐藏"), lambda: self._hide(instance, version))
         add(tr("创建桌面快捷方式"), lambda: self._shortcut(instance, version))
-        add(tr("导出启动脚本"), lambda: self.backend.export_launch_script(instance, version))
+        add(tr("导出启动脚本"), lambda: self._export_script(instance, version))
         menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+
+    def _export_script(self, instance, version):
+        try:
+            self.backend.export_launch_script(instance, version)
+        except Exception as e:
+            MessageBox(tr("导出失败"), str(e), self).exec()
+            return
+        InfoBar.success(
+            tr("已开始导出启动脚本"),
+            tr("进度见「下载任务」，完成后文件在数据目录 exports 文件夹"),
+            parent=self, position=InfoBarPosition.TOP, duration=4000,
+        )
 
     def _shortcut(self, instance, version):
         try:

@@ -404,6 +404,7 @@
   "已应用": "Applied",
   "已开始修复": "Repair started",
   "已开始备份": "Backup started",
+  "已开始导出启动脚本": "Launch script export started",
   "已开始导出整合包": "Modpack export started",
   "已开始检查并更新": "Check & update started",
   "已排队": "Queued",
