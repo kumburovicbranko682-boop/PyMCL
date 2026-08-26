@@ -1466,7 +1466,9 @@ class BackendAPI(QObject):
                     if pack_src != src and key != CBC_CF_ID:
                         continue
                 row = {
-                    "name": title,
+                    # 显示名过 tr：POPULAR_* 的原文带中文别名注释，英文界面直接
+                    # 露出来就是一排乱码感的汉字。安装走 id/slug，改显示名无害。
+                    "name": tr(title),
                     "author": "CurseForge" if pack_src == "curseforge" else "Modrinth",
                     "downloads": 0,
                     "id": key if pack_src == "curseforge" else None,
@@ -1530,7 +1532,8 @@ class BackendAPI(QObject):
                 if src != "all" and mod_src != src:
                     continue
                 rows.append({
-                    "name": title,
+                    # 同整合包：显示名过 tr，安装仍走 id/slug
+                    "name": tr(title),
                     "author": "CurseForge" if mod_src == "curseforge" else "Modrinth",
                     "downloads": 0,
                     "id": key if mod_src == "curseforge" else None,
