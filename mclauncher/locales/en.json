@@ -1103,5 +1103,8 @@
   "界面体验": "UI / UX",
   "建议": "Suggestion",
   "开发者会实时看到这条反馈（编号 {0}）": "The developers will see this feedback right away (ref {0})",
-  "开发者会实时看到这条反馈": "The developers will see this feedback right away"
+  "开发者会实时看到这条反馈": "The developers will see this feedback right away",
+  "已隐藏 {0}": "{0} is now hidden",
+  "勾选右上角「显示隐藏」可以再看到它": "Tick “Show hidden” in the top bar to see it again",
+  "已取消隐藏 {0}": "{0} is no longer hidden"
 }

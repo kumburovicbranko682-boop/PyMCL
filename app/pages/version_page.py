@@ -372,9 +372,23 @@ class VersionPage(QWidget):
     def _hide(self, instance, version):
         try:
             data = self.backend.get_version_settings(instance, version)
-            self.backend.hide_version(instance, version, not bool(data.get("hidden")))
+            now_hidden = not bool(data.get("hidden"))
+            self.backend.hide_version(instance, version, now_hidden)
         except Exception as e:
             MessageBox(tr("操作失败"), str(e), self).exec()
+            self._reload_installed()
+            return
+        # 以前隐藏后版本无声消失，不知道「显示隐藏」的人会以为删掉了
+        if now_hidden:
+            hint = ("" if self._show_hidden
+                    else tr("勾选右上角「显示隐藏」可以再看到它"))
+            InfoBar.success(tr("已隐藏 {0}").format(version), hint,
+                            parent=self, position=InfoBarPosition.TOP,
+                            duration=4000)
+        else:
+            InfoBar.success(tr("已取消隐藏 {0}").format(version), "",
+                            parent=self, position=InfoBarPosition.TOP,
+                            duration=3000)
         self._reload_installed()
 
     def _uninstall_selected(self):
