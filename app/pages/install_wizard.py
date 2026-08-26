@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """安装向导：原版 + 主加载器 + OptiFine / LiteLoader，可选加载器版本。"""
+import re
+
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
     BodyLabel, CheckBox, ComboBox, MessageBoxBase, SubtitleLabel,
@@ -8,6 +10,12 @@ from qfluentwidgets import (
 from mclauncher.config import CONFIG
 from ..ui_alive import guard
 from mclauncher.i18n import tr
+
+
+def liteloader_supported(mc_version: str) -> bool:
+    """LiteLoader 只有 1.7–1.12 的构建，别的版本勾了也装不上。"""
+    m = re.match(r"^1\.(\d+)", (mc_version or "").strip())
+    return bool(m and 7 <= int(m.group(1)) <= 12)
 
 
 class InstallWizardDialog(MessageBoxBase):
@@ -41,6 +49,11 @@ class InstallWizardDialog(MessageBoxBase):
 
         self.optifine = CheckBox(tr("同时安装 OptiFine（Forge / 原版）"))
         self.liteloader = CheckBox(tr("同时安装 LiteLoader（1.7–1.12）"))
+        # 标签写着 1.7–1.12，但以前任何版本都能勾，勾了也装不上
+        if not liteloader_supported(mc_version):
+            self.liteloader.setEnabled(False)
+            self.liteloader.setToolTip(
+                tr("LiteLoader 没有 {0} 的构建，只支持 1.7–1.12").format(mc_version))
         self.skip_assets = CheckBox(tr("跳过资源文件校验（加快重装）"))
         self.skip_assets.setChecked(bool(CONFIG.get("skip_assets")))
         self.of_ver = ComboBox()

@@ -1108,5 +1108,6 @@
   "勾选右上角「显示隐藏」可以再看到它": "Tick “Show hidden” in the top bar to see it again",
   "已取消隐藏 {0}": "{0} is no longer hidden",
   "将卸载 {0} 个版本：": "This will uninstall {0} version(s):",
-  "[预检:{0}] {1}: {2}": "[Preflight:{0}] {1}: {2}"
+  "[预检:{0}] {1}: {2}": "[Preflight:{0}] {1}: {2}",
+  "LiteLoader 没有 {0} 的构建，只支持 1.7–1.12": "LiteLoader has no build for {0}; it only supports 1.7–1.12"
 }
