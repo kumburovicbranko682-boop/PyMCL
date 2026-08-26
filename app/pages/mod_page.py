@@ -267,7 +267,8 @@ class ModManagerPage(QWidget):
     def _delete(self, filename: str):
         inst = self._current_instance()
         ver = self._current_version()
-        box = MessageBox(tr("删除确认"), f"将删除模组文件「{filename}」，不可恢复。", self)
+        box = MessageBox(tr("删除确认"),
+                         tr("将删除模组文件「{0}」，不可恢复。").format(filename), self)
         box.yesButton.setText(tr("删除"))
         box.cancelButton.setText(tr("取消"))
         if not box.exec():
@@ -308,11 +309,18 @@ class ModManagerPage(QWidget):
             self._install_jars(paths)
 
     def _check_updates(self):
+        # 检查跑在后台任务里，点击处必须给「开始了、去哪看结果」的反馈
         try:
             self.backend.start_mod_updates(self._current_instance())
         except Exception as e:
             InfoBar.error(tr("检查更新失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+            return
+        win = self.window()
+        if hasattr(win, "fly_to_tasks"):
+            win.fly_to_tasks(self.update_btn, self._current_instance())
+        InfoBar.success(tr("已开始检查模组更新"), tr("结果见「下载任务」页"),
+                        parent=self, position=InfoBarPosition.TOP, duration=3000)
 
     # ------------------------------------------------------------------
     def dragEnterEvent(self, event):

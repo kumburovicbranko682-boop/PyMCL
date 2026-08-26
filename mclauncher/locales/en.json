@@ -1033,5 +1033,8 @@
   "服务器已更新": "Server updated",
   "删除服务器 {0}？": "Delete server {0}?",
   "已导入 {0} 个服务器": "Imported {0} servers",
-  "已保存到 {0}": "Saved to {0}"
+  "已保存到 {0}": "Saved to {0}",
+  "已开始检查模组更新": "Mod update check started",
+  "结果见「下载任务」页": "See the result on the Download Tasks page",
+  "将删除模组文件「{0}」，不可恢复。": "This deletes the mod file “{0}”. It cannot be undone."
 }
