@@ -60,6 +60,15 @@ class I18nLeftoverTests(unittest.TestCase):
             "将删除整个实例「{0}」及其文件，不可恢复。",
             "将永久删除世界「{0}」，其中的建筑与游戏进度都无法恢复。",
             "将删除「{0}」。",
+            "无法打开: {0}",
+            "已备份到 {0}",
+            "账号不存在: {0}",
+            "已安装 {0}",
+            "已登录 {0}",
+            "已更新 {0} 个模组",
+            "已安装世界 {0}",
+            "Java {0} ({1}) 安装完成",
+            "已导入 {0} 个版本",
         ]
         for loc in ("en.json", "zh_CN.json"):
             data = json.loads((ROOT / "mclauncher" / "locales" / loc).read_text(encoding="utf-8"))
@@ -85,6 +94,10 @@ class I18nLeftoverTests(unittest.TestCase):
             ("app/pages/catalog_page.py", 'f"将删除整个实例'),
             ("app/pages/catalog_page.py", 'f"将永久删除世界'),
             ("app/pages/catalog_page.py", 'f"将删除「'),
+            # 任务完成消息（任务卡「✔」行）与启动错误必须走 tr()
+            ("app/backend.py", 'return f"已'),
+            ("app/backend.py", 'raise LaunchError(f"'),
+            ("app/backend.py", 'f"已保存 ('),
         ]
         for rel, needle in cases:
             src = (ROOT / rel).read_text(encoding="utf-8")

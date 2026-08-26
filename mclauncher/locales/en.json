@@ -1044,5 +1044,16 @@
   "已打开崩溃报告": "Crash report opened",
   "已清空自定义 JVM 参数": "Custom JVM arguments cleared",
   "未知动作: {0}": "Unknown action: {0}",
-  "显卡/OpenGL 相关崩溃：请更新显卡驱动，关闭独显强制、超采样/滤镜，并确认不是远程桌面/虚拟机缺 OpenGL。": "GPU/OpenGL crash: update your graphics driver, turn off forced dedicated-GPU / supersampling / filters, and make sure you're not on a remote desktop or VM without OpenGL."
+  "显卡/OpenGL 相关崩溃：请更新显卡驱动，关闭独显强制、超采样/滤镜，并确认不是远程桌面/虚拟机缺 OpenGL。": "GPU/OpenGL crash: update your graphics driver, turn off forced dedicated-GPU / supersampling / filters, and make sure you're not on a remote desktop or VM without OpenGL.",
+  "无法打开: {0}": "Could not open: {0}",
+  "已备份到 {0}": "Backed up to {0}",
+  "账号不存在: {0}": "Account does not exist: {0}",
+  "已安装 {0}": "Installed {0}",
+  "无法解析整合包: {0}": "Could not resolve modpack: {0}",
+  "已登录 {0}": "Signed in as {0}",
+  "已更新 {0} 个模组": "Updated {0} mod(s)",
+  "已安装世界 {0}": "Installed world {0}",
+  "Java {0} ({1}) 安装完成": "Java {0} ({1}) installed",
+  "已导入 {0} 个版本": "Imported {0} version(s)",
+  "已保存 ({0})": "Saved ({0})"
 }

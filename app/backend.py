@@ -275,7 +275,7 @@ class BackendAPI(QObject):
         if not target:
             raise LaunchError(tr("没有可打开的日志文件"))
         if not open_path(target):
-            raise LaunchError(f"无法打开: {target}")
+            raise LaunchError(tr("无法打开: {0}").format(target))
         return target
 
     def _on_worker_finished(self, task_id, success, message):
@@ -576,7 +576,7 @@ class BackendAPI(QObject):
             on_progress=lambda text, cur, total: progress(cur, total, text))
         log(f"备份完成: {info['path']}")
         self._emit_ui_changed()
-        return f"已备份到 {info['name']}"
+        return tr("已备份到 {0}").format(info["name"])
 
     def list_save_backups(self, instance: str, name: str = "", version: str = "") -> list[dict]:
         from mclauncher import saves as saves_mod
@@ -770,7 +770,7 @@ class BackendAPI(QObject):
         else:
             acc = self.accounts.get_account(account)
             if not acc:
-                raise LaunchError(f"账号不存在: {account}")
+                raise LaunchError(tr("账号不存在: {0}").format(account))
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
         from mclauncher import launcher
@@ -821,7 +821,7 @@ class BackendAPI(QObject):
         folder = self._mods_folder(self._instance(instance), version)
         utils.ensure_dir(folder)
         if not open_path(folder):
-            raise LaunchError(f"无法打开: {folder}")
+            raise LaunchError(tr("无法打开: {0}").format(folder))
         return str(folder)
 
     def delete_mod(self, instance: str, filename: str, version: str = ""):
@@ -1654,7 +1654,7 @@ class BackendAPI(QObject):
             opts.append({"label": j.get("name") or exe, "value": exe})
         stored = self.get_instance_java(instance)
         if stored != JAVA_AUTO and stored not in seen:
-            opts.append({"label": f"已保存 ({stored})", "value": stored})
+            opts.append({"label": tr("已保存 ({0})").format(stored), "value": stored})
         return opts
 
     def java_combo_label_for(self, instance: str, options=None) -> str:
@@ -1698,7 +1698,7 @@ class BackendAPI(QObject):
             vs.save(inst, vid, {"isolation": iso})
             log(f"已套用默认隔离: {iso}")
         log(f"版本 {vid} 安装完成")
-        return f"已安装 {vid}"
+        return tr("已安装 {0}").format(vid)
 
     def _install_modpack_impl(self, progress, log, name, source, extra=None):
         extra = extra or {}
@@ -1722,7 +1722,7 @@ class BackendAPI(QObject):
             addon_id = hit.get("id")
             slug = hit.get("slug")
             if not addon_id and not slug:
-                raise RuntimeError(f"无法解析整合包: {name}")
+                raise RuntimeError(tr("无法解析整合包: {0}").format(name))
             log(f"从 CurseForge 安装 {hit.get('name') or name} (id={addon_id} slug={slug})")
             log(f"实例: {inst.name}  路径: {inst.path}")
             if str(addon_id) == str(CBC_CF_ID) or (slug or "") == CBC_CF_SLUG:
@@ -1888,7 +1888,7 @@ class BackendAPI(QObject):
         else:
             acc = self.accounts.get_account(account)
             if not acc:
-                raise LaunchError(f"账号不存在: {account}")
+                raise LaunchError(tr("账号不存在: {0}").format(account))
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
         log(f"账号: {props.get('name')} ({self._account_kind(props, acc)})")
@@ -2053,7 +2053,7 @@ class BackendAPI(QObject):
         account = authlib_mod.login(api, username, password)
         self.accounts.add_account(account)
         log(f"皮肤站登录成功：{account.get('name')}")
-        return f"已登录 {account.get('name')}"
+        return tr("已登录 {0}").format(account.get("name"))
 
     def _repair_impl(self, progress, log, instance, version):
         from mclauncher.repair import repair
@@ -2084,7 +2084,7 @@ class BackendAPI(QObject):
             log(f"更新 {row.get('name')} {row.get('current')} → {row.get('latest')}")
             apply_update(inst, row, dm=dm)
             progress(i + 1, len(rows), row.get("name") or "")
-        return f"已更新 {len(rows)} 个模组"
+        return tr("已更新 {0} 个模组").format(len(rows))
 
     def _self_update_impl(self, progress, log):
         from mclauncher import updater as updater_mod
@@ -2105,7 +2105,7 @@ class BackendAPI(QObject):
         account = nide8_mod.login(server_id, username, password)
         self.accounts.add_account(account)
         log(f"统一通行证登录成功：{account.get('name')}")
-        return f"已登录 {account.get('name')}"
+        return tr("已登录 {0}").format(account.get("name"))
 
     def _install_world_impl(self, progress, log, name, instance, extra=None):
         from mclauncher import worlds as worlds_mod
@@ -2117,7 +2117,7 @@ class BackendAPI(QObject):
         result = worlds_mod.install_world(dm, extra, inst, on_progress=dm.on_progress)
         files = (result or {}).get("files") or []
         log(f"完成: {', '.join(files) or name}")
-        return f"已安装世界 {', '.join(files) or name}"
+        return tr("已安装世界 {0}").format(", ".join(files) or name)
 
     def _export_bat_impl(self, progress, log, instance, version, dest):
         from mclauncher import launch_flow, version_ops as vops
@@ -2258,7 +2258,7 @@ class BackendAPI(QObject):
         dm = self._dm(progress, log)
         exe = java_mod.install_java_vendor(dm, major, vendor=vendor, on_progress=dm.on_progress)
         log(f"Java 已安装: {exe}")
-        return f"Java {major} ({vendor}) 安装完成"
+        return tr("Java {0} ({1}) 安装完成").format(major, vendor)
 
     # ==================================================================
     # 新增 API：多语言
@@ -2353,7 +2353,7 @@ class BackendAPI(QObject):
         progress(2, 3, f"导入 {len(versions)} 个版本")
         result = om.migrate(str(src), instance)
         log(f"已导入 {len(result.get('versions', []))} 个版本")
-        return f"已导入 {len(result.get('versions', []))} 个版本"
+        return tr("已导入 {0} 个版本").format(len(result.get("versions", [])))
 
     # ==================================================================
     # 新增 API：多开
