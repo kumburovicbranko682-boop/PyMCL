@@ -109,6 +109,17 @@ class I18nLeftoverTests(unittest.TestCase):
         src = (ROOT / "app" / "backend.py").read_text(encoding="utf-8")
         self.assertNotIn('start_task(f"', src,
                          "backend.py 出现硬编码任务标题（start_task(f\"…\"））")
+
+    def test_task_logs_translated(self):
+        """任务日志（任务卡日志面板 / 实时日志）不许再新增硬编码中文。"""
+        import re
+        src = (ROOT / "app" / "backend.py").read_text(encoding="utf-8")
+        cjk = re.compile(r"[\u4e00-\u9fff]")
+        bad = []
+        for m in re.finditer(r'(?:progress|log|_log)\(\s*(f"[^"]*")', src):
+            if cjk.search(m.group(1)):
+                bad.append(m.group(1)[:60])
+        self.assertEqual(bad, [], f"backend.py 出现硬编码中文日志：{bad}")
         for loc in ("en.json", "zh_CN.json"):
             data = json.loads((ROOT / "mclauncher" / "locales" / loc).read_text(encoding="utf-8"))
             for k in ("修复", "导出整合包", "检查模组更新", "安装世界"):

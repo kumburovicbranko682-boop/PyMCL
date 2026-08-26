@@ -134,11 +134,11 @@ class BackendWorker(QThread):
         except TaskCancelled:
             self.task_finished.emit(self.task_id, False, tr("已取消"))
         except GameCrashError as exc:
-            self._log(f"[错误] {exc}")
+            self._log(tr("[错误] {0}").format(exc))
             self.crash.emit(self.task_id, exc.report)
             self.task_finished.emit(self.task_id, False, str(exc))
         except Exception as exc:  # noqa: BLE001
-            self._log(f"[错误] {exc}")
+            self._log(tr("[错误] {0}").format(exc))
             self.task_finished.emit(self.task_id, False, str(exc))
 
 
@@ -574,7 +574,7 @@ class BackendAPI(QObject):
         info = saves_mod.backup_save(
             self._instance(instance), name, version,
             on_progress=lambda text, cur, total: progress(cur, total, text))
-        log(f"备份完成: {info['path']}")
+        log(tr("备份完成: {0}").format(info["path"]))
         self._emit_ui_changed()
         return tr("已备份到 {0}").format(info["name"])
 
@@ -1687,17 +1687,17 @@ class BackendAPI(QObject):
             on_progress=dm.on_progress,
             cancel=dm.cancel,
         )
-        log(f"安装到实例 {inst.name}")
+        log(tr("安装到实例 {0}").format(inst.name))
         from mclauncher.game_install import install_game
         vid = install_game(installer, version, loader, loader_version, extra)
-        log(f"版本安装完成: {vid}")
+        log(tr("版本安装完成: {0}").format(vid))
         self._last_installed = {"instance": inst.name, "version": vid, "loader": loader or tr("无")}
         iso = CONFIG.get("default_isolation") or "none"
         if iso and iso != "none":
             from mclauncher import version_settings as vs
             vs.save(inst, vid, {"isolation": iso})
-            log(f"已套用默认隔离: {iso}")
-        log(f"版本 {vid} 安装完成")
+            log(tr("已套用默认隔离: {0}").format(iso))
+        log(tr("版本 {0} 安装完成").format(vid))
         return tr("已安装 {0}").format(vid)
 
     def _install_modpack_impl(self, progress, log, name, source, extra=None):
@@ -1711,8 +1711,8 @@ class BackendAPI(QObject):
 
         if src_l.startswith(tr("本地")) or Path(str(path)).is_file():
             p = Path(path)
-            log(f"从本地文件安装: {p}")
-            log(f"实例: {inst.name}  路径: {inst.path}")
+            log(tr("从本地文件安装: {0}").format(p))
+            log(tr("实例: {0}  路径: {1}").format(inst.name, inst.path))
             if p.suffix.lower() == ".mrpack":
                 meta = modpack_mod.install_mrpack(dm, str(p), inst, on_progress=on_progress, cancel=dm.cancel)
             else:
@@ -1723,17 +1723,18 @@ class BackendAPI(QObject):
             slug = hit.get("slug")
             if not addon_id and not slug:
                 raise RuntimeError(tr("无法解析整合包: {0}").format(name))
-            log(f"从 CurseForge 安装 {hit.get('name') or name} (id={addon_id} slug={slug})")
-            log(f"实例: {inst.name}  路径: {inst.path}")
+            log(tr("从 CurseForge 安装 {0}").format(hit.get("name") or name) + f" (id={addon_id} slug={slug})")
+            log(tr("实例: {0}  路径: {1}").format(inst.name, inst.path))
             if str(addon_id) == str(CBC_CF_ID) or (slug or "") == CBC_CF_SLUG:
                 log(tr("目标包：机械动力：黄铜协奏曲（CBC），Minecraft 1.20.1 Forge。这不是 Create+ / CDC。"))
             elif str(addon_id) == str(CDC_CF_ID) or (slug or "") == CDC_CF_SLUG:
                 log(tr("目标包：机械动力：齿轮盛宴（CDC），Minecraft 1.20.1 Forge。"))
             existing = (inst.meta() or {}).get("modpack")
             if isinstance(existing, dict) and existing.get("name"):
-                log(f"注意：实例 {inst.name} 当前已是 {existing.get('name')} "
-                    f"{existing.get('version') or ''} / {existing.get('mc_version') or ''}。"
-                    "覆盖安装会混入旧模组，建议先新建实例再装。")
+                pack = (f"{existing.get('name')} {existing.get('version') or ''}"
+                        f" / {existing.get('mc_version') or ''}").strip()
+                log(tr("注意：实例 {0} 当前已是 {1}，覆盖安装会混入旧模组，建议先新建实例再装。")
+                    .format(inst.name, pack))
             meta = modpack_mod.install_cf_modpack(
                 dm, addon_id, inst,
                 api_key=CONFIG.get("curseforge_api_key"),
@@ -1743,15 +1744,15 @@ class BackendAPI(QObject):
         else:
             hit = extra if extra.get("slug") else self._lookup_pack(name, source)
             slug = hit.get("slug") or name
-            log(f"从 Modrinth 安装 {hit.get('name') or slug} ({slug})")
-            log(f"实例: {inst.name}  路径: {inst.path}")
+            log(tr("从 Modrinth 安装 {0}").format(hit.get("name") or slug) + f" ({slug})")
+            log(tr("实例: {0}  路径: {1}").format(inst.name, inst.path))
             meta = modpack_mod.install_mrpack_by_slug(
                 dm, slug, inst, on_progress=on_progress, cancel=dm.cancel,
                 version_id=extra.get("version_id"))
         if isinstance(meta, dict) and meta.get("instance"):
             CONFIG.set("default_instance", meta["instance"])
             CONFIG.save()
-        log(f"整合包安装完成: {(meta or {}).get('name') or name}")
+        log(tr("整合包安装完成: {0}").format((meta or {}).get("name") or name))
 
     def _install_mod_impl(self, progress, log, name, instance, extra=None):
         extra = extra or {}
@@ -1766,27 +1767,27 @@ class BackendAPI(QObject):
         target = str(extra.get("version") or "").strip()
         mods_dir = self._mods_folder(inst, target) if target else None
         if target:
-            log(f"安装目标: {inst.name} / {target}")
+            log(tr("安装目标: {0} / {1}").format(inst.name, target))
         if extra.get("path") or extra.get("url"):
             source = extra.get("path") or extra.get("url")
-            log(f"安装模组: {source}")
+            log(tr("安装模组: {0}").format(source))
             mods_mod.install_mod_from_source(dm, str(source), inst, on_progress=on_progress,
                                              version_id=vid, mods_dir=mods_dir)
         elif src_kind.startswith("curse") and extra.get("id"):
-            log(f"从 CurseForge 安装模组 id={extra.get('id')}" + (f" file={fid}" if fid else ""))
+            log(tr("从 CurseForge 安装模组") + f" id={extra.get('id')}" + (f" file={fid}" if fid else ""))
             mods_mod.install_curseforge_mod(
                 dm, extra["id"], inst, mc_version=gv, on_progress=on_progress, file_id=fid,
                 mods_dir=mods_dir)
         else:
             hit = extra if extra.get("slug") else self._lookup_mod(str(name), extra.get("source") or "Modrinth")
             if hit.get("id") and str(hit.get("source") or src_kind).lower().startswith("curse"):
-                log(f"从 CurseForge 安装模组 id={hit.get('id')}")
+                log(tr("从 CurseForge 安装模组") + f" id={hit.get('id')}")
                 mods_mod.install_curseforge_mod(
                     dm, hit["id"], inst, mc_version=gv, on_progress=on_progress,
                     file_id=fid or extra.get("version_id"), mods_dir=mods_dir)
             else:
                 slug = hit.get("slug") or name
-                log(f"从 Modrinth 安装模组 {slug}" + (f" @{vid}" if vid else ""))
+                log(tr("从 Modrinth 安装模组") + f" {slug}" + (f" @{vid}" if vid else ""))
                 mods_mod.install_mod_from_source(
                     dm, str(slug), inst, mc_version=gv, on_progress=on_progress,
                     version_id=vid, mods_dir=mods_dir)
@@ -1799,29 +1800,29 @@ class BackendAPI(QObject):
         inst = self._instance(instance or extra.get("instance"))
         spec = mods_mod.CONTENT_KINDS[kind]
         dm = self._dm(progress, log)
-        log(f"安装到 {inst.name}/{spec['subdir']}")
+        log(tr("安装到 {0}").format(f"{inst.name}/{spec['subdir']}"))
         result = mods_mod.install_content_from_source(
             dm, inst, spec["subdir"], extra=extra, on_progress=dm.on_progress)
         files = (result or {}).get("files") or []
-        log(f"完成: {', '.join(files) or name}")
+        log(tr("完成: {0}").format(", ".join(files) or name))
         if kind == "datapack":
             save_name = extra.get("save") or extra.get("world")
             if save_name:
                 from mclauncher import saves as saves_mod
                 dest = saves_mod.install_datapack_into_save(
                     inst, (files or [name])[0], save_name, extra.get("version") or "")
-                log(f"已放入存档: {dest}")
+                log(tr("已放入存档: {0}").format(dest))
             else:
                 log(tr("数据包已放到实例 datapacks 目录。可在存档管理里选世界安装进去。"))
 
     def _download_java_impl(self, progress, log, major):
         dm = self._dm(progress, log)
-        log(f"下载 Adoptium Java {major}")
+        log(tr("下载 Java") + f" {major} (adoptium)")
         exe = java_mod.install_adoptium(
             dm, int(major),
             on_progress=dm.on_progress,
         )
-        log(f"Java {major} 就绪: {exe}")
+        log(tr("Java {0} 就绪: {1}").format(major, exe))
 
     def _terracotta_prepare_impl(self, progress, log):
         dm = self._dm(progress, log)
@@ -1873,15 +1874,15 @@ class BackendAPI(QObject):
             raise LaunchError(tr("启动预检未通过") + "\n\n" + msg)
 
         inst = self._instance(instance)
-        log(f"实例: {inst.name} | 版本: {version}")
-        log(f"实例 Java 设置: {inst.java_pref()}")
+        log(tr("实例: {0} | 版本: {1}").format(inst.name, version))
+        log(tr("实例 Java 设置: {0}").format(inst.java_pref()))
         CONFIG.set("default_instance", inst.name)
         CONFIG.save()
         from mclauncher import launch_flow, version_settings as vs
         bound = vs.load(inst, version).get("login_account") or ""
         if bound:
             account = bound
-            log(f"该版本绑定账号: {bound}")
+            log(tr("该版本绑定账号: {0}").format(bound))
         if account == tr("离线模式") or not account:
             acc = self.accounts.offline_account(
                 username or "Player", skin=CONFIG.get("offline_skin") or "default")
@@ -1891,8 +1892,8 @@ class BackendAPI(QObject):
                 raise LaunchError(tr("账号不存在: {0}").format(account))
             acc = self.accounts.ensure_valid(acc)
         props = self.accounts.launch_props(acc)
-        log(f"账号: {props.get('name')} ({self._account_kind(props, acc)})")
-        log(f"内存: {memory_mb} MB | 分辨率: {width}x{height}")
+        log(tr("账号: {0} ({1})").format(props.get("name"), self._account_kind(props, acc)))
+        log(tr("内存: {0} MB | 分辨率: {1}x{2}").format(memory_mb, width, height))
 
         mods_dir = inst.path / "mods"
         jar_count = 0
@@ -1901,7 +1902,7 @@ class BackendAPI(QObject):
         looks_loader = any(tok in version.lower() for tok in (
             "forge", "fabric", "quilt", "neoforge", "optifine", "liteloader"))
         if jar_count and not looks_loader:
-            log(f"警告: mods 里有 {jar_count} 个 jar，但当前版本是原版，不会加载模组")
+            log(tr("警告: mods 里有 {0} 个 jar，但当前版本是原版，不会加载模组").format(jar_count))
 
         from mclauncher import launch_flow
         prep = launch_flow.prepare(inst, version, extra_game_args=extra_game_args, memory_mb=memory_mb)
@@ -1909,9 +1910,9 @@ class BackendAPI(QObject):
         extra_game_args = prep["extra_game_args"]
         game_dir = prep["game_dir"]
         if prep["settings"].get("isolation") != "none":
-            log(f"版本隔离: {prep['settings']['isolation']} → {game_dir}")
+            log(tr("版本隔离: {0} → {1}").format(prep["settings"]["isolation"], game_dir))
         if prep["global_mods"]:
-            log(f"已应用 {prep['global_mods']} 个全局模组")
+            log(tr("已应用 {0} 个全局模组").format(prep["global_mods"]))
         launch_flow.run_hook(
             prep["settings"].get("pre_launch") or "", game_dir, log=log,
             wait=bool(prep.get("pre_launch_wait", True)))
@@ -1941,7 +1942,7 @@ class BackendAPI(QObject):
         need = java_mod.required_java_major(resolved)
         java_exe = java_mod.resolve_launch_java(resolved, prefer=prefer, on_note=log)
         if not java_mod.java_usable_for(resolved, java_exe):
-            log(f"未找到 Java {need}，自动下载中…")
+            log(tr("未找到 Java {0}，自动下载中…").format(need))
             dm = self._dm(progress, log)
             java_exe = java_mod.resolve_launch_java(
                 resolved, prefer=None, dm=dm,
@@ -1949,25 +1950,25 @@ class BackendAPI(QObject):
             )
         ver_line = next((ln.strip() for ln in (java_mod.java_version_output(java_exe) or "").splitlines() if ln.strip()), "?")
         log(f"Java -version: {ver_line}")
-        log(f"使用 Java {java_mod.get_java_major(java_exe) or '?'}: {java_exe}")
+        log(tr("使用 Java {0}: {1}").format(java_mod.get_java_major(java_exe) or "?", java_exe))
         progress(2, 4, tr("构建启动参数"))
         auth_server = str(prep.get("auth_server") or "").strip()
         if auth_server and not props.get("authlib_api"):
             # 版本设置里的「认证服」：账号不是皮肤站时也按自定义 Yggdrasil 注入
             props = dict(props)
             props["authlib_api"] = auth_server
-            log(f"认证服: {auth_server}")
+            log(tr("认证服: {0}").format(auth_server))
         if props.get("authlib_api"):
             from mclauncher import authlib as authlib_mod
             authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
-            log(f"皮肤站: {props.get('authlib_api')}")
+            log(tr("皮肤站: {0}").format(props.get("authlib_api")))
         if props.get("nide8_id") or prep.get("nide8_id"):
             from mclauncher import nide8 as nide8_mod
             nide8_mod.ensure_jar(self._dm(progress, log), on_note=log)
             if prep.get("nide8_id") and not props.get("nide8_id"):
                 props = dict(props)
                 props["nide8_id"] = prep["nide8_id"]
-            log(f"统一通行证: {props.get('nide8_id')}")
+            log(tr("统一通行证: {0}").format(props.get("nide8_id")))
         width, height = launch_flow.resolve_resolution(prep, width, height)
         cmd, _natives, _vdir, game_dir = build_launch_command(
             inst, version, props, java_exe,
@@ -1977,7 +1978,7 @@ class BackendAPI(QObject):
             game_directory=game_dir,
             authlib_api=props.get("authlib_api"),
         )
-        log(f"实际启动: {cmd[0]}")
+        log(tr("实际启动: {0}").format(cmd[0]))
         log(tr("正在启动游戏进程…"))
         progress(3, 4, tr("游戏启动中"))
         worker = QThread.currentThread()
@@ -2002,7 +2003,7 @@ class BackendAPI(QObject):
                 try:
                     dur = tracker.stop()
                     if dur:
-                        log(f"本次游玩 {playtime_mod.format_duration(dur)}")
+                        log(tr("本次游玩 {0}").format(playtime_mod.format_duration(dur)))
                 except Exception:
                     pass
             with self._game_lock:
@@ -2012,7 +2013,7 @@ class BackendAPI(QObject):
         if getattr(worker, "_cancelled", False):
             log(tr("已停止游戏"))
             return
-        log(f"游戏已退出，退出码 {code}")
+        log(tr("游戏已退出，退出码 {0}").format(code))
         launch_flow.run_hook(prep["settings"].get("post_launch") or "", game_dir, log=log)
         report = analyze_launch(
             inst, exit_code=code, output_lines=proc.last_lines(),
@@ -2021,7 +2022,7 @@ class BackendAPI(QObject):
             extra_roots=[game_dir],
         )
         if report.get("is_crash"):
-            log(f"[崩溃分析] {report.get('summary') or report.get('headline')}")
+            log(tr("[崩溃分析] {0}").format(report.get("summary") or report.get("headline")))
             raise GameCrashError(report)
         return tr("已正常退出")
 
@@ -2033,7 +2034,7 @@ class BackendAPI(QObject):
         def on_code(code, uri, exp):
             if hasattr(worker, "login_code"):
                 worker.login_code.emit(code, uri)
-            log(f"请打开 {uri} 并输入代码 {code}（{exp // 60} 分钟内有效）")
+            log(tr("请打开 {0} 并输入代码 {1}（{2} 分钟内有效）").format(uri, code, exp // 60))
 
         def on_status(s):
             if hasattr(worker, "login_status"):
@@ -2043,7 +2044,7 @@ class BackendAPI(QObject):
 
         account = auth.login(on_code=on_code, on_status=on_status, open_browser=True)
         self.accounts.add_account(account)
-        log(f"登录成功：{account.get('name')}")
+        log(tr("登录成功：{0}").format(account.get("name")))
 
     def _authlib_login_impl(self, progress, log, api, username, password):
         from mclauncher import authlib as authlib_mod
@@ -2052,7 +2053,7 @@ class BackendAPI(QObject):
         progress(1, 2, tr("登录皮肤站"))
         account = authlib_mod.login(api, username, password)
         self.accounts.add_account(account)
-        log(f"皮肤站登录成功：{account.get('name')}")
+        log(tr("皮肤站登录成功：{0}").format(account.get("name")))
         return tr("已登录 {0}").format(account.get("name"))
 
     def _repair_impl(self, progress, log, instance, version):
@@ -2069,7 +2070,7 @@ class BackendAPI(QObject):
             dest = str(utils.ROOT / "exports" / f"{inst.name}.mrpack")
         dm = self._dm(progress, log)
         path = export_mrpack(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))
-        log(f"已导出: {path}")
+        log(tr("已导出: {0}").format(path))
         return path
 
     def _mod_update_impl(self, progress, log, instance):
@@ -2081,7 +2082,7 @@ class BackendAPI(QObject):
             log(tr("已装模组都是最新"))
             return tr("没有可更新的模组")
         for i, row in enumerate(rows):
-            log(f"更新 {row.get('name')} {row.get('current')} → {row.get('latest')}")
+            log(tr("更新") + f" {row.get('name')} {row.get('current')} → {row.get('latest')}")
             apply_update(inst, row, dm=dm)
             progress(i + 1, len(rows), row.get("name") or "")
         return tr("已更新 {0} 个模组").format(len(rows))
@@ -2104,7 +2105,7 @@ class BackendAPI(QObject):
         progress(1, 2, tr("登录统一通行证"))
         account = nide8_mod.login(server_id, username, password)
         self.accounts.add_account(account)
-        log(f"统一通行证登录成功：{account.get('name')}")
+        log(tr("统一通行证登录成功：{0}").format(account.get("name")))
         return tr("已登录 {0}").format(account.get("name"))
 
     def _install_world_impl(self, progress, log, name, instance, extra=None):
@@ -2113,10 +2114,10 @@ class BackendAPI(QObject):
         extra.setdefault("name", name)
         inst = self._instance(instance or extra.get("instance"))
         dm = self._dm(progress, log)
-        log(f"安装世界到 {inst.name}/saves")
+        log(tr("安装世界到 {0}").format(f"{inst.name}/saves"))
         result = worlds_mod.install_world(dm, extra, inst, on_progress=dm.on_progress)
         files = (result or {}).get("files") or []
-        log(f"完成: {', '.join(files) or name}")
+        log(tr("完成: {0}").format(", ".join(files) or name))
         return tr("已安装世界 {0}").format(", ".join(files) or name)
 
     def _export_bat_impl(self, progress, log, instance, version, dest):
@@ -2149,7 +2150,7 @@ class BackendAPI(QObject):
         if not dest:
             dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.bat")
         path = vops.export_launch_bat(Path(dest), cmd, gdir)
-        log(f"已写出 {path}")
+        log(tr("已写出 {0}").format(path))
         return path
 
     # ==================================================================
@@ -2257,7 +2258,7 @@ class BackendAPI(QObject):
         from mclauncher import java as java_mod
         dm = self._dm(progress, log)
         exe = java_mod.install_java_vendor(dm, major, vendor=vendor, on_progress=dm.on_progress)
-        log(f"Java 已安装: {exe}")
+        log(tr("Java 已安装: {0}").format(exe))
         return tr("Java {0} ({1}) 安装完成").format(major, vendor)
 
     # ==================================================================
@@ -2343,16 +2344,16 @@ class BackendAPI(QObject):
         src = om.official_dir()
         if not src:
             raise FileNotFoundError(tr("未找到官方启动器目录"))
-        log(f"正在从 {src} 迁移…")
+        log(tr("正在从 {0} 迁移…").format(src))
         progress(1, 3, tr("扫描版本"))
         versions = om.scan_versions(src)
         if not versions:
             log(tr("未发现版本"))
             return tr("无版本可导入")
-        log(f"发现 {len(versions)} 个版本")
-        progress(2, 3, f"导入 {len(versions)} 个版本")
+        log(tr("发现 {0} 个版本").format(len(versions)))
+        progress(2, 3, tr("导入 {0} 个版本").format(len(versions)))
         result = om.migrate(str(src), instance)
-        log(f"已导入 {len(result.get('versions', []))} 个版本")
+        log(tr("已导入 {0} 个版本").format(len(result.get("versions", []))))
         return tr("已导入 {0} 个版本").format(len(result.get("versions", [])))
 
     # ==================================================================
