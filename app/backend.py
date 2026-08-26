@@ -912,6 +912,37 @@ class BackendAPI(QObject):
         self._launch_task_id = task_id
         return task_id
 
+    def quick_start_game(self, instance: str, account: str, username: str,
+                         memory_mb: int, width: int, height: int,
+                         java: str = tr("自动选择")) -> str:
+        """HMCL「开始游戏」同款：一个版本都没装时，自动下载最新正式版并直接进入游戏。"""
+        task_id = self.start_task(
+            tr("开始游戏（自动下载最新正式版）"), self._quick_start_impl,
+            instance, account, username, memory_mb, width, height, java,
+        )
+        self._launch_task_id = task_id
+        return task_id
+
+    def _quick_start_impl(self, progress, log, instance, account, username,
+                          memory_mb, width, height, java=tr("自动选择")):
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        from mclauncher.manifest import get_version_manifest
+        data = get_version_manifest(dm)
+        latest = str(((data or {}).get("latest") or {}).get("release") or "")
+        if not latest:
+            raise LaunchError(tr("无法获取最新正式版版本号，请检查网络后重试"))
+        installed = set(self.get_installed_versions(inst.name, include_hidden=True) or [])
+        if latest in installed:
+            log(tr("最新正式版 {0} 已安装，直接启动").format(latest))
+        else:
+            log(tr("开始下载最新正式版 {0}").format(latest))
+            self._install_game_impl(progress, log, latest, tr("无"), "", inst.name, None)
+            self._emit_ui_changed()
+            log(tr("下载完成，正在启动 {0}").format(latest))
+        return self._launch_game_impl(progress, log, inst.name, latest, account,
+                                      username, memory_mb, width, height, java, None)
+
     def build_launch_command(self, instance: str, version: str, account: str,
                               username: str, memory_mb: int, width: int, height: int,
                               java: str = tr("自动选择")) -> str:

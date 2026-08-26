@@ -346,6 +346,9 @@ class LaunchPage(QWidget):
         if cur in ids:
             self.version_box.setCurrentText(cur)
         self.version_box.blockSignals(False)
+        # HMCL 新手流程：一个版本都没装时，启动按钮变「开始游戏」，
+        # 点击自动下载最新正式版并直接进入游戏。
+        self.launch_btn.setText(tr("开始游戏") if not ids else tr("启动游戏"))
         self._sync_banner()
 
     def _sync_banner(self):
@@ -363,6 +366,9 @@ class LaunchPage(QWidget):
         if pack_name:
             bits = [b for b in (pack_ver, f"Minecraft {pack_mc}" if pack_mc else "", f"实例 {instance}") if b]
             self.banner.set_info(pack_name, " · ".join(bits) or version)
+        elif self.version_box.count() == 0:
+            self.banner.set_info(tr("还没有安装版本"),
+                                 tr("点击「开始游戏」自动下载最新正式版并进入游戏"))
         else:
             self.banner.set_info(version, f"实例 {instance} · 点击「启动游戏」进入世界")
 
@@ -374,6 +380,37 @@ class LaunchPage(QWidget):
         version = self.version_box.currentText()
         memory_mb = self.memory_slider.value()
         java = self._selected_java()
+
+        if not version and self.version_box.count() == 0:
+            # HMCL「开始游戏」同款新手流程：自动下载最新正式版并直接进入游戏。
+            box = MessageBox(
+                tr("开始游戏"),
+                tr("这个实例还没有安装任何游戏版本。\n"
+                   "是否自动下载最新正式版 Minecraft，下载完成后直接进入游戏？"),
+                self,
+            )
+            box.yesButton.setText(tr("开始游戏"))
+            box.cancelButton.setText(tr("取消"))
+            if not box.exec():
+                return
+            self.log_edit.clear()
+            self.progress.setValue(0)
+            self.status_label.setText(tr("正在获取最新正式版…"))
+            self.launch_btn.setEnabled(False)
+            self.stop_btn.setEnabled(True)
+            self._crash_shown = False
+            self._quick_started = True
+            self._task_id = self.backend.quick_start_game(
+                instance=instance,
+                account=self.account_box.currentText(),
+                username=self.username_edit.text().strip(),
+                memory_mb=memory_mb,
+                width=self.width_spin.value(),
+                height=self.height_spin.value(),
+                java=java,
+            )
+            return
+
         try:
             pf = self.backend.preflight_launch(
                 instance=instance, version=version,
@@ -535,6 +572,10 @@ class LaunchPage(QWidget):
         self.launch_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_label.setText(message)
+        if getattr(self, "_quick_started", False):
+            # 「开始游戏」装完了新版本：刷新版本下拉与按钮文案。
+            self._quick_started = False
+            self._reload_versions()
         if success:
             self.progress.setValue(100)
             InfoBar.success(tr("游戏已结束"), message or tr("已正常退出"), parent=self,
