@@ -969,5 +969,7 @@
   "搜索失败": "Search failed",
   "正版 / 皮肤站账号使用账号自己的名字；用户名仅离线模式生效": "Microsoft / skin-server accounts use their own name; the username only applies in offline mode",
   "跳过（用默认设置）": "Skip (use defaults)",
-  "无法打开输出": "Cannot open output"
+  "无法打开输出": "Cannot open output",
+  "暂无任务 —— 在「下载」区安装原版游戏 / 整合包 / 模组 / 光影包 / 资源包 / Java，进度都会显示在这里": "No tasks yet — install a vanilla game, modpack, mod, shader pack, resource pack or Java from the Download section and progress shows up here",
+  "去下载": "Go to Download"
 }
