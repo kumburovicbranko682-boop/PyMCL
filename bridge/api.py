@@ -2274,7 +2274,7 @@ class BackendAPI:
                 self, self.get_settings(), history, text,
                 on_delta=on_delta, on_status=on_status,
                 confirm_fn=confirm_fn, ask_fn=ask_fn, cancelled=cancelled,
-                http_cancel=http,
+                http_cancel=http, chat_notes=list(chat.get("notes") or []),
             )
             flush_delta(True)
             if self._ai_cancel:
@@ -2286,6 +2286,7 @@ class BackendAPI:
             history.append({"role": "user", "content": text})
             history.append({"role": "assistant", "content": reply or ""})
             chat_store.upsert_messages(data, data.get("active_id") or "", history[-24:])
+            chat_store.append_notes(data, data.get("active_id") or "", notes)
             self._bus.emit("ai.done", {"text": reply or "", "store": data})
         except AgentCancelled:
             flush_delta(True)

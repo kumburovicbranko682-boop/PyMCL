@@ -11,6 +11,7 @@ from mclauncher import utils
 STORE_FILE = utils.ROOT / "ai_chats.json"
 MAX_CHATS = 40
 MAX_MESSAGES = 24
+MAX_NOTES = 20
 
 
 def _empty():
@@ -32,6 +33,8 @@ def _blank_chat(cid: str | None = None) -> dict:
         "title": "新对话",
         "updated": now,
         "messages": [],
+        # 每轮实际执行过的工具摘要：下一轮注入 system，模型不用靠气泡文字回忆
+        "notes": [],
     }
 
 
@@ -54,6 +57,7 @@ def load() -> dict:
                 for m in (raw.get("messages") or [])
                 if isinstance(m, dict) and m.get("role") in ("user", "assistant", "error")
             ][-MAX_MESSAGES:],
+            "notes": [str(n) for n in (raw.get("notes") or []) if str(n).strip()][-MAX_NOTES:],
         })
     if not chats:
         data = _empty()
@@ -110,6 +114,16 @@ def api_messages(messages: list) -> list:
             continue
         out.append({"role": role, "content": m.get("content") or ""})
     return out
+
+
+def append_notes(data: dict, cid: str, notes: list):
+    """把本轮工具执行摘要挂到对话上（滚动上限，随 save 落盘）。"""
+    chat = get_chat(data, cid)
+    if not chat or not notes:
+        return
+    merged = list(chat.get("notes") or []) + [str(n) for n in notes if str(n).strip()]
+    chat["notes"] = merged[-MAX_NOTES:]
+    save(data)
 
 
 def upsert_messages(data: dict, cid: str, messages: list, title: str | None = None):
