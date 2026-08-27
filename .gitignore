@@ -5,6 +5,7 @@ config.json
 !.env.example
 *.log
 ai_chats.json
+ai_memory.json
 
 # Runtime / generated
 node_modules/
