@@ -314,6 +314,31 @@ def _looks_like_ip(host: str) -> bool:
 
 # ---------------------------------------------------------------- 状态查询
 
+def favicon_base64(favicon) -> str:
+    """把 SLP 返回的 favicon 规范成 servers.dat icon 字段的纯 base64。
+
+    输入可以是 data URI（data:image/png;base64,xxx）或裸 base64；
+    校验能解码、是 PNG、且不超过 512KB，不合法一律返回空串。
+    游戏的多人列表就是从 servers.dat 的 icon 读图标的。
+    """
+    import base64
+    text = str(favicon or "").strip()
+    if not text:
+        return ""
+    if text.startswith("data:"):
+        _head, _sep, text = text.partition(",")
+        if not _sep:
+            return ""
+    text = "".join(text.split())
+    try:
+        raw = base64.b64decode(text, validate=True)
+    except Exception:
+        return ""
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n") or len(raw) > 512 * 1024:
+        return ""
+    return base64.b64encode(raw).decode("ascii")
+
+
 def ping(host: str, port: int = DEFAULT_PORT, timeout: float = 4.0) -> dict:
     """Server List Ping：返回 MOTD / 人数 / 版本 / 延迟。失败抛 PingError。"""
     started = time.monotonic()

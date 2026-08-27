@@ -2,9 +2,10 @@
 """服务器列表管理页。"""
 from __future__ import annotations
 
+import base64
 import re
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QHeaderView, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
@@ -61,6 +62,10 @@ class ServerPage(QWidget):
         ping_btn.setIcon(FIF.SYNC)
         ping_btn.clicked.connect(self._ping_all)
         tl.addWidget(ping_btn)
+        self.lan_btn = PushButton(tr("发现局域网"))
+        self.lan_btn.setIcon(getattr(FIF, "WIFI", None) or _GLOBE_ICON)
+        self.lan_btn.clicked.connect(self._on_discover_lan)
+        tl.addWidget(self.lan_btn)
         add_btn = PushButton(tr("添加服务器"))
         add_btn.setIcon(FIF.ADD)
         add_btn.clicked.connect(self._on_add)
@@ -148,7 +153,11 @@ class ServerPage(QWidget):
         self._body.setCurrentWidget(self.table)
         self.table.setRowCount(len(self._servers))
         for i, s in enumerate(self._servers):
-            self.table.setItem(i, 0, QTableWidgetItem(s.get("name", "?")))
+            name_item = QTableWidgetItem(s.get("name", "?"))
+            icon = self._icon_from_base64(s.get("icon", ""))
+            if icon is not None:
+                name_item.setIcon(icon)
+            self.table.setItem(i, 0, name_item)
             self.table.setItem(i, 1, QTableWidgetItem(s.get("ip", "")))
             self.table.setItem(i, 2, QTableWidgetItem(str(s.get("port", 25565))))
             self.table.setItem(i, 3, QTableWidgetItem("—"))
@@ -173,13 +182,31 @@ class ServerPage(QWidget):
 
     # ------------------------------------------------------------------
     # 在线状态（Server List Ping）：逐行异步查询，切实例/重载后旧结果作废
+    @staticmethod
+    def _icon_from_base64(text: str):
+        """servers.dat 的 icon（纯 base64 PNG）转 QIcon；坏数据返回 None。"""
+        text = (text or "").strip()
+        if not text:
+            return None
+        try:
+            raw = base64.b64decode("".join(text.split()))
+        except Exception:
+            return None
+        pm = QPixmap()
+        if not pm.loadFromData(raw) or pm.isNull():
+            return None
+        return QIcon(pm.scaled(
+            32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
     def _ping_all(self):
         self._ping_gen = getattr(self, "_ping_gen", 0) + 1
         gen = self._ping_gen
         call_async = getattr(self.backend, "call_async", None)
+        ping_listed = getattr(self.backend, "ping_listed_server", None)
         ping = getattr(self.backend, "ping_server", None)
-        if not callable(call_async) or not callable(ping):
+        if not callable(call_async) or not (callable(ping_listed) or callable(ping)):
             return
+        inst = self._instance
         for i, s in enumerate(self._servers):
             addr = (s.get("ip") or "").strip()
             if not addr:
@@ -188,6 +215,7 @@ class ServerPage(QWidget):
             if item is not None:
                 item.setText(tr("查询中…"))
             port = int(s.get("port") or 0)
+            idx = int(s.get("index", i))
 
             def _ok(result, row=i, g=gen):
                 self._on_ping_result(row, g, result)
@@ -195,7 +223,12 @@ class ServerPage(QWidget):
             def _err(err, row=i, g=gen):
                 self._on_ping_result(row, g, {"online": False, "error": str(err)})
 
-            call_async(lambda a=addr, p=port: ping(a, p), _ok, _err)
+            if callable(ping_listed):
+                # 走列表版查询：favicon 会顺手写回 servers.dat，
+                # 游戏的多人界面第一眼就能看到服务器图标。
+                call_async(lambda n=inst, k=idx: ping_listed(n, k), _ok, _err)
+            else:
+                call_async(lambda a=addr, p=port: ping(a, p), _ok, _err)
 
     def _on_ping_result(self, row: int, gen: int, result: dict):
         if gen != getattr(self, "_ping_gen", 0) or row >= self.table.rowCount():
@@ -213,10 +246,60 @@ class ServerPage(QWidget):
             item.setText(text)
             item.setForeground(QColor("#2E9B6B"))
             item.setToolTip(result.get("motd") or "")
+            icon = self._icon_from_base64(result.get("icon") or "")
+            name_item = self.table.item(row, 0)
+            if icon is not None and name_item is not None:
+                name_item.setIcon(icon)
         else:
             item.setText(tr("离线"))
             item.setForeground(QColor("#D95568"))
             item.setToolTip(result.get("error") or "")
+
+    # ------------------------------------------------------------------
+    # 局域网世界发现：监听官方组播广播（对局域网开放后游戏每 1.5s 广播一次）
+    def _on_discover_lan(self):
+        discover = getattr(self.backend, "discover_lan_worlds", None)
+        call_async = getattr(self.backend, "call_async", None)
+        if not callable(discover) or not callable(call_async):
+            return
+        self.lan_btn.setEnabled(False)
+        self.lan_btn.setText(tr("扫描中…"))
+        call_async(lambda: discover(3.0), self._on_lan_found, self._on_lan_error)
+
+    def _lan_btn_reset(self):
+        self.lan_btn.setEnabled(True)
+        self.lan_btn.setText(tr("发现局域网"))
+
+    def _on_lan_error(self, err):
+        self._lan_btn_reset()
+        InfoBar.error(tr("扫描失败"), str(err), duration=4000, parent=self)
+
+    def _on_lan_found(self, worlds):
+        self._lan_btn_reset()
+        worlds = worlds or []
+        if not worlds:
+            box = MessageBox(
+                tr("没有发现局域网世界"),
+                tr("请确认：房主已在游戏里「对局域网开放」、双方连接同一路由器、"
+                   "防火墙放行了 UDP 4445 端口。"),
+                self.window())
+            box.yesButton.setText(tr("知道了"))
+            box.cancelButton.hide()
+            box.exec()
+            return
+        lines = [f"{w.get('motd') or '?'}  —  {w.get('address') or ''}" for w in worlds]
+        box = MessageBox(
+            tr("发现 {n} 个局域网世界").format(n=len(worlds)),
+            "\n".join(lines) + "\n\n" + tr("点「复制地址」把地址发给朋友，或在启动页直连。"),
+            self.window())
+        box.yesButton.setText(tr("复制地址"))
+        box.cancelButton.setText(tr("关闭"))
+        if box.exec():
+            from PySide6.QtWidgets import QApplication
+            QApplication.clipboard().setText(
+                "\n".join(w.get("address") or "" for w in worlds))
+            InfoBar.success(tr("已复制"), tr("局域网地址已复制到剪贴板"),
+                            duration=3000, parent=self)
 
     def _on_join(self, index: int):
         s = self._servers[index]

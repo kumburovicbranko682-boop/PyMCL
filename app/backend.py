@@ -1815,6 +1815,41 @@ class BackendAPI(QObject):
         from mclauncher import server_ping
         return server_ping.ping_address(address, port=port)
 
+    def ping_listed_server(self, instance: str, index: int) -> dict:
+        """查询服务器列表里第 index 个服务器的状态，并把 favicon 写回 servers.dat。
+
+        游戏的多人列表从 servers.dat 的 icon 字段读图标——写回后
+        进游戏第一眼就能看到服务器图标（与游戏自身 ping 后的行为一致）。
+        同步阻塞最多几秒，UI 侧用 call_async 包装。
+        """
+        from mclauncher import server_ping
+        from mclauncher import servers as servers_mod
+        inst = self._instance(instance)
+        entry = servers_mod.get_server(inst, index)
+        if not entry:
+            return {"online": False, "error": tr("服务器不存在"), "index": index}
+        result = server_ping.ping_address(
+            entry.get("ip", ""), port=int(entry.get("port") or 0))
+        result["index"] = index
+        if result.get("online"):
+            icon = server_ping.favicon_base64(result.get("favicon"))
+            result["icon"] = icon
+            if icon and icon != (entry.get("icon") or ""):
+                try:
+                    servers_mod.update_server(inst, index, icon=icon)
+                except Exception as exc:
+                    utils.log.warning("写回服务器图标失败: %s", exc)
+        return result
+
+    def discover_lan_worlds(self, timeout: float = 3.0) -> list:
+        """监听官方组播广播，发现局域网里「对局域网开放」的世界。
+
+        返回 [{"motd", "ip", "port", "address"}]，阻塞约 timeout 秒，
+        UI 侧用 call_async 包装。
+        """
+        from mclauncher import lan as lan_mod
+        return lan_mod.discover_lan_worlds(timeout=timeout)
+
     def join_server(self, instance: str, ip: str, port: int = 25565) -> str:
         """一键启动并直连服务器（1.20+ 走 Quick Play，老版本回退 --server）。
 

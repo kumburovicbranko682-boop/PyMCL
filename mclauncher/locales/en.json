@@ -1706,5 +1706,15 @@
   "让 AI 扫描模组冲突": "Ask AI to scan mod conflicts",
   "问 AI": "Ask AI",
   "问 AI 这个模组": "Ask AI about this mod",
-  "，版本：{0}": ", version: {0}"
+  "，版本：{0}": ", version: {0}",
+  "发现局域网": "Discover LAN",
+  "没有发现局域网世界": "No LAN worlds found",
+  "请确认：房主已在游戏里「对局域网开放」、双方连接同一路由器、防火墙放行了 UDP 4445 端口。": "Please check: the host has used \"Open to LAN\" in game, both machines are on the same router, and the firewall allows UDP port 4445.",
+  "发现 {n} 个局域网世界": "Found {n} LAN world(s)",
+  "点「复制地址」把地址发给朋友，或在启动页直连。": "Click \"Copy address\" to share with friends, or join directly from the launch page.",
+  "复制地址": "Copy address",
+  "知道了": "Got it",
+  "局域网地址已复制到剪贴板": "LAN addresses copied to clipboard",
+  "服务器不存在": "Server does not exist",
+  "拖动旋转，滚轮缩放，双击复位": "Drag to rotate, scroll to zoom, double-click to reset"
 }
