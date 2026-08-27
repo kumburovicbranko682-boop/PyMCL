@@ -555,10 +555,24 @@ def gui_main():
     init_language()
     window = MainWindow()
 
-    def _ui_hook(kind, text, path):
-        from PySide6.QtCore import QTimer
+    # guard 的 ui_hook 可能在任意 Python 线程触发（threading.excepthook）。
+    # QTimer.singleShot 在没有 Qt 事件循环的普通线程里不会触发，弹窗会
+    # 静默丢失；跨线程 Signal 走 QueuedConnection 才是可靠的调度方式。
+    from PySide6.QtCore import QObject, Signal
+
+    class _GuardRelay(QObject):
+        fired = Signal(str, str, str)
+
+    relay = _GuardRelay(window)
+
+    def _show_error(kind, text, path):
         from app.pages.crash_dialog import show_launcher_error
-        QTimer.singleShot(0, lambda: show_launcher_error(window, kind, text, path))
+        show_launcher_error(window, kind, text, path)
+
+    relay.fired.connect(_show_error, Qt.ConnectionType.QueuedConnection)
+
+    def _ui_hook(kind, text, path):
+        relay.fired.emit(kind, text, str(path or ""))
 
     install_guard(ui_hook=_ui_hook)
     window.show()

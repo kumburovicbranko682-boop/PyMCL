@@ -18,6 +18,7 @@ dist/
 feedback_hub/data/
 device_id
 feedback_history.json
+feedback_pending.json
 
 # Android local/build
 android/.gradle/
