@@ -234,6 +234,11 @@ def _probe_cpu() -> dict:
     }
 
 
+def memory_info() -> dict:
+    """公开入口：系统内存信息 {total_mb, avail_mb, load_percent, …}。"""
+    return _memory_info()
+
+
 def _memory_info() -> dict:
     total = avail = 0
     load = 0

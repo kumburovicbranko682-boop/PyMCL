@@ -20,10 +20,8 @@ from . import manifest as manifest_mod
 MODRINTH_API = "https://api.modrinth.com/v2"
 CURSEFORGE_DOWNLOAD = "https://www.curseforge.com/api/v1/mods/{project_id}/files/{file_id}/download"
 
-
 class ModpackError(Exception):
     pass
-
 
 def _emit(on_progress, msg):
     msg = str(msg or "").strip()
@@ -32,7 +30,6 @@ def _emit(on_progress, msg):
     utils.log.info("%s", msg)
     if on_progress:
         on_progress(msg, 0, 1)
-
 
 def _pack_retry_worthwhile(err) -> bool:
     """加载器/安装器基础设施失败时，换整合包版本通常也没用。"""
@@ -49,7 +46,6 @@ def _pack_retry_worthwhile(err) -> bool:
     )
     return not any(s in msg for s in stop)
 
-
 def cf_manifest_loaders(mf):
     """CurseForge 标准字段在 minecraft.modLoaders；少数旧包才写在根上。"""
     mc = mf.get("minecraft") if isinstance(mf.get("minecraft"), dict) else {}
@@ -63,10 +59,8 @@ PACK_FILES_NAME = "modpack.files.json"
 # 更新时只自动清理这些目录下的旧包文件；config 等可能被用户改过，不动。
 _MANAGED_PREFIXES = ("mods/", "resourcepacks/", "shaderpacks/", "datapacks/")
 
-
 def pack_files_path(instance: Instance) -> Path:
     return Path(instance.path) / PACK_FILES_NAME
-
 
 def read_pack_files(instance: Instance) -> list[str]:
     """读取整合包写入实例的文件清单（相对实例根的 posix 路径）。"""
@@ -78,12 +72,10 @@ def read_pack_files(instance: Instance) -> list[str]:
         return []
     return [str(x) for x in files if x]
 
-
 def write_pack_files(instance: Instance, paths):
     """记录整合包本次安装写入的文件（下载文件 + overrides）。"""
     uniq = sorted({str(p).replace("\\", "/").lstrip("/") for p in paths if p})
     utils.write_json(pack_files_path(instance), {"files": uniq})
-
 
 def _tree_rel_paths(src: Path) -> list[str]:
     out = []
@@ -92,7 +84,6 @@ def _tree_rel_paths(src: Path) -> list[str]:
             out.append(p.relative_to(src).as_posix())
     return out
 
-
 def _merge_origin(pack_meta: dict, origin, keys):
     """把安装来源标识（slug / addon_id / file_id / version_id）并进 pack_meta。"""
     for k in keys:
@@ -100,7 +91,6 @@ def _merge_origin(pack_meta: dict, origin, keys):
         if v not in (None, ""):
             pack_meta[k] = v
     return pack_meta
-
 
 def cleanup_stale_pack_files(instance: Instance, old_files) -> list[str]:
     """删除旧整合包版本装入、且新版本清单里没有的文件。
@@ -139,7 +129,6 @@ _NO_ORIGIN_HINT = (
     "该整合包安装时未记录来源信息（本地文件安装，或由旧版本 PyMCL 安装）。"
     "从下载页重新安装一次同名整合包后即可在线检查更新。"
 )
-
 
 def check_modpack_update(dm: DownloadManager, instance: Instance, api_key=None) -> dict:
     """检查实例整合包是否有新版本（Modrinth / CurseForge / MCBBS fileApi）。
@@ -236,7 +225,6 @@ def check_modpack_update(dm: DownloadManager, instance: Instance, api_key=None) 
         "（本地 zip / MultiMC 实例包没有更新源）"
     )
 
-
 def update_modpack(dm: DownloadManager, instance: Instance, on_progress=None,
                    cancel=None, api_key=None, info=None) -> dict:
     """把实例整合包升级到最新版本。
@@ -281,7 +269,6 @@ def update_modpack(dm: DownloadManager, instance: Instance, on_progress=None,
 
 
 # ================================================================ CurseForge 搜索（BMCLAPI 镜像）
-
 def search_cf_modpacks(dm: DownloadManager, query, limit=25, api_key=None,
                        game_version=None, categories=None, sort="", offset=0):
     """搜索 CurseForge 整合包（走 BMCLAPI 国内镜像，无需 API key）。"""
@@ -311,7 +298,6 @@ def _cf_pack_is_server(file_obj) -> bool:
         return False
     return "server" in name
 
-
 def _pick_cf_pack_file(files, main_file_id=None):
     """从文件列表里挑整合包 zip：优先客户端、mainFileId，其次正式版。"""
     if not files:
@@ -334,7 +320,6 @@ def _pick_cf_pack_file(files, main_file_id=None):
                     continue
     releases = [f for f in pool if f.get("releaseType") == 1]
     return (releases or pool)[0]
-
 
 def resolve_cf_modpack_file(dm: DownloadManager, addon_id, api_key=None, cf_slug=None):
     """解析 CurseForge 整合包的最新文件（不下载）。
@@ -407,7 +392,6 @@ def resolve_cf_modpack_file(dm: DownloadManager, addon_id, api_key=None, cf_slug
         f"获取 CurseForge 整合包文件失败: {last_err or '无可用文件'}"
         f"（slug={cf_slug}, addon_id={addon_id}）"
     )
-
 
 def install_cf_modpack(dm: DownloadManager, addon_id, instance: Instance,
                        api_key=None, on_progress=None, cancel=None, cf_slug=None,
@@ -508,7 +492,6 @@ def _cf_latest_from_html(dm: DownloadManager, slug: str, class_path="modpacks"):
         fn = f"modpack-{fid}.zip"
     return fid, fn, None
 
-
 def _cf_name_from_html(dm: DownloadManager, slug: str, class_path="modpacks"):
     """从 CurseForge 项目页抓取整合包名称（HTML 兜底）。"""
     import re as _re
@@ -529,7 +512,6 @@ def _cf_name_from_html(dm: DownloadManager, slug: str, class_path="modpacks"):
 
 
 # ================================================================ 中文搜索（别名目录 + 多源）
-
 def search_modpacks_chinese(dm: DownloadManager, query, limit=25, api_key=None,
                             game_version=None, categories=None):
     """中文搜索整合包：优先命中内置中文别名目录，否则回退到多源搜索。"""
@@ -589,9 +571,21 @@ def search_modpacks_chinese(dm: DownloadManager, query, limit=25, api_key=None,
         except Exception as e:
             utils.log.warning("整合包别名命中后 CurseForge 查询失败: %s", e)
     if hits:
+        from . import mod_translations
+        mod_translations.annotate_pack_hits(hits)
         return hits[:limit]
 
-    # 2) 回退到多源搜索
+    # 2) mcmod 整合包数据集（HMCL 同款 1400+ 条）：中文名 → CF slug → 双源解析
+    try:
+        hits = _pack_dataset_hits(dm, q, api_key=api_key,
+                                  game_version=game_version, cat_keys=cat_keys)
+    except Exception as e:
+        utils.log.warning("mcmod 整合包数据集搜索失败: %s", e)
+        hits = []
+    if hits:
+        return hits[:limit]
+
+    # 3) 回退到多源搜索
     try:
         hits.extend(modrinth_search(dm, q, limit=limit,
                                     game_version=game_version, categories=cat_keys))
@@ -604,6 +598,89 @@ def search_modpacks_chinese(dm: DownloadManager, query, limit=25, api_key=None,
         utils.log.warning("中文搜索回退 CurseForge 整合包失败: %s", e)
     return hits[:limit]
 
+def _pack_dataset_hits(dm: DownloadManager, query, api_key=None,
+                       game_version=None, cat_keys=None,
+                       max_records=6, max_cf_lookups=3):
+    """用 mcmod 整合包数据集把中文名解析成真实项目（对标 PCL2 中文搜索）。
+
+    数据集按 CurseForge slug 收录；先用 Modrinth 批量接口一次解析全部
+    候选（不少大包双端同 slug），没命中的再按 slug 查 CurseForge
+    （最多 max_cf_lookups 次）。版本/分类筛选沿用别名命中的过滤器。
+    首次调用会下载并缓存数据文件（约 66KB）。
+    """
+    import json as _json
+    from . import mod_translations as mt
+    from .mods import cf_by_slug, _cf_norm, CF_CLASS_MODPACK
+
+    if not mt.load_packs(dm):
+        return []
+    # 同一 slug 多条目去重，保留排序更优的一条
+    recs, seen = [], set()
+    for r in mt.search_packs_chinese(query, limit=max_records * 2):
+        if r["slug"] and r["slug"] not in seen:
+            seen.add(r["slug"])
+            recs.append(r)
+        if len(recs) >= max_records:
+            break
+    if not recs:
+        return []
+
+    mr_found = {}
+    try:
+        arr = dm.fetch_json(f"{MODRINTH_API}/projects",
+                            params={"ids": _json.dumps([r["slug"] for r in recs])},
+                            timeout=(3, 8))
+        for p in arr or []:
+            if isinstance(p, dict) and p.get("slug"):
+                mr_found[p["slug"]] = p
+    except Exception as e:
+        utils.log.warning("Modrinth 批量解析整合包候选失败: %s", e)
+
+    hits = []
+    cf_used = 0
+    for rec in recs:
+        extra = {"matched_alias": True}
+        if mt.has_cjk(rec["name_cn"]):
+            extra["name_cn"] = rec["name_cn"]
+        url = mt.mcmod_pack_url(rec["mcmod_id"])
+        if url:
+            extra["mcmod_url"] = url
+        p = mr_found.get(rec["slug"])
+        if p is not None:
+            if not _match_filters_mr(p, game_version, cat_keys):
+                continue
+            gvs = p.get("game_versions") or []
+            desc = (p.get("description") or "")[:120]
+            if gvs:
+                desc = f"MC {', '.join(gvs[:3])} · {desc}"
+            hits.append({
+                "source": "modrinth",
+                "slug": p.get("slug"),
+                "title": p.get("title") or rec["name_en"] or rec["slug"],
+                "author": "?",
+                "downloads": p.get("downloads", 0),
+                "description": desc,
+                "icon_url": p.get("icon_url") or "",
+                **extra,
+            })
+            continue
+        if cf_used >= max_cf_lookups:
+            continue
+        cf_used += 1
+        try:
+            mod = cf_by_slug(dm, rec["slug"], class_id=CF_CLASS_MODPACK,
+                             api_key=api_key)
+        except Exception as e:
+            utils.log.warning("CurseForge 解析整合包候选 %s 失败: %s", rec["slug"], e)
+            continue
+        if not mod or not _match_filters_cf(mod, game_version, cat_keys):
+            continue
+        h = _cf_norm(mod)
+        h["description"] = h.pop("summary", "")
+        h.pop("cf_categories", None)
+        h.update(extra)
+        hits.append(h)
+    return hits
 
 def _match_filters_mr(project: dict, game_version=None, cat_keys=None) -> bool:
     """别名命中的 Modrinth 项目按版本/分类过滤（项目自带字段，可直接比对）。"""
@@ -618,7 +695,6 @@ def _match_filters_mr(project: dict, game_version=None, cat_keys=None) -> bool:
         if want and not (want & cats):
             return False
     return True
-
 
 def _match_filters_cf(mod: dict, game_version=None, cat_keys=None) -> bool:
     """别名命中的 CurseForge 项目按版本/分类过滤。"""
@@ -638,7 +714,6 @@ def _match_filters_cf(mod: dict, game_version=None, cat_keys=None) -> bool:
 
 
 # ================================================================ Modrinth
-
 def modrinth_search(dm: DownloadManager, query, limit=25,
                     game_version=None, categories=None, sort="", offset=0):
     """搜索 Modrinth 整合包（官方优先，MCIM 镜像兜底）。
@@ -705,7 +780,6 @@ def modrinth_project(dm: DownloadManager, slug):
             utils.log.warning("Modrinth 项目端点不可用 %s: %s", api_base, e)
     raise ModpackError(f"找不到 Modrinth 项目 {slug}: {last_err}")
 
-
 def modrinth_versions(dm: DownloadManager, slug):
     """列出某个整合包的版本。"""
     try:
@@ -735,7 +809,6 @@ def modrinth_versions(dm: DownloadManager, slug):
         })
     return result
 
-
 def _pick_mrpack_file(versions):
     """优先选正式版客户端 .mrpack，跳过 server pack 和纯 jar。"""
     ranked = []
@@ -757,7 +830,6 @@ def _pick_mrpack_file(versions):
     _rank, pool, v = ranked[0]
     return pool[0], v
 
-
 def _mrpack_candidates(versions, limit=5):
     """按正式版优先列出可尝试的 .mrpack（版本不兼容时自动换下一个）。"""
     items = []
@@ -775,7 +847,6 @@ def _mrpack_candidates(versions, limit=5):
         items.append((rank, f, v))
     items.sort(key=lambda x: x[0])
     return [(f, v) for _rank, f, v in items[:limit]]
-
 
 def _copy_embedded_versions(tmpdir, instance: Instance, plain=False):
     """把整合包自带的 versions JSON 先拷进实例，供自定义版本安装。
@@ -801,7 +872,6 @@ def _copy_embedded_versions(tmpdir, instance: Instance, plain=False):
             copied.append(ver_dir.name)
     return copied
 
-
 def _nested_marker_root(tmpdir: Path, marker: str, depth: int = 3):
     """zip 根目录没有 marker 时向下找包含它的目录（“压缩了文件夹本身”的包）。"""
     for level in range(1, depth + 1):
@@ -813,7 +883,6 @@ def _nested_marker_root(tmpdir: Path, marker: str, depth: int = 3):
 
 _PLAIN_MC_STRONG = frozenset(("mods", "config", "versions", "saves"))
 
-
 def _looks_like_mc_dir(root: Path) -> bool:
     """像不像一个 .minecraft 目录（按标志性子目录判断）。"""
     try:
@@ -824,7 +893,6 @@ def _looks_like_mc_dir(root: Path) -> bool:
         return False
     return bool(names & _PLAIN_MC_STRONG)
 
-
 def _plain_pack_root(tmpdir: Path):
     """识别“直接压缩的 .minecraft 目录”整合包（可能还套了一层文件夹）。"""
     if _looks_like_mc_dir(tmpdir):
@@ -834,7 +902,6 @@ def _plain_pack_root(tmpdir: Path):
             if cand.is_dir() and _looks_like_mc_dir(cand):
                 return cand
     return None
-
 
 def _plain_pack_version(root: Path):
     """从 versions/<名>/<名>.json 推断 MC 版本与加载器（没有则返回 None）。"""
@@ -870,7 +937,6 @@ def _plain_pack_version(root: Path):
             plain = {"mc": vid, "loader": None, "loader_version": ""}
     return plain
 
-
 def _resolve_pack_minecraft(dm, declared, on_progress=None):
     """整合包声明的 MC 版本 -> 官方可安装版本。"""
     if not declared:
@@ -886,7 +952,6 @@ def _resolve_pack_minecraft(dm, declared, on_progress=None):
             on_progress(f"声明版本 {declared} 不是 Minecraft 版本，改用 {alt}", 0, 1)
         return alt
     return None
-
 
 def install_mrpack_by_slug(dm: DownloadManager, slug, instance: Instance,
                            on_progress=None, cancel=None, force=False, java=None,
@@ -949,7 +1014,6 @@ def _fetch_mrpack(dm: DownloadManager, source):
     if not p.is_file():
         raise ModpackError(f"找不到整合包文件: {source}")
     return p
-
 
 def install_mrpack(dm: DownloadManager, source, instance: Instance,
                    on_progress=None, cancel=None, force=False, java=None,
@@ -1131,7 +1195,6 @@ def _mmc_root(tmpdir: Path):
         return tmpdir
     return _nested_marker_root(tmpdir, "mmc-pack.json")
 
-
 def parse_mmc_components(pack: dict) -> dict:
     """解析 mmc-pack.json 的 components：MC 版本、加载器、无法自动处理的组件。"""
     mc = ""
@@ -1156,7 +1219,6 @@ def parse_mmc_components(pack: dict) -> dict:
     return {"mc": mc, "loader": loader, "loader_version": loader_version,
             "skipped": skipped}
 
-
 def _mmc_instance_name(root: Path) -> str:
     """instance.cfg 里的实例名（Prism 新版带 [General] 节，老版 MultiMC 没有）。"""
     cfg = root / "instance.cfg"
@@ -1171,7 +1233,6 @@ def _mmc_instance_name(root: Path) -> str:
         if line.startswith("name="):
             return line[5:].strip()
     return ""
-
 
 def _install_mmc_pack(dm: DownloadManager, root: Path, instance: Instance, pack_path,
                       on_progress=None, cancel=None, force=False, java=None):
@@ -1253,13 +1314,11 @@ _MCBBS_LOADER_ADDONS = {
     "quilt-loader": "quilt-loader",
 }
 
-
 def _mcbbs_root(tmpdir: Path):
     """找 MCBBS 整合包根（mcbbs.packmeta 所在目录，可能套一层文件夹）。"""
     if (tmpdir / MCBBS_MANIFEST).is_file():
         return tmpdir
     return _nested_marker_root(tmpdir, MCBBS_MANIFEST)
-
 
 def parse_mcbbs_addons(mf: dict) -> dict:
     """解析 mcbbs.packmeta 的 addons：MC 版本、主加载器、附加组件。"""
@@ -1282,7 +1341,6 @@ def parse_mcbbs_addons(mf: dict) -> dict:
     return {"mc": mc, "loader": loader, "loader_version": loader_version,
             "extras": extras}
 
-
 def split_mcbbs_files(mf: dict) -> tuple[list, list]:
     """files 按类型分流：CurseForge 文件（要下载）与 addFile（随 overrides 落地）。
 
@@ -1299,7 +1357,6 @@ def split_mcbbs_files(mf: dict) -> tuple[list, list]:
         elif typ == "addfile":
             add.append(f)
     return curse, add
-
 
 def _install_mcbbs_extra(installer: Installer, instance: Instance, aid, ver,
                          mc_version, loader, on_progress=None, force=False):
@@ -1333,7 +1390,6 @@ def _install_mcbbs_extra(installer: Installer, instance: Instance, aid, ver,
     except (InstallError, ModpackError, DownloadError) as e:
         _emit(on_progress, f"组件 {aid} 安装失败（{e}），已跳过；不影响其余内容")
     return None
-
 
 def _apply_mcbbs_launch_info(instance: Instance, version_id, info, on_progress=None):
     """launchInfo（最低内存 / JVM 参数 / 游戏参数）落进版本设置，启动链直接生效。"""
@@ -1369,7 +1425,6 @@ def _apply_mcbbs_launch_info(instance: Instance, version_id, info, on_progress=N
         parts.append("游戏参数")
     _emit(on_progress, f"已按整合包 launchInfo 预设版本设置：{'、'.join(parts)}")
 
-
 def fetch_mcbbs_manifest(dm: DownloadManager, file_api: str) -> dict:
     """拉取 fileApi 更新源上的 mcbbs.packmeta。"""
     url = f"{file_api.rstrip('/')}/{MCBBS_MANIFEST}"
@@ -1380,7 +1435,6 @@ def fetch_mcbbs_manifest(dm: DownloadManager, file_api: str) -> dict:
     if not isinstance(data, dict):
         raise ModpackError("更新源返回的 mcbbs.packmeta 不是有效的 JSON 对象")
     return data
-
 
 def update_mcbbs_pack(dm: DownloadManager, instance: Instance,
                       on_progress=None, cancel=None, java=None) -> dict:
@@ -1455,7 +1509,6 @@ def update_mcbbs_pack(dm: DownloadManager, instance: Instance,
     write_pack_files(instance, pack_paths)
     _emit(on_progress, f"整合包 {name} 同步完成 -> 实例 {instance.name}")
     return pack_meta
-
 
 def _install_mcbbs_pack(dm: DownloadManager, root: Path, instance: Instance, pack_path,
                         on_progress=None, cancel=None, force=False, java=None):
@@ -1553,13 +1606,11 @@ def _install_mcbbs_pack(dm: DownloadManager, root: Path, instance: Instance, pac
 SERVER_MANIFEST = "server-manifest.json"
 SERVER_FILES_NAME = "modpack.server-files.json"
 
-
 def _server_root(tmpdir: Path):
     """找服务器整合包根（server-manifest.json 所在目录，可能套一层文件夹）。"""
     if (tmpdir / SERVER_MANIFEST).is_file():
         return tmpdir
     return _nested_marker_root(tmpdir, SERVER_MANIFEST)
-
 
 def parse_server_files(mf: dict) -> list[dict]:
     """server-manifest.json 的 files -> [{path, hash, url}]。
@@ -1582,10 +1633,8 @@ def parse_server_files(mf: dict) -> list[dict]:
         })
     return out
 
-
 def server_files_path(instance: Instance) -> Path:
     return Path(instance.path) / SERVER_FILES_NAME
-
 
 def read_server_hashes(instance: Instance) -> dict:
     """读取上次安装/更新记录的 {相对路径: sha1}，供增量更新逐文件比对。"""
@@ -1595,11 +1644,9 @@ def read_server_hashes(instance: Instance) -> dict:
         return {}
     return {str(k): str(v or "").lower() for k, v in files.items()}
 
-
 def write_server_hashes(instance: Instance, files: list[dict]):
     utils.write_json(server_files_path(instance),
                      {"files": {f["path"]: f.get("hash") or "" for f in files}})
-
 
 def fetch_server_manifest(dm: DownloadManager, file_api: str) -> dict:
     """拉取更新源上的 server-manifest.json（地址可以是基址或清单直链）。"""
@@ -1616,7 +1663,6 @@ def fetch_server_manifest(dm: DownloadManager, file_api: str) -> dict:
         raise ModpackError("更新源返回的 server-manifest.json 不是有效的 JSON 对象")
     return data
 
-
 def _derive_file_api(mf: dict, source_url: str = "") -> str:
     """文件下载基址：优先清单声明的 fileApi，否则按清单地址推导。"""
     file_api = str((mf or {}).get("fileApi") or "").strip().rstrip("/")
@@ -1627,7 +1673,6 @@ def _derive_file_api(mf: dict, source_url: str = "") -> str:
         base = base[: -len(SERVER_MANIFEST)]
     return base.rstrip("/")
 
-
 def _server_file_urls(file_api: str, f: dict) -> list:
     from urllib.parse import quote
     urls = []
@@ -1636,7 +1681,6 @@ def _server_file_urls(file_api: str, f: dict) -> list:
     if file_api:
         urls.append(f"{file_api}/overrides/{quote(f['path'])}")
     return urls
-
 
 def _install_server_addons(dm: DownloadManager, instance: Instance, mf: dict,
                            on_progress=None, cancel=None, force=False, java=None):
@@ -1667,7 +1711,6 @@ def _install_server_addons(dm: DownloadManager, instance: Instance, mf: dict,
         loader_vid = extra_vid or loader_vid
     return (loader_vid or mc_version), mc_version, loader, loader_version
 
-
 def _server_pack_meta(mf: dict, instance: Instance, mc_version, loader,
                       loader_version, file_api) -> dict:
     meta = {
@@ -1683,7 +1726,6 @@ def _server_pack_meta(mf: dict, instance: Instance, mc_version, loader,
     if file_api:
         meta["file_api"] = file_api
     return meta
-
 
 def _install_server_pack(dm: DownloadManager, root: Path, instance: Instance, pack_path,
                          on_progress=None, cancel=None, force=False, java=None):
@@ -1736,7 +1778,6 @@ def _install_server_pack(dm: DownloadManager, root: Path, instance: Instance, pa
     _emit(on_progress, f"整合包 {name} 安装完成 -> 实例 {instance.name}")
     return pack_meta
 
-
 def install_server_pack_url(dm: DownloadManager, url, instance: Instance,
                             on_progress=None, cancel=None, force=False, java=None):
     """从更新源地址安装服务器整合包（HMCL ServerModpackRemoteInstallTask 同款）。
@@ -1747,7 +1788,6 @@ def install_server_pack_url(dm: DownloadManager, url, instance: Instance,
     return install_server_pack_manifest(dm, mf, instance, source_url=str(url),
                                         on_progress=on_progress, cancel=cancel,
                                         force=force, java=java)
-
 
 def install_server_pack_manifest(dm: DownloadManager, mf: dict, instance: Instance,
                                  source_url="", on_progress=None, cancel=None,
@@ -1787,7 +1827,6 @@ def install_server_pack_manifest(dm: DownloadManager, mf: dict, instance: Instan
     write_server_hashes(instance, files)
     _emit(on_progress, f"整合包 {name} 安装完成 -> 实例 {instance.name}")
     return pack_meta
-
 
 def update_server_pack(dm: DownloadManager, instance: Instance,
                        on_progress=None, cancel=None, java=None) -> dict:
@@ -1876,7 +1915,6 @@ def update_server_pack(dm: DownloadManager, instance: Instance,
 
 
 # ================================================================ CurseForge
-
 def download_pack_mods_tolerant(dm: DownloadManager, tasks, raw_files, meta,
                                 on_progress=None) -> list[dict]:
     """下载整合包 Mod，容忍个别失败。
@@ -1926,7 +1964,6 @@ def download_pack_mods_tolerant(dm: DownloadManager, tasks, raw_files, meta,
         _emit(on_progress, "整合包 Mod 下载完成")
     return manual_mods
 
-
 def _download_cf_pack_files(dm: DownloadManager, instance: Instance, raw_files,
                             on_progress=None):
     """按 projectID/fileID 批量下载整合包 Mod 到 mods/。
@@ -1965,7 +2002,6 @@ def _download_cf_pack_files(dm: DownloadManager, instance: Instance, raw_files,
     manual_mods = download_pack_mods_tolerant(
         dm, tasks, raw_files, meta, on_progress=on_progress)
     return manual_mods, pack_paths
-
 
 def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                    on_progress=None, cancel=None, force=False, java=None,
@@ -2113,6 +2149,70 @@ def install_cf_zip(dm: DownloadManager, source, instance: Instance,
                 pass
 
 
+def _handle_mod_download_failure(dm, err, file_infos, instance, cancel, on_progress) -> list:
+    """整合包 Mod 批量下载部分失败时的处理，返回手动下载清单。
+
+    用户取消或全军覆没（多半断网/镜像全挂）原样抛出——装出一个
+    空 mods 的实例比失败更坑人；部分失败（多为作者禁止第三方分发的
+    403）则生成清单继续安装，对标 PCL2 / HMCL。
+    """
+    if (cancel and cancel()) or "用户取消" in str(err):
+        raise err
+    missing = [fi for fi in file_infos if not fi["dest"].is_file()]
+    if not missing or len(missing) == len(file_infos):
+        raise err
+    manual = _cf_manual_downloads(dm, missing)
+    write_manual_download_list(instance, manual)
+    _emit(on_progress,
+          f"{len(missing)}/{len(file_infos)} 个 Mod 下载失败"
+          "（多为作者禁止第三方分发），已生成手动下载清单，继续安装其余文件")
+    return manual
+
+def _cf_manual_downloads(dm: DownloadManager, missing) -> list:
+    """给下载失败（多为作者禁止第三方分发、CDN 403）的 Mod 生成手动下载清单。
+
+    对标 PCL2 / HMCL：列出 CurseForge 文件页链接，让玩家浏览器下载后
+    放进实例 mods 文件夹，而不是让整包安装原地失败。
+    """
+    from .mods import cf_mods_by_ids
+    meta = {}
+    try:
+        meta = cf_mods_by_ids(dm, [m.get("pid") for m in missing])
+    except Exception as e:
+        utils.log.warning("查询被禁 Mod 项目信息失败: %s", e)
+    out = []
+    for m in missing:
+        try:
+            info = meta.get(int(m.get("pid"))) or {}
+        except (TypeError, ValueError):
+            info = {}
+        site = str(((info.get("links") or {}).get("websiteUrl")) or "").rstrip("/")
+        if not site:
+            site = f"https://www.curseforge.com/projects/{m.get('pid')}"
+        out.append({
+            "filename": m.get("name") or "",
+            "project": info.get("name") or str(m.get("pid")),
+            "url": f"{site}/files/{m.get('fid')}",
+        })
+    return out
+
+def write_manual_download_list(instance: Instance, manual) -> Path:
+    """把手动下载清单写进实例 mods 目录（.txt 不会被游戏加载）。"""
+    dest = instance.path / "mods" / "需要手动下载的Mod.txt"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "以下 Mod 的作者禁止第三方启动器下载（CurseForge 403）。",
+        "请在浏览器打开链接下载 jar 文件，放进本文件夹后删除本清单。",
+        "",
+    ]
+    for m in manual:
+        lines.append(f"{m.get('project') or m.get('filename')}")
+        lines.append(f"  文件: {m.get('filename') or '?'}")
+        lines.append(f"  链接: {m.get('url')}")
+        lines.append("")
+    dest.write_text("\n".join(lines), encoding="utf-8")
+    return dest
+
 def _copy_tree_over(src: Path, dest: Path):
     for item in src.rglob("*"):
         rel = item.relative_to(src)
@@ -2122,7 +2222,6 @@ def _copy_tree_over(src: Path, dest: Path):
         elif item.is_file():
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(item, target)
-
 
 def _copy_mc_tree(root: Path, dest: Path):
     """整个 .minecraft 目录拷进实例。versions/ 由 _copy_embedded_versions
@@ -2139,7 +2238,6 @@ def _copy_mc_tree(root: Path, dest: Path):
                 shutil.copy2(item, target)
         except OSError:
             continue
-
 
 def _install_plain_zip(dm: DownloadManager, tmpdir: Path, instance: Instance, pack_path,
                        on_progress=None, cancel=None, force=False, java=None):
@@ -2212,6 +2310,92 @@ def _install_plain_zip(dm: DownloadManager, tmpdir: Path, instance: Instance, pa
 
 # ================================================================ 加载器
 
+
+def parse_mmc_pack(data: dict) -> dict:
+    """解析 mmc-pack.json 的 components → {mc, loader, loader_version}。"""
+    mc = ""
+    loader = None
+    loader_version = ""
+    for comp in (data or {}).get("components") or []:
+        uid = str(comp.get("uid") or "")
+        ver = str(comp.get("version") or "")
+        if uid == "net.minecraft":
+            mc = ver
+        elif uid in _MMC_LOADER_UIDS:
+            loader = _MMC_LOADER_UIDS[uid]
+            loader_version = ver
+    return {"mc": mc, "loader": loader, "loader_version": loader_version}
+
+def parse_instance_cfg(text: str) -> dict:
+    """instance.cfg 是简单 key=value；Prism 新版带 [General] 段头。"""
+    out = {}
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", ";", "[")):
+            continue
+        if "=" in line:
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip()
+    return out
+
+def _install_multimc_zip(dm: DownloadManager, tmpdir: Path, instance: Instance,
+                         pack_path, mmc_file: Path, on_progress=None,
+                         cancel=None, force=False, java=None):
+    """导入 MultiMC / Prism / PolyMC 导出的实例 zip。"""
+    root = mmc_file.parent
+    ver = parse_mmc_pack(utils.read_json(mmc_file, None) or {})
+    cfg = {}
+    cfg_file = root / "instance.cfg"
+    if cfg_file.is_file():
+        cfg = parse_instance_cfg(
+            cfg_file.read_text(encoding="utf-8", errors="replace"))
+    name = cfg.get("name") or Path(pack_path).stem
+    mc_version = ver["mc"]
+    if not mc_version:
+        raise ModpackError("mmc-pack.json 里没有 net.minecraft 组件，无法确定游戏版本")
+    tail = f" + {ver['loader']} {ver['loader_version']}" if ver["loader"] else ""
+    _emit(on_progress, f"识别为 MultiMC/Prism 实例包「{name}」: MC {mc_version}{tail}")
+
+    if instance.path.is_dir():
+        instance.ensure_standard_dirs()
+    else:
+        instance.create()
+    _emit(on_progress, f"安装到实例 {instance.name} ({instance.path})")
+    installer = Installer(instance, dm, on_progress=on_progress or dm.on_progress,
+                          cancel=cancel)
+    resolved = _resolve_pack_minecraft(dm, mc_version, on_progress) or mc_version
+    _emit(on_progress, f"安装 Minecraft {resolved}")
+    installer.install_version(resolved, force=force, java=java)
+    loader_vid = None
+    if ver["loader"]:
+        _emit(on_progress, f"安装加载器 {ver['loader']} {ver['loader_version']} (Minecraft {resolved})")
+        loader_vid = install_loader(installer, ver["loader"],
+                                    ver["loader_version"], resolved, force=force)
+
+    gdir = next((root / d for d in (".minecraft", "minecraft")
+                 if (root / d).is_dir()), None)
+    if gdir:
+        _emit(on_progress, "复制实例数据（mods / config / saves …）")
+        _copy_tree_over(gdir, instance.path)
+    else:
+        _emit(on_progress, "包里没有 .minecraft 目录，只安装了游戏版本")
+
+    pack_meta = {
+        "name": name,
+        "version": "?",
+        "mc_version": mc_version,
+        "loader": (f"{ver['loader']}-{ver['loader_version']}"
+                   if ver["loader"] else "vanilla"),
+        "source": "multimc",
+        "instance": instance.name,
+    }
+    instance.set_meta("modpack", pack_meta)
+    instance.set_meta("mc_version", loader_vid or mc_version)
+    _emit(on_progress, f"MultiMC 实例「{name}」导入完成 -> 实例 {instance.name}")
+    return pack_meta
+
+
+# ================================================================ 加载器
 def install_loader(installer: Installer, loader: str, version: str, mc_version: str,
                    force=False):
     """按名称安装加载器。loader: fabric-loader / quilt-loader / forge / neoforge"""

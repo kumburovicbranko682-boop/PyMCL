@@ -360,6 +360,50 @@ def watch_window_title(proc, title: str, timeout: float = 90.0):
     threading.Thread(target=loop, daemon=True).start()
 
 
+def _supports_quick_play(resolved) -> bool:
+    """版本 JSON 是否声明 Quick Play（23w14a/1.20+ 起 --server/--port 被移除）。"""
+    args = ((resolved.get("arguments") or {}).get("game")) or []
+    for a in args:
+        if isinstance(a, str):
+            if "quickPlayMultiplayer" in a:
+                return True
+        elif isinstance(a, dict):
+            vals = a.get("value")
+            vals = [vals] if isinstance(vals, str) else (vals or [])
+            if any("quickPlayMultiplayer" in str(v) for v in vals):
+                return True
+    return False
+
+
+def adapt_server_args(extras, resolved) -> list:
+    """按版本能力换算进服参数（对标 PCL2「直接进入服务器」/ HMCL 服务器地址）。
+
+    启动页直连、版本设置、陶瓦联机统一传 --server host --port port；
+    23w14a (1.20) 起原版只认 --quickPlayMultiplayer host:port，
+    这里按 resolved JSON 是否声明 quickPlayMultiplayer 决定实际参数，
+    否则 1.20+ 直连会被游戏静默忽略。
+    """
+    out = [str(a) for a in (extras or [])]
+    if "--server" not in out:
+        return out
+    i = out.index("--server")
+    host = out[i + 1] if i + 1 < len(out) else ""
+    del out[i:i + 2]
+    port = "25565"
+    if "--port" in out:
+        j = out.index("--port")
+        if j + 1 < len(out):
+            port = str(out[j + 1]).strip() or "25565"
+        del out[j:j + 2]
+    host = host.strip()
+    if not host:
+        return out
+    if _supports_quick_play(resolved):
+        addr = host if ":" in host else f"{host}:{port}"
+        return out + ["--quickPlayMultiplayer", addr]
+    return out + ["--server", host, "--port", port]
+
+
 def build_launch_command(instance, version_id, account_props, java_exe,
                          memory_mb=4096, width=None, height=None,
                          extra_game_args=None, extra_jvm_args=None,
@@ -623,6 +667,10 @@ class GameProcess:
         self.total_lines = 0
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
+
+    @property
+    def pid(self):
+        return self.proc.pid
 
     def last_lines(self):
         return list(self.lines)

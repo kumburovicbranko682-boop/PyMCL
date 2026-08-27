@@ -1266,9 +1266,21 @@ class MainWindow(FluentWindowBase):
         if success:
             InfoBar.success(title, message, parent=self,
                             position=InfoBarPosition.TOP_RIGHT, duration=3000)
+            self._maybe_show_manual_downloads()
         elif message != tr("已取消"):
             InfoBar.error(title, message, parent=self,
                           position=InfoBarPosition.TOP_RIGHT, duration=5000)
+
+    def _maybe_show_manual_downloads(self):
+        """整合包里有作者禁止第三方下载的 Mod 时，弹清单引导手动下载（对标 PCL2）。"""
+        try:
+            data = self.backend.pop_manual_downloads()
+        except Exception:
+            return
+        if not data or not data.get("items"):
+            return
+        from .pages.manual_download_dialog import ManualDownloadDialog
+        ManualDownloadDialog(self.backend, data, self).exec()
 
     def _refresh_pages(self, force: bool = False):
         if force:

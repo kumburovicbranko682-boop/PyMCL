@@ -457,6 +457,15 @@ class AccountManager:
         self.save()
         return account
 
+    def update_account(self, name, fields: dict):
+        """原地更新账号字段（不改变激活账号），返回更新后的账号。"""
+        for acc in self.accounts:
+            if acc.get("name") == name:
+                acc.update(fields or {})
+                self.save()
+                return acc
+        return None
+
     def remove_account(self, name):
         self._remove_stored_secrets(name)
         self.accounts = [a for a in self.accounts if a.get("name") != name]

@@ -33,6 +33,8 @@ DEFAULTS = {
     "pre_launch": "",
     "post_launch": "",
     "pre_launch_wait": True,
+    "wrapper": "",
+    "env_vars": "",
     "server": "",
     "port": "",
     "process_priority": "normal",

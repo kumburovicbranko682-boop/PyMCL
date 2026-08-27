@@ -63,10 +63,14 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
     seen = set()
     seen_projects = set()
     downloaded = []
+    warnings = []
 
     def _download(v, depth=0):
         vid = v.get("id")
         if not vid or vid in seen or depth > 3:
+            return
+        pid = v.get("project_id")
+        if pid and pid in seen_projects:
             return
         seen.add(vid)
         if v.get("project_id"):
@@ -110,6 +114,7 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         "slug": slug,
         "version": version.get("version_number"),
         "files": [p.name for p in downloaded],
+        "warnings": warnings,
     }
 
 
@@ -229,6 +234,7 @@ def list_versions(dm: DownloadManager, slug, game_version=None, loaders=None):
             })
         result.append({
             "id": v.get("id"),
+            "project_id": v.get("project_id"),
             "name": v.get("name"),
             "version_number": v.get("version_number"),
             "version_type": v.get("version_type") or "release",
@@ -327,14 +333,27 @@ def _dedupe_hits(hits) -> list:
     return out
 
 
-def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
-    """中文搜索模组：优先命中内置中文别名目录，其次按别名到多源搜索。
+def _filter_sources(hits, sources):
+    """sources 为 None 表示不限；否则按来源过滤（用户在下载页选了单一源）。"""
+    if not sources:
+        return list(hits)
+    allow = {str(s).lower() for s in sources}
+    return [h for h in hits if str(h.get("source") or "").lower() in allow]
+
+
+def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None,
+                        sources=None):
+    """中文搜索模组：内置别名目录 → mcmod 数据集（HMCL 同款）→ 全文回退。
+
+    sources 传 ("modrinth",) / ("curseforge",) 时只保留该来源的结果，
+    某一步过滤后为空则继续走下一步，不会提前返回空列表。
 
     返回结果统一为:
     {
         "source": "modrinth" | "curseforge",
         "slug" / "id",
-        "title", "author", "downloads", "description"
+        "title", "author", "downloads", "description",
+        可选 "name_cn" / "mcmod_url"
     }
     """
     from . import catalog
@@ -345,7 +364,15 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
     hits = []
 
     def _finish(rows):
+        rows = _filter_sources(rows, sources)
         rows = _dedupe_hits(rows)[:limit]
+        if not rows:
+            return []
+        try:
+            from . import mod_translations
+            mod_translations.annotate_hits(rows)
+        except Exception:
+            pass
         if _has_cjk(q):
             _mcim_translate_hits(dm, rows)
         return rows
@@ -367,8 +394,9 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
             hits.extend(_alias_to_cf_hits(dm, cf_id, title, api_key))
         except Exception as e:
             utils.log.warning("别名命中后 CurseForge 查询失败 %s: %s", cf_id, e)
-    if hits:
-        return _finish(hits)
+    got = _finish(hits)
+    if got:
+        return got
 
     # 2) 模糊匹配：跳过已经 404 的 slug，最多 3 条
     fuzzy = catalog.fuzzy_match_mod(q)
@@ -389,27 +417,119 @@ def search_mods_chinese(dm: DownloadManager, query, limit=30, api_key=None):
                 utils.log.warning("模糊匹配 CurseForge 查询失败 %s: %s", cf_id, e)
         if len(hits) >= 4:
             break
-    if hits:
-        return _finish(hits)
+    got = _finish(hits)
+    if got:
+        return got
 
-    # 3) 别名未命中：回退到 Modrinth 全文 + CurseForge（中文查询提英文词再搜）
-    mr_hits = []
+    # 3) mcmod 数据集（HMCL 同款 2.8 万条）：中文名 → CF slug → 双源解析
     try:
-        mr_hits = search_mods(dm, fallback_q, limit=limit)
-        hits.extend(mr_hits)
+        hits = _dataset_hits(dm, q, api_key=api_key, sources=sources)
     except Exception as e:
-        utils.log.warning("中文搜索回退 Modrinth 失败: %s", e)
+        utils.log.warning("mcmod 数据集搜索失败: %s", e)
+        hits = []
+    got = _finish(hits)
+    if got:
+        return got
+
+    # 4) 别名未命中：回退到 Modrinth 全文 + CurseForge（中文查询提英文词再搜）
+    hits = []
+    mr_hits = []
+    srcset = {str(s).lower() for s in (sources or [])}
+    if not sources or "modrinth" in srcset:
+        try:
+            mr_hits = search_mods(dm, fallback_q, limit=limit)
+            hits.extend(mr_hits)
+        except Exception as e:
+            utils.log.warning("中文搜索回退 Modrinth 失败: %s", e)
     cf_query = fallback_q
-    if _has_cjk(cf_query):
+    if _has_cjk(cf_query) and mr_hits:
         terms = _english_terms_from_hits(mr_hits)
-        cf_query = " ".join(terms) if terms else None
-    if cf_query:
+        if terms:
+            cf_query = " ".join(terms)
+    if cf_query and (not sources or "curseforge" in srcset):
         try:
             hits.extend(search_curseforge(dm, cf_query, limit=limit, api_key=api_key,
                                           class_id=CF_CLASS_MOD))
         except Exception as e:
             utils.log.warning("中文搜索回退 CurseForge 失败: %s", e)
     return _finish(hits)
+
+
+def _dataset_hits(dm: DownloadManager, query, api_key=None, sources=None,
+                  max_records=6, max_cf_lookups=3):
+    """用 mcmod 数据集把中文名解析成真实项目（对标 PCL2 中文搜索）。
+
+    数据集按 CurseForge slug 收录，但双端 slug 高度重合：
+    先用 Modrinth 批量接口一次解析全部候选（无 key、免翻页），
+    没命中的再按 slug 精确查 CurseForge（最多 max_cf_lookups 次）。
+    首次调用会下载并缓存数据文件（约 1.7MB，之后走磁盘缓存）。
+    """
+    from . import mod_translations as mt
+
+    if not mt.load(dm):
+        return []
+    recs, seen = [], set()
+    for r in mt.search_chinese(query, limit=max_records * 2):
+        if r["slug"] and r["slug"] not in seen:
+            seen.add(r["slug"])
+            recs.append(r)
+        if len(recs) >= max_records:
+            break
+    if not recs:
+        return []
+    want_mr = not sources or "modrinth" in sources
+    want_cf = not sources or "curseforge" in sources
+
+    mr_found = {}
+    if want_mr:
+        slugs = [r["slug"] for r in recs]
+        try:
+            arr = dm.fetch_json(f"{MODRINTH_API}/projects",
+                                params={"ids": json.dumps(slugs)},
+                                timeout=API_TIMEOUT)
+            for proj in arr or []:
+                if isinstance(proj, dict) and proj.get("slug"):
+                    mr_found[proj["slug"]] = proj
+        except Exception as e:
+            utils.log.warning("Modrinth 批量解析译名候选失败: %s", e)
+
+    hits = []
+    cf_used = 0
+    for rec in recs:
+        extra = {"matched_alias": True}
+        if mt.has_cjk(rec["name_cn"]):
+            extra["name_cn"] = rec["name_cn"]
+        url = mt.mcmod_url(rec["mcmod_id"])
+        if url:
+            extra["mcmod_url"] = url
+        proj = mr_found.get(rec["slug"])
+        if proj is not None:
+            hits.append({
+                "source": "modrinth",
+                "slug": proj.get("slug"),
+                "title": proj.get("title") or rec["name_en"] or rec["slug"],
+                "author": "?",
+                "downloads": proj.get("downloads", 0),
+                "description": (proj.get("description") or "")[:120],
+                "icon_url": proj.get("icon_url") or "",
+                **extra,
+            })
+            continue
+        if not want_cf or cf_used >= max_cf_lookups:
+            continue
+        cf_used += 1
+        try:
+            mod = cf_by_slug(dm, rec["slug"], class_id=CF_CLASS_MOD,
+                             api_key=api_key)
+        except Exception as e:
+            utils.log.warning("CurseForge 解析译名候选 %s 失败: %s", rec["slug"], e)
+            continue
+        if not mod:
+            continue
+        h = _cf_norm(mod)
+        h.update(extra)
+        hits.append(h)
+    return hits
 
 
 def _alias_to_modrinth_hits(dm: DownloadManager, slug, title=None, limit=30):
@@ -541,12 +661,19 @@ def list_instance_mods(instance: Instance):
     return [Path(r["path"]) for r in list_mod_entries_at(instance.path / "mods") if r.get("enabled")]
 
 
-def list_instance_mod_entries(instance: Instance) -> list:
+def list_instance_mod_entries(instance: Instance, detailed=False) -> list:
     """已装模组，含 .jar.disabled。"""
-    return list_mod_entries_at(instance.path / "mods")
+    return list_mod_entries_at(instance.path / "mods", detailed=detailed)
 
 
-def list_mod_entries_at(mods_dir) -> list:
+def list_mod_entries_at(mods_dir, detailed=False) -> list:
+    """列出 mods 目录条目。
+
+    detailed=True 时额外读取 jar 内元数据（fabric.mod.json / mods.toml 等），
+    补 id / mod_name / mod_version / loader，并注中文译名 name_cn / mcmod_url
+    （对标 HMCL 模组列表：显示真实模组名和 mcmod.cn 译名，而不是文件名）。
+    元数据按 (大小, mtime) 缓存，刷新列表不重复解包。
+    """
     folder = Path(mods_dir)
     if not folder.is_dir():
         return []
@@ -559,7 +686,43 @@ def list_mod_entries_at(mods_dir) -> list:
             rows.append({"filename": p.name, "enabled": True, "bytes": p.stat().st_size, "path": str(p)})
         elif low.endswith(".jar.disabled") or low.endswith(".disabled"):
             rows.append({"filename": p.name, "enabled": False, "bytes": p.stat().st_size, "path": str(p)})
+    if detailed and rows:
+        for r in rows:
+            r.update(_jar_meta(Path(r["path"]), r["bytes"]))
+        from . import mod_translations
+        mod_translations.annotate_local_mods(rows)
     return rows
+
+
+_jar_meta_cache: dict = {}   # path -> (size, mtime_ns, meta)
+
+
+def _jar_meta(path: Path, size: int) -> dict:
+    """读 jar 元数据（缓存）；解析失败回空字段，列表照常显示文件名。"""
+    try:
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    hit = _jar_meta_cache.get(str(path))
+    if hit and hit[0] == size and hit[1] == mtime:
+        return hit[2]
+    from .ai.conflict import inspect_jar
+    info = inspect_jar(path)
+    meta = {}
+    # loader 仍是 unknown 说明没解析到元数据文件，id/name 只是文件名回退，不当真名展示
+    if not info.get("error") and (info.get("loader") or "unknown") != "unknown":
+        if info.get("id"):
+            meta["id"] = info["id"]
+        if info.get("name"):
+            meta["mod_name"] = info["name"]
+        ver = str(info.get("version") or "")
+        if ver and "${" not in ver:   # mods.toml 的 ${file.jarVersion} 占位符不展示
+            meta["mod_version"] = ver
+        meta["loader"] = info["loader"]
+    if len(_jar_meta_cache) > 4096:
+        _jar_meta_cache.clear()
+    _jar_meta_cache[str(path)] = (size, mtime, meta)
+    return meta
 
 
 def _mod_file_at(mods_dir, filename: str) -> Path:
@@ -884,6 +1047,31 @@ def cf_files_by_ids(dm: DownloadManager, file_ids, api_key=None):
 _CF_TRANSLATE_KIND = {CF_CLASS_MOD: "mod", CF_CLASS_MODPACK: "modpack"}
 
 
+def cf_mods_by_ids(dm: DownloadManager, mod_ids, api_key=None):
+    """批量查询项目元数据 POST /v1/mods，返回 {modId: mod}（含 links.websiteUrl）。"""
+    ids = []
+    for x in mod_ids or []:
+        try:
+            ids.append(int(x))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        return {}
+    out = {}
+    for i in range(0, len(ids), 50):
+        chunk = ids[i:i + 50]
+        try:
+            data = _cf_post(dm, "/mods", {"modIds": chunk}, api_key=api_key)
+        except Exception as e:
+            utils.log.warning("批量查询 CurseForge 项目失败: %s", e)
+            continue
+        for m in _cf_items(data):
+            mid = m.get("id")
+            if mid is not None:
+                out[int(mid)] = m
+    return out
+
+
 def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
                       class_id=CF_CLASS_MOD, slug=None, game_version=None,
                       categories=None, sort="", offset=0):
@@ -908,7 +1096,8 @@ def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
         "sortField": cf_sort_field(sort),
         "sortOrder": "desc",
         "pageSize": limit * 2 if categories else limit,
-        "index": int(offset or 0),
+        # 分类过滤是客户端过滤：pageSize 翻倍拉取时 index 同步翻倍，窗口才不重叠
+        "index": int(offset or 0) * 2 if categories else int(offset or 0),
     }
     if query:
         params["searchFilter"] = query
@@ -1041,6 +1230,115 @@ def _resolve_mods_dir(instance: Instance, mods_dir=None) -> Path:
 
 # CurseForge dependencies[].relationType == 3 表示必装依赖
 CF_RELATION_REQUIRED = 3
+CF_DEP_REQUIRED = 3   # relationType: RequiredDependency
+
+
+def _cf_required_dep_ids(file_obj) -> list:
+    """文件必需前置的 CurseForge 项目 id（relationType=3，PCL2「前置模组」）。"""
+    out = []
+    for dep in (file_obj or {}).get("dependencies") or []:
+        if not isinstance(dep, dict):
+            continue
+        if dep.get("relationType") != CF_DEP_REQUIRED:
+            continue
+        mid = dep.get("modId") or dep.get("addonId")
+        try:
+            mid = int(mid)
+        except (TypeError, ValueError):
+            continue
+        if mid and mid not in out:
+            out.append(mid)
+    return out
+
+
+def _cf_pick_file(files, mc_version, loader):
+    """挑最匹配 MC 版本与加载器的文件；没有任何匹配返回 None。"""
+    files = [f for f in files or [] if isinstance(f, dict)]
+    candidates = [f for f in files
+                  if not mc_version or mc_version in (f.get("gameVersions") or [])]
+    if loader:
+        pref = [f for f in candidates
+                if any(loader.lower() in (gv or "").lower()
+                       for gv in (f.get("gameVersions") or []))]
+        if pref:
+            candidates = pref
+    return candidates[0] if candidates else None
+
+
+def _cf_download_file(dm: DownloadManager, addon_id, file_obj, dest_dir,
+                      on_progress=None, label="模组"):
+    """按候选源下载一个 CurseForge 文件（downloadUrl → CDN 直链 → 通用 URL）。"""
+    f = _cf_normalize_file(file_obj)
+    file_id = f.get("id")
+    if file_id is None:
+        raise ModError("模组文件信息缺失")
+    filename = f.get("fileName") or f"mod-{addon_id}-{file_id}.jar"
+    dest = Path(dest_dir) / filename
+    url_sets = []
+    if f.get("downloadUrl"):
+        url_sets.append([f["downloadUrl"]])
+    url_sets.append(_candidate_cf_urls(addon_id, file_id, filename))
+    url_sets.append(_candidate_cf_urls(addon_id, file_id, None))
+    last_err = None
+    tried = set()
+    for urls in url_sets:
+        for url in urls:
+            if url in tried:
+                continue
+            tried.add(url)
+            try:
+                if on_progress:
+                    on_progress(f"下载 CurseForge {label} {filename}", 0, 1)
+                dm.download(url, dest, timeout=900)
+                return dest
+            except Exception as e:
+                last_err = e
+                utils.remove_tree(dest)
+    raise ModError(f"CurseForge {label} {filename} 下载失败: {last_err}")
+
+
+def _install_cf_deps(dm: DownloadManager, file_obj, dest_dir, mc_version, loader,
+                     api_key, on_progress, seen, downloaded, warnings, depth=0):
+    """递归安装文件的必需前置（对齐 PCL2 自动下载前置 / HMCL 依赖安装）。
+
+    单个前置失败不打断主模组安装，失败原因写进 warnings 由上层展示。
+    """
+    if depth > 3:
+        return
+    for dep_id in _cf_required_dep_ids(file_obj):
+        if dep_id in seen:
+            continue
+        seen.add(dep_id)
+        title = str(dep_id)
+        try:
+            dep_mod = cf_detail(dm, dep_id, api_key=api_key)
+            title = dep_mod.get("name") or title
+            files = []
+            if mc_version:
+                try:
+                    files = cf_files(dm, dep_id, api_key=api_key,
+                                     game_version=mc_version, page_size=50)
+                except ModError:
+                    files = []
+            picked = _cf_pick_file(files, mc_version, loader)
+            if picked is None:
+                picked = _cf_pick_file(dep_mod.get("latestFiles") or [],
+                                       mc_version, loader)
+            if picked is None:
+                raise ModError(f"没有支持 MC {mc_version or '当前版本'} 的文件")
+            fname = picked.get("fileName") or ""
+            if fname and (Path(dest_dir) / fname).is_file():
+                utils.log.info("前置 %s 已存在（%s），跳过", title, fname)
+                continue
+            dest = _cf_download_file(dm, dep_id, picked, dest_dir,
+                                     on_progress=on_progress, label=f"前置 {title}")
+            downloaded.append(dest.name)
+            _install_cf_deps(dm, picked, dest_dir, mc_version, loader, api_key,
+                             on_progress, seen, downloaded, warnings, depth + 1)
+        except Exception as e:
+            msg = f"必需前置 {title} 安装失败: {e}"
+            utils.log.warning("%s", msg)
+            warnings.append(msg)
 
 
 def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,

@@ -158,7 +158,135 @@ static int set_mod_enabled(const char *instance, const char *filename, int enabl
     return 0;
 }
 
+/* mods.toml / neoforge.mods.toml 首个 [[mods]] 段的 modId / displayName / version
+   （轻量行扫描，够拿显示字段；与 Python conflict._parse_mods_toml_fallback 同思路） */
+static void toml_mod_fields(const char *text, char *id, size_t ni,
+                            char *nm, size_t nn, char *ver, size_t nv) {
+    id[0] = nm[0] = ver[0] = 0;
+    int in_mods = 0;
+    const char *p = text ? text : "";
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        size_t ll = eol ? (size_t)(eol - p) : strlen(p);
+        char line[512];
+        if (ll < sizeof(line)) {
+            memcpy(line, p, ll);
+            line[ll] = 0;
+            char *s = line;
+            while (*s == ' ' || *s == '\t') s++;
+            size_t sl = strlen(s);
+            while (sl && (s[sl - 1] == '\r' || s[sl - 1] == ' ' || s[sl - 1] == '\t'))
+                s[--sl] = 0;
+            if (s[0] == '[') {
+                if (strncmp(s, "[[mods]]", 8) == 0) {
+                    if (in_mods) break;          /* 只取第一个模组段 */
+                    in_mods = 1;
+                } else if (in_mods) {
+                    break;                       /* 进依赖段就结束 */
+                }
+            } else if (in_mods && s[0] && s[0] != '#') {
+                char *eq = strchr(s, '=');
+                if (eq) {
+                    *eq = 0;
+                    char *k = s, *v = eq + 1;
+                    size_t kl = strlen(k);
+                    while (kl && (k[kl - 1] == ' ' || k[kl - 1] == '\t')) k[--kl] = 0;
+                    while (*v == ' ' || *v == '\t') v++;
+                    size_t vl = strlen(v);
+                    while (vl && (v[vl - 1] == ' ' || v[vl - 1] == '\t')) v[--vl] = 0;
+                    if (vl >= 2 && ((v[0] == '"' && v[vl - 1] == '"') ||
+                                    (v[0] == '\'' && v[vl - 1] == '\''))) {
+                        v[vl - 1] = 0;
+                        v++;
+                    }
+                    if (strcmp(k, "modId") == 0) snprintf(id, ni, "%s", v);
+                    else if (strcmp(k, "displayName") == 0) snprintf(nm, nn, "%s", v);
+                    else if (strcmp(k, "version") == 0) snprintf(ver, nv, "%s", v);
+                }
+            }
+        }
+        if (!eol) break;
+        p = eol + 1;
+    }
+}
+
+static void jar_meta_add(cJSON *row, const char *id, const char *nm,
+                         const char *ver, const char *loader) {
+    if (id && id[0]) cJSON_AddStringToObject(row, "id", id);
+    if (nm && nm[0]) cJSON_AddStringToObject(row, "mod_name", nm);
+    else if (id && id[0]) cJSON_AddStringToObject(row, "mod_name", id);
+    if (ver && ver[0] && !strstr(ver, "${"))   /* ${file.jarVersion} 占位符不展示 */
+        cJSON_AddStringToObject(row, "mod_version", ver);
+    if (loader && loader[0]) cJSON_AddStringToObject(row, "loader", loader);
+}
+
+/* 读 jar 内元数据（fabric/quilt/forge/neoforge/旧版 mcmod.info），
+   对齐 Python ai.conflict.inspect_jar 的显示字段；解析失败静默退回文件名 */
+static void jar_meta_row(cJSON *row, const char *jar_path) {
+    size_t len = 0;
+    char *txt = pymcl_zip_read(jar_path, "fabric.mod.json", &len);
+    if (txt) {
+        cJSON *d = cJSON_Parse(txt);
+        free(txt);
+        if (d) {
+            jar_meta_add(row,
+                         cJSON_GetStringValue(cJSON_GetObjectItem(d, "id")),
+                         cJSON_GetStringValue(cJSON_GetObjectItem(d, "name")),
+                         cJSON_GetStringValue(cJSON_GetObjectItem(d, "version")),
+                         "fabric");
+            cJSON_Delete(d);
+        }
+        return;
+    }
+    txt = pymcl_zip_read(jar_path, "quilt.mod.json", &len);
+    if (txt) {
+        cJSON *d = cJSON_Parse(txt);
+        free(txt);
+        if (d) {
+            cJSON *ql = cJSON_GetObjectItem(d, "quilt_loader");
+            if (!cJSON_IsObject(ql)) ql = d;
+            cJSON *md = cJSON_GetObjectItem(ql, "metadata");
+            jar_meta_add(row,
+                         cJSON_GetStringValue(cJSON_GetObjectItem(ql, "id")),
+                         cJSON_GetStringValue(cJSON_GetObjectItem(md, "name")),
+                         cJSON_GetStringValue(cJSON_GetObjectItem(ql, "version")),
+                         "quilt");
+            cJSON_Delete(d);
+        }
+        return;
+    }
+    const char *loader = "neoforge";
+    txt = pymcl_zip_read(jar_path, "META-INF/neoforge.mods.toml", &len);
+    if (!txt) {
+        loader = "forge";
+        txt = pymcl_zip_read(jar_path, "META-INF/mods.toml", &len);
+    }
+    if (txt) {
+        char id[128], nm[256], ver[128];
+        toml_mod_fields(txt, id, sizeof(id), nm, sizeof(nm), ver, sizeof(ver));
+        free(txt);
+        jar_meta_add(row, id, nm, ver, loader);
+        return;
+    }
+    txt = pymcl_zip_read(jar_path, "mcmod.info", &len);
+    if (txt) {
+        cJSON *d = cJSON_Parse(txt);
+        free(txt);
+        cJSON *m = cJSON_IsArray(d) ? cJSON_GetArrayItem(d, 0) : d;
+        if (cJSON_IsObject(m))
+            jar_meta_add(row,
+                         cJSON_GetStringValue(cJSON_GetObjectItem(m, "modid")),
+                         cJSON_GetStringValue(cJSON_GetObjectItem(m, "name")),
+                         cJSON_GetStringValue(cJSON_GetObjectItem(m, "version")),
+                         "forge");
+        cJSON_Delete(d);
+    }
+}
+
 static cJSON *list_mod_entries(const char *instance) {
+    char ip[PYMCL_PATH], dir[PYMCL_PATH];
+    instance_path(instance, ip, sizeof(ip));
+    pymcl_path_join(dir, sizeof(dir), ip, "mods");
     cJSON *names = list_instance_files(instance, "mods");
     cJSON *out = cJSON_CreateArray();
     cJSON *it;
@@ -176,9 +304,15 @@ static cJSON *list_mod_entries(const char *instance) {
         cJSON_AddStringToObject(row, "filename", fn);
         cJSON_AddStringToObject(row, "name", base);
         cJSON_AddBoolToObject(row, "enabled", enabled);
+        char full[PYMCL_PATH];
+        pymcl_path_join(full, sizeof(full), dir, fn);
+        long long sz = pymcl_file_size(full);
+        if (sz >= 0) cJSON_AddNumberToObject(row, "bytes", (double)sz);
+        jar_meta_row(row, full);
         cJSON_AddItemToArray(out, row);
     }
     cJSON_Delete(names);
+    mods_annotate_local(out);   /* 中文译名 + mcmod.cn 链接（缓存内注解，不联网） */
     return out;
 }
 
@@ -785,8 +919,12 @@ cJSON *rpc_align_call(const char *method, cJSON *params, sse_emit_fn emit) {
         if (emit) emit("ui_changed", cJSON_CreateObject());
         return cJSON_CreateString(pstr(params, "filename", ""));
     }
-    if (strcmp(method, "get_installed_mod_entries") == 0)
+    if (strcmp(method, "get_installed_mod_entries") == 0) {
+        /* 版本隔离的独立 mods 目录逻辑在 Python（version_settings），回落 */
+        if (pstr(params, "version", "")[0])
+            return py_rpc_call(method, params);
         return list_mod_entries(pstr(params, "instance", "default"));
+    }
     if (strcmp(method, "open_global_mods") == 0) {
         char p[PYMCL_PATH];
         pymcl_path_join(p, sizeof(p), g_root, "global_mods");

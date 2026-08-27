@@ -107,9 +107,15 @@ class BannerBody(QWidget):
         # （压扁的空进度条叠在渐变底上看着就是一条脏线）。
         # 启动开始时由 LaunchPage 显示、结束后再收起。
         page.stop_btn.setVisible(False)
+        # 多开管理入口：有游戏在跑时显示「运行中 ×N」，点开列表可结束指定游戏
+        page.running_btn = TransparentPushButton(FIF.GAME, tr("运行中"))
+        page.running_btn.setFixedSize(170, 26)
+        page.running_btn.hide()
+        page.running_btn.clicked.connect(page._show_running_games)
         page.banner.right_area.addStretch(1)
         page.banner.right_area.addWidget(page.launch_btn, 0, Qt.AlignRight)
         page.banner.right_area.addWidget(page.stop_btn, 0, Qt.AlignRight)
+        page.banner.right_area.addWidget(page.running_btn, 0, Qt.AlignRight)
 
         from ..motion import SmoothProgressBar
         page.progress = SmoothProgressBar(self)
@@ -163,9 +169,16 @@ class ConfigBody(QWidget):
         page.memory_slider.setValue(int(CONFIG.get("memory_mb", 4096)))
         page.memory_label = CaptionLabel(f"{page.memory_slider.value()} MB")
         page.memory_slider.valueChanged.connect(page._on_memory_changed)
+        from qfluentwidgets import CheckBox
+        page.memory_auto_check = CheckBox(tr("自动"))
+        page.memory_auto_check.setChecked(bool(CONFIG.get("memory_auto", True)))
+        page.memory_auto_check.setToolTip(tr("按启动时的系统可用内存自动分配"))
+        page.memory_auto_check.toggled.connect(page._on_memory_auto_toggled)
         mem_row = QHBoxLayout()
+        mem_row.addWidget(page.memory_auto_check)
         mem_row.addWidget(page.memory_slider, 1)
         mem_row.addWidget(page.memory_label)
+        page._apply_memory_auto_ui()
 
         # CompactSpinBox（82px）替代 SpinBox（136px）：默认布局下配置卡
         # 只有 ~350px 宽，两个大号 SpinBox 一排直接把卡片撑出横向滚动条，

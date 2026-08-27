@@ -58,19 +58,10 @@ def javaagent_arg(server_id: str) -> str:
     return f"-javaagent:{jar_path()}={sid}"
 
 
-def login(server_id: str, username: str, password: str) -> dict:
-    sid = normalize_server_id(server_id)
-    username = (username or "").strip()
-    if not username or not password:
-        raise AuthError("请输入统一通行证账号和密码")
-    url = api_url(sid) + "/authserver/authenticate"
+def _post(sid: str, path: str, payload: dict) -> dict:
+    url = api_url(sid) + path
     try:
-        resp = requests.post(url, json={
-            "agent": {"name": "Minecraft", "version": 1},
-            "username": username,
-            "password": password,
-            "requestUser": True,
-        }, timeout=20)
+        resp = requests.post(url, json=payload, timeout=20)
     except requests.RequestException as exc:
         raise AuthError(f"统一通行证无法连接: {exc}") from exc
     try:
@@ -80,13 +71,10 @@ def login(server_id: str, username: str, password: str) -> dict:
     if resp.status_code >= 400:
         err = data.get("errorMessage") or data.get("error") or resp.text[:200]
         raise AuthError(f"统一通行证登录失败: {err}")
-    profile = data.get("selectedProfile") or {}
-    if not profile:
-        profiles = data.get("availableProfiles") or []
-        if profiles:
-            profile = profiles[0]
-    if not profile.get("name"):
-        raise AuthError("该通行证没有可用角色")
+    return data
+
+
+def _build_account(sid: str, username: str, data: dict, profile: dict) -> dict:
     return {
         "type": "nide8",
         "name": profile.get("name"),
@@ -99,6 +87,63 @@ def login(server_id: str, username: str, password: str) -> dict:
         "expires_at": time.time() + 7 * 24 * 3600,
         "updated_at": time.time(),
     }
+
+
+def login(server_id: str, username: str, password: str, profile_id: str = "") -> dict:
+    """统一通行证登录。多角色且未指定 profile_id 时返回 pending 结构。"""
+    sid = normalize_server_id(server_id)
+    username = (username or "").strip()
+    if not username or not password:
+        raise AuthError("请输入统一通行证账号和密码")
+    data = _post(sid, "/authserver/authenticate", {
+        "agent": {"name": "Minecraft", "version": 1},
+        "username": username,
+        "password": password,
+        "requestUser": True,
+    })
+    profile = data.get("selectedProfile") or {}
+    profiles = [p for p in (data.get("availableProfiles") or []) if isinstance(p, dict)]
+    if profile_id:
+        hit = next((p for p in profiles if str(p.get("id")) == str(profile_id)), None)
+        if hit:
+            return select_profile(sid, data.get("accessToken") or "",
+                                  data.get("clientToken") or "", hit, username)
+    if profile.get("name"):
+        return _build_account(sid, username, data, profile)
+    if len(profiles) == 1:
+        return select_profile(sid, data.get("accessToken") or "",
+                              data.get("clientToken") or "", profiles[0], username)
+    if len(profiles) > 1:
+        return {
+            "pending": True,
+            "kind": "nide8",
+            "server_id": sid,
+            "username": username,
+            "access_token": data.get("accessToken") or "",
+            "client_token": data.get("clientToken") or "",
+            "profiles": [{"id": p.get("id"), "name": p.get("name")} for p in profiles],
+        }
+    raise AuthError("该通行证没有可用角色")
+
+
+def select_profile(server_id: str, access_token: str, client_token: str,
+                   profile: dict, username: str = "") -> dict:
+    """把令牌绑定到选中的角色（/authserver/refresh + selectedProfile）。"""
+    sid = normalize_server_id(server_id)
+    payload = {
+        "accessToken": access_token,
+        "requestUser": True,
+        "selectedProfile": {"id": profile.get("id"), "name": profile.get("name")},
+    }
+    if client_token:
+        payload["clientToken"] = client_token
+    data = _post(sid, "/authserver/refresh", payload)
+    if not data.get("accessToken"):
+        data = dict(data)
+        data["accessToken"] = access_token
+        data.setdefault("clientToken", client_token)
+    prof = data.get("selectedProfile") or profile
+    return _build_account(sid, username, data, prof)
 
 
 def refresh(account: dict) -> dict:

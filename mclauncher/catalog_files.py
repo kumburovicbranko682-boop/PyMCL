@@ -348,6 +348,10 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
     src = str(source or extra.get("source") or "").lower()
     gv = _game_version({**extra, "game_version": extra.get("game_version") or extra.get("version")})
     cats = category_facets(extra.get("category") or extra.get("type") or "")
+    try:
+        offset = int(extra.get("offset") or 0)
+    except (TypeError, ValueError):
+        offset = 0
     want_mr = src in ("", "全部", "all", "modrinth") and kind in KIND_MR
     want_cf = src in ("", "全部", "all") or src.startswith("curse")
     if src.startswith("modrinth"):
@@ -360,7 +364,10 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
     rows = []
     q = (query or "").strip()
     sort = str(extra.get("sort") or "")
-    offset = int(extra.get("offset") or 0)
+    try:
+        offset = max(0, int(extra.get("offset") or 0))
+    except (TypeError, ValueError):
+        offset = 0
     from .config import CONFIG
     api_key = CONFIG.get("curseforge_api_key")
     if want_mr:

@@ -113,6 +113,31 @@ def level_summary(save_dir) -> dict:
     return out
 
 
+def world_info(world_dir) -> dict:
+    """level.dat 世界元数据的另一种视图（键名对齐旧皮肤分支调用方）。
+
+    与 level_summary 的差别：game_type 数字码、硬核显示为「硬核」、
+    版本键叫 version。坏档或缺文件返回 {}。
+    """
+    s = level_summary(world_dir)
+    if not s:
+        return {}
+    mode_code = s.get("game_mode_code")
+    hardcore = bool(s.get("hardcore"))
+    return {
+        "level_name": s.get("level_name", ""),
+        "seed": s.get("seed", ""),
+        "game_type": mode_code if mode_code is not None else -1,
+        "game_mode": ("硬核" if hardcore and mode_code == 0
+                      else s.get("game_mode", "")),
+        "hardcore": hardcore,
+        "cheats": bool(s.get("cheats")),
+        "difficulty": s.get("difficulty", ""),
+        "version": s.get("mc_version", ""),
+        "last_played": int(s.get("last_played") or 0),
+    }
+
+
 def list_saves(instance: Instance, version_id: str = "") -> list[dict]:
     folder = _game_dir(instance, version_id) / "saves"
     if not folder.is_dir():

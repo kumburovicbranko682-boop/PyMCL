@@ -6,12 +6,39 @@
 static sse_emit_fn g_emit;
 static pthread_mutex_t g_mu = PTHREAD_MUTEX_INITIALIZER;
 static int g_task_n;
-static HANDLE g_game;
-static char g_launch_id[32];
-/* 正在飞的 launch_game 任务数（多开检查的闸门）。只看 g_game 不够：
- * 它要等 game_spawn 成功才被赋值，而启动准备（解析/下载 Java、预检）
- * 可能要几分钟，期间连点两次「启动」就会开出两个游戏。 */
+
+/* 运行中游戏注册表（多开管理，对齐 Python backend._game_procs） */
+#define MAX_GAMES 16
+typedef struct {
+    HANDLE proc;
+    DWORD pid;
+    char task_id[32];
+    char instance[128];
+    char version[128];
+    char account[64];
+    double started;
+} game_slot;
+static game_slot g_games[MAX_GAMES];
+/* 正在飞的 launch_game 任务数（多开检查的闸门）。只看进程表不够：
+ * 启动准备（解析/下载 Java、预检）可能要几分钟，期间连点两次「启动」
+ * 就会开出两个游戏。 */
 static int g_nlaunch;
+
+static int game_slot_alive(const game_slot *s) {
+    DWORD code = 0;
+    if (!s->proc) return 0;
+    if (GetExitCodeProcess(s->proc, &code) && code != STILL_ACTIVE) return 0;
+    return 1;
+}
+
+static int games_running(void) {
+    int any = 0;
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < MAX_GAMES; i++)
+        if (game_slot_alive(&g_games[i])) { any = 1; break; }
+    pthread_mutex_unlock(&g_mu);
+    return any;
+}
 
 typedef struct {
     char id[32];
@@ -130,6 +157,44 @@ static void ctx_log(void *ud, const char *text) {
     emit("log", o);
     cJSON_Delete(o);
 }
+/* 首次启动写 options.txt 的 lang（对齐 Python launch_flow.ensure_game_language：
+   PCL2/HMCL 同款，新版本第一次进游戏就是中文；绝不覆盖玩家已有设置） */
+static void game_lang_preset(const char *game_dir, const char *ver, task_t *t) {
+    char pref[16];
+    snprintf(pref, sizeof(pref), "%s", config_str("game_lang", "auto"));
+    for (char *p = pref; *p; p++) if (*p >= 'A' && *p <= 'Z') *p = (char)(*p + 32);
+    if (strcmp(pref, "off") == 0 || strcmp(pref, "none") == 0) return;
+    const char *lang = pref;
+    if (strcmp(pref, "auto") == 0) lang = "zh_cn";   /* 原生 UI 面向中文用户 */
+    if (strcmp(lang, "en_us") == 0 || !lang[0]) return;   /* 原版默认英文 */
+    char path[PYMCL_PATH];
+    pymcl_path_join(path, sizeof(path), game_dir, "options.txt");
+    if (pymcl_file_exists(path)) return;
+    char code[16];
+    snprintf(code, sizeof(code), "%s", lang);
+    /* 1.10 及以前语言代码带大写地区（zh_CN），1.11+ 全小写 */
+    int minor = -1;
+    for (const char *p = ver ? ver : ""; *p; p++) {
+        if (p[0] == '1' && p[1] == '.' && p[2] >= '0' && p[2] <= '9' &&
+            (p == ver || !((p[-1] >= '0' && p[-1] <= '9') || p[-1] == '.'))) {
+            minor = atoi(p + 2);
+            break;
+        }
+    }
+    if (minor >= 0 && minor < 11) {
+        char *us = strchr(code, '_');
+        if (us) for (char *p = us + 1; *p; p++)
+            if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 32);
+    }
+    char line[32];
+    snprintf(line, sizeof(line), "lang:%s\n", code);
+    if (pymcl_write_file(path, line, strlen(line)) == 0) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "游戏语言: 首次启动预设为 %s", code);
+        ctx_log(t, msg);
+    }
+}
+
 static int ctx_cancel(void *ud) {
     task_t *t = (task_t *)ud;
     return t->cancelled;
@@ -430,11 +495,14 @@ static void *task_run(void *p) {
         /* 多开检查（对齐 bridge/api.py::_launch_game_impl）。以前 C 桥
          * 没有这一步：游戏已在运行时 WinUI/WPF/EziApp 再点「启动」会
          * 静默再开一个游戏。闸门从任务开始持到游戏进程被回收，另一个
-         * 启动任务还在准备阶段（g_game 尚未赋值）时也会被拦住。 */
+         * 启动任务还在准备阶段（进程尚未登记）时也会被拦住。 */
         int already;
         pthread_mutex_lock(&g_mu);
-        already = g_nlaunch > 0
-            || (g_game && WaitForSingleObject(g_game, 0) == WAIT_TIMEOUT);
+        already = g_nlaunch > 0;
+        if (!already) {
+            for (int i = 0; i < MAX_GAMES; i++)
+                if (game_slot_alive(&g_games[i])) { already = 1; break; }
+        }
         g_nlaunch++;
         t->gate_held = 1;
         pthread_mutex_unlock(&g_mu);
@@ -513,6 +581,7 @@ static void *task_run(void *p) {
                 if (jprobe != vj) cJSON_Delete(jprobe);
                 if (vj) cJSON_Delete(vj);
                 char **argv = NULL; int argc = 0; char natives[PYMCL_PATH];
+                int gslot = -1;
                 /* 版本隔离：游戏目录可能是 versions/<ver> 而非实例根。
                  * 只认版本文件里的 isolation（对齐 version_settings.load 的
                  * 启动语义）；全局 default_isolation 是安装时写入的模板，
@@ -521,6 +590,7 @@ static void *task_run(void *p) {
                 const char *iso = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "isolation"));
                 if (!iso || !iso[0]) iso = "none";
                 vs_apply_isolation(inst, ver, iso, gdir, sizeof(gdir));
+                game_lang_preset(gdir, ver, t);
                 /* GC 预设 + 版本 JVM 参数（gc.apply 语义）。 */
                 const char *gck = cJSON_GetStringValue(cJSON_GetObjectItem(vset, "gc"));
                 if (!gck || !gck[0]) gck = config_str("gc_preset", "auto");
@@ -589,8 +659,21 @@ static void *task_run(void *p) {
                     HANDLE rd = NULL;
                     HANDLE proc = game_spawn((const char **)argv, argc, gdir, &rd);
                     pthread_mutex_lock(&g_mu);
-                    g_game = proc;
-                    snprintf(g_launch_id, sizeof(g_launch_id), "%s", t->id);
+                    if (proc) {
+                        for (int i = 0; i < MAX_GAMES; i++)
+                            if (!g_games[i].proc) { gslot = i; break; }
+                        if (gslot >= 0) {
+                            game_slot *s = &g_games[gslot];
+                            s->proc = proc;
+                            s->pid = GetProcessId(proc);
+                            snprintf(s->task_id, sizeof(s->task_id), "%s", t->id);
+                            snprintf(s->instance, sizeof(s->instance), "%s", inst);
+                            snprintf(s->version, sizeof(s->version), "%s", ver);
+                            snprintf(s->account, sizeof(s->account), "%s",
+                                     (account[0] && strcmp(account, "离线模式") != 0) ? account : user);
+                            s->started = (double)time(NULL);
+                        }
+                    }
                     pthread_mutex_unlock(&g_mu);
                     if (proc) {
                         vs_apply_priority(proc, vset);
@@ -629,12 +712,13 @@ static void *task_run(void *p) {
                         WaitForSingleObject(proc, INFINITE);
                         DWORD code = 0;
                         GetExitCodeProcess(proc, &code);
-                        /* 先把 g_game 摘下来再关句柄：backend_game_alive /
-                         * cancel_task 在别的线程探测 g_game，不能让它们
+                        /* 先把进程从注册表摘下来再关句柄：backend_game_alive /
+                         * cancel_task 在别的线程探测进程表，不能让它们
                          * 摸到已经 CloseHandle 的句柄。闸门也在这里放掉：
                          * 后面的崩溃分析可能跑 45s，不该挡住用户重开游戏。 */
                         pthread_mutex_lock(&g_mu);
-                        if (g_game == proc) g_game = NULL;
+                        if (gslot >= 0 && g_games[gslot].proc == proc)
+                            memset(&g_games[gslot], 0, sizeof(g_games[gslot]));
                         if (t->gate_held) { t->gate_held = 0; g_nlaunch--; }
                         pthread_mutex_unlock(&g_mu);
                         CloseHandle(rd); CloseHandle(proc);
@@ -743,15 +827,11 @@ static const char *ensure_inst(const char *name) {
     return config_str("default_instance", "default");
 }
 
-/* 原生游戏进程是否还活着（g_game 由 launch_game 任务线程维护）。
+/* 原生游戏进程是否还活着（g_games 由 launch_game 任务线程维护）。
  * 一次性 py_rpc 进程里 Python 侧的 _game_proc 永远是 None，所以
  * terracotta 快照 / 进入世界 必须以这里的状态为准。 */
 int backend_game_alive(void) {
-    int alive;
-    pthread_mutex_lock(&g_mu);
-    alive = g_game != NULL && WaitForSingleObject(g_game, 0) == WAIT_TIMEOUT;
-    pthread_mutex_unlock(&g_mu);
-    return alive;
+    return games_running();
 }
 
 /* 对齐 mclauncher/terracotta.split_join_url：去掉协议头，从最后一个冒号
@@ -1022,7 +1102,10 @@ void backend_init(sse_emit_fn emit_fn) {
 }
 
 void backend_shutdown(void) {
-    if (g_game) game_kill(g_game);
+    pthread_mutex_lock(&g_mu);
+    for (int i = 0; i < MAX_GAMES; i++)
+        if (g_games[i].proc) game_kill(g_games[i].proc);
+    pthread_mutex_unlock(&g_mu);
 }
 
 cJSON *backend_call(const char *method, cJSON *params) {
@@ -1385,9 +1468,46 @@ cJSON *backend_call(const char *method, cJSON *params) {
         pthread_mutex_lock(&g_mu);
         for (int i = 0; i < g_ntasks; i++)
             if (g_tasks[i] && strcmp(g_tasks[i]->id, tid) == 0) g_tasks[i]->cancelled = 1;
-        if (strcmp(g_launch_id, tid) == 0 && g_game) game_kill(g_game);
+        /* 多开时按任务结束对应的游戏进程 */
+        for (int i = 0; i < MAX_GAMES; i++)
+            if (g_games[i].proc && strcmp(g_games[i].task_id, tid) == 0)
+                game_kill(g_games[i].proc);
         pthread_mutex_unlock(&g_mu);
         return cJSON_CreateTrue();
+    }
+    if (strcmp(method, "is_game_running") == 0)
+        return cJSON_CreateBool(games_running());
+    if (strcmp(method, "get_running_games") == 0) {
+        cJSON *out = cJSON_CreateArray();
+        double now = (double)time(NULL);
+        pthread_mutex_lock(&g_mu);
+        for (int i = 0; i < MAX_GAMES; i++) {
+            if (!game_slot_alive(&g_games[i])) continue;
+            cJSON *row = cJSON_CreateObject();
+            cJSON_AddNumberToObject(row, "pid", (double)g_games[i].pid);
+            cJSON_AddStringToObject(row, "task_id", g_games[i].task_id);
+            cJSON_AddStringToObject(row, "instance", g_games[i].instance);
+            cJSON_AddStringToObject(row, "version", g_games[i].version);
+            cJSON_AddStringToObject(row, "account", g_games[i].account);
+            double up = now - g_games[i].started;
+            cJSON_AddNumberToObject(row, "uptime", up > 0 ? up : 0);
+            cJSON_AddItemToArray(out, row);
+        }
+        pthread_mutex_unlock(&g_mu);
+        return out;
+    }
+    if (strcmp(method, "stop_game") == 0) {
+        int pid = pint(params, "pid", 0);
+        int n = 0;
+        pthread_mutex_lock(&g_mu);
+        for (int i = 0; i < MAX_GAMES; i++) {
+            if (!game_slot_alive(&g_games[i])) continue;
+            if (pid && (DWORD)pid != g_games[i].pid) continue;
+            game_kill(g_games[i].proc);
+            n++;
+        }
+        pthread_mutex_unlock(&g_mu);
+        return cJSON_CreateNumber(n);
     }
     if (strcmp(method, "list_tasks") == 0) {
         cJSON *arr = cJSON_CreateArray();

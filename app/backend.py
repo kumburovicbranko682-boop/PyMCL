@@ -1602,8 +1602,11 @@ class BackendAPI(QObject):
     def check_modpack_update(self, instance: str) -> dict:
         """检查实例整合包是否有新版本（Modrinth / CurseForge）。"""
         dm = DownloadManager(threads=2)
-        return modpack_mod.check_modpack_update(
+        info = modpack_mod.check_modpack_update(
             dm, self._instance(instance), api_key=CONFIG.get("curseforge_api_key"))
+        if isinstance(info, dict) and "has_update" not in info:
+            info["has_update"] = bool(info.get("update"))
+        return info
 
     def update_modpack(self, instance: str) -> str:
         """把实例整合包升级到最新版本（重装文件并清理旧版残留 mods）。"""
@@ -3313,3 +3316,345 @@ class BackendAPI(QObject):
         """根据硬件配置提供推荐值。"""
         from mclauncher.sysinfo import get_smart_recommendation
         return get_smart_recommendation()
+
+    def get_version_components(self, instance: str, version: str) -> dict:
+        """识别已装版本的 Minecraft 版本与加载器：{mc, loader, loader_version}。"""
+        from mclauncher import version_components as vc
+        return vc.components_of(self._instance(instance), version)
+
+    def switch_loader(self, instance: str, version: str, loader: str,
+                      loader_version: str = "") -> str:
+        """给已装版本换 / 装 / 移除加载器（原地，保留 mods 与设置）。返回任务 ID。"""
+        return self.start_task(
+            tr("更换加载器 {v}").format(v=version),
+            self._switch_loader_impl, instance, version, loader, loader_version)
+
+    def _switch_loader_impl(self, progress, log, instance, version, loader, loader_version):
+        from mclauncher import version_components as vc
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        res = vc.switch_loader(
+            inst, version, loader, loader_version, dm=dm,
+            on_progress=dm.on_progress, cancel=dm.cancel,
+            extra={"skip_assets": bool(CONFIG.get("skip_assets"))})
+        self._emit_ui_changed()
+        new_loader = res.get("loader") or ""
+        label = vc.LOADER_LABELS.get(new_loader, new_loader)
+        lv = res.get("loader_version") or ""
+        if not res.get("in_place"):
+            msg = tr("已生成新版本 {n}（{l} {lv}），原版本保留").format(
+                n=res.get("version"), l=label, lv=lv).rstrip()
+        elif new_loader:
+            msg = tr("{v} 已更换为 {l} {lv}").format(v=version, l=label, lv=lv).rstrip()
+        else:
+            msg = tr("{v} 已移除加载器，还原为原版").format(v=version)
+        log(msg)
+        return msg
+
+    def _export_modpack_impl(self, progress, log, instance, version, dest, name,
+                             pack_version, summary, inc_rp, inc_sp):
+        from mclauncher import modpack_export as mpx
+        inst = self._instance(instance)
+        if not version:
+            version = mpx.pick_default_version(inst)
+            name = name or inst.name
+            log(tr("未指定版本，按最近改动导出 {v}").format(v=version))
+        include = []
+        if inc_rp:
+            include.append("resourcepacks")
+        if inc_sp:
+            include.append("shaderpacks")
+        progress(1, 3, tr("反查模组下载地址"))
+        result = mpx.export_mrpack(
+            inst, version, dest or None, name=name,
+            pack_version=pack_version or "1.0.0", summary=summary,
+            include=include, dm=self._dm(progress, log), on_note=log)
+        progress(3, 3, tr("完成"))
+        log(tr("整合包已导出: {p}（{m}/{n} 个模组反查到下载地址）").format(
+            p=result["path"], m=result["matched"], n=result["mods"]))
+        return result["path"]
+
+    def asset_categories(self) -> list[dict]:
+        """可提取的资源类别（对标 PCL2 百宝箱 → 提取游戏资源）。"""
+        from mclauncher import asset_extract as ax
+        return [{"key": k, "label": tr(v[0])} for k, v in ax.CATEGORIES.items()]
+
+    def list_game_assets(self, instance: str, version: str,
+                         category: str = "music", query: str = "") -> list[dict]:
+        """按类别列出版本 assets 里可提取的资源文件。"""
+        from mclauncher import asset_extract as ax
+        return ax.list_assets(self._instance(instance), version,
+                              category=category, query=query)
+
+    def extract_game_assets(self, instance: str, version: str, names: list,
+                            dest: str = "") -> str:
+        """把选中资源按真实文件名导出（后台任务），返回任务 id。"""
+        return self.start_task(
+            tr("提取游戏资源"), self._extract_assets_impl, instance, version,
+            list(names or []), dest)
+
+    def _extract_assets_impl(self, progress, log, instance, version, names, dest):
+        from mclauncher import asset_extract as ax
+        inst = self._instance(instance)
+        dest_dir = Path(dest) if dest else (utils.ROOT / "exports" / f"assets-{version}")
+        log(tr("提取 {n} 个资源到 {d}").format(n=len(names), d=dest_dir))
+        result = ax.extract_assets(
+            inst, version, names, dest_dir,
+            on_progress=lambda msg, done, total: progress(done, total, msg))
+        for name in result.get("skipped") or []:
+            log(tr("本地缺失，已跳过: {f}").format(f=name))
+        log(tr("提取完成: {n} 个文件 → {d}").format(
+            n=result["count"], d=result["dest"]))
+        return result["dest"]
+
+    def start_modpack_update(self, instance: str) -> str:
+        """把整合包更新到最新版本（同一实例，保留存档）。返回任务 ID。"""
+        return self.start_task(f"更新整合包 {instance}",
+                               self._modpack_update_impl, instance)
+
+    def _modpack_update_impl(self, progress, log, instance):
+        from mclauncher import modpack_update as mpu
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        info = mpu.apply_pack_update(inst, dm=dm, on_progress=dm.on_progress,
+                                     cancel=dm.cancel)
+        if info.get("updated"):
+            msg = tr("整合包已更新: {n} {a} → {b}").format(
+                n=info["name"], a=info["current"], b=info["latest"])
+        else:
+            msg = tr("整合包已是最新: {n} {v}").format(
+                n=info["name"], v=info["current"])
+        log(msg)
+        return msg
+
+    def skin_capabilities(self, account_name: str = "") -> dict:
+        """账号支持哪些皮肤操作，UI 据此启用按钮。"""
+        acc = self.accounts.get_account(account_name) if account_name else self.accounts.get_active()
+        kind = (acc or {}).get("type") or "offline"
+        if kind == "microsoft":
+            return {"can_upload": True, "can_reset": True, "can_cape": True, "reason": ""}
+        if kind == "authlib":
+            return {"can_upload": True, "can_reset": True, "can_cape": False,
+                    "reason": tr("皮肤站披风请到站点网页管理")}
+        if kind == "offline":
+            # 对标 HMCL：离线账号选本地 PNG，启动时经本地 Yggdrasil + authlib-injector 注入
+            return {"can_upload": True, "can_reset": bool((acc or {}).get("skin_file")),
+                    "can_cape": False,
+                    "reason": tr("离线皮肤保存在本机，启动游戏时自动注入生效")}
+        return {"can_upload": False, "can_reset": False, "can_cape": False,
+                "reason": tr("通行证账号没有云端皮肤，请使用微软或皮肤站账号")}
+
+    def _skin_account(self, account_name: str) -> dict:
+        from mclauncher.skin import SkinError
+        acc = (self.accounts.get_account(account_name) if account_name
+               else self.accounts.get_active())
+        if not acc:
+            raise SkinError(tr("账号不存在: {name}").format(name=account_name))
+        return self.accounts.ensure_valid(acc)
+
+    def fetch_skin_texture(self, account_name: str = "") -> dict:
+        """当前皮肤原始纹理 {png: bytes, variant}，供本地渲染预览。"""
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        return skin_mod.fetch_skin_texture(acc)
+
+    def fetch_player_skin(self, name: str) -> dict:
+        """下载正版玩家皮肤。有自定义皮肤时带 png 字节，UI 本地渲染预览。"""
+        from mclauncher import skin as skin_mod
+        return skin_mod.fetch_player_skin(name)
+
+    def save_player_skin(self, name: str, dest: str = "") -> str:
+        """把正版玩家皮肤保存为 PNG 文件，返回路径。"""
+        from mclauncher import skin as skin_mod
+        info = skin_mod.fetch_player_skin(name)
+        if not info.get("png"):
+            raise skin_mod.SkinError(
+                tr("玩家 {n} 用的是默认皮肤，没有自定义皮肤可下载").format(n=info["name"]))
+        if not dest:
+            dest = str(utils.ROOT / "exports" / f"skin-{info['name']}.png")
+        p = Path(dest)
+        utils.ensure_dir(p.parent)
+        p.write_bytes(info["png"])
+        return str(p)
+
+    def _upload_skin_impl(self, progress, log, account_name, file_path, variant):
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        if acc.get("type") == "offline":
+            from mclauncher import offline_skin as offline_skin_mod
+            log(tr("正在保存离线皮肤…"))
+            dest = offline_skin_mod.store_skin(file_path)
+            self.accounts.update_account(acc.get("name"), {
+                "skin_file": str(dest),
+                "skin_model": skin_mod.normalize_variant(variant),
+            })
+            self._emit_ui_changed()
+            return tr("离线皮肤已保存，启动游戏时自动注入生效")
+        log(tr("正在上传皮肤…"))
+        if acc.get("type") == "microsoft":
+            skin_mod.upload_ms_skin(acc.get("access_token") or "", file_path, variant)
+        elif acc.get("type") == "authlib":
+            skin_mod.upload_ygg_skin(
+                acc.get("api") or "", acc.get("access_token") or "",
+                acc.get("uuid") or "", file_path, variant)
+        else:
+            raise skin_mod.SkinError(tr("通行证账号没有云端皮肤，请使用微软或皮肤站账号"))
+        self._emit_ui_changed()
+        return tr("皮肤已更新。第三方预览有缓存，可能要几分钟才能看到新皮肤")
+
+    def _reset_skin_impl(self, progress, log, account_name):
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        log(tr("正在重置皮肤…"))
+        if acc.get("type") == "offline":
+            self.accounts.update_account(acc.get("name"),
+                                         {"skin_file": "", "skin_model": ""})
+            self._emit_ui_changed()
+            return tr("已恢复默认皮肤")
+        if acc.get("type") == "microsoft":
+            skin_mod.reset_ms_skin(acc.get("access_token") or "")
+        elif acc.get("type") == "authlib":
+            skin_mod.reset_ygg_skin(
+                acc.get("api") or "", acc.get("access_token") or "",
+                acc.get("uuid") or "")
+        else:
+            raise skin_mod.SkinError(tr("通行证账号没有云端皮肤，请使用微软或皮肤站账号"))
+        self._emit_ui_changed()
+        return tr("已恢复默认皮肤")
+
+    def _set_cape_impl(self, progress, log, account_name, cape_id):
+        from mclauncher import skin as skin_mod
+        acc = self._skin_account(account_name)
+        if acc.get("type") != "microsoft":
+            raise skin_mod.SkinError(tr("只有微软正版账号支持更换披风"))
+        log(tr("正在更新披风…"))
+        skin_mod.set_ms_cape(acc.get("access_token") or "", cape_id or "")
+        self._emit_ui_changed()
+        return tr("披风已更换") if cape_id else tr("披风已隐藏")
+
+    def auto_memory(self) -> dict:
+        """按系统当前可用内存计算自动分配值 {memory_mb, total_mb, avail_mb}。"""
+        from mclauncher import memory as memory_mod
+        return memory_mod.auto_memory()
+
+    @staticmethod
+    def _default_memory_mb() -> int:
+        """配置的默认内存；开了自动分配就返回 0（各处 0 = 自动）。"""
+        if CONFIG.get("memory_auto", True):
+            return 0
+        return int(CONFIG.get("memory_mb") or 4096)
+
+    def get_version_patch_note(self, version: str) -> dict:
+        """Minecraft 官方版本更新日志（HMCL 下载页同款数据源）。
+
+        返回 {version, title, type, image, body_html}；官方没写的版本抛错。
+        """
+        from mclauncher import patch_notes
+        return patch_notes.patch_note(DownloadManager(threads=2), version)
+
+    def get_project_detail(self, source: str, ident: str) -> dict:
+        """资源项目详情（正文 / 截图 / 链接），Modrinth 传 slug，CurseForge 传数字 id。"""
+        from mclauncher import catalog_detail
+        return catalog_detail.project_detail(
+            DownloadManager(threads=2), source, ident,
+            api_key=CONFIG.get("curseforge_api_key") or "")
+
+    @staticmethod
+    def _search_offset(extra: dict | None) -> int:
+        """extra["offset"] → 翻页偏移（对标 PCL2 下载页翻页 / HMCL 加载更多）。"""
+        try:
+            return max(0, int((extra or {}).get("offset") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def add_custom_java(self, path: str) -> dict:
+        """手动添加本地 Java（校验 java -version 后写入配置）。"""
+        info = java_mod.add_custom_java(path)
+        self._emit_ui_changed()
+        return info
+
+    def remove_custom_java(self, path: str):
+        java_mod.remove_custom_java(path)
+        self._emit_ui_changed()
+
+    def pop_manual_downloads(self) -> dict:
+        """取走最近一次整合包安装留下的手动下载清单（取走即清空）。
+
+        返回 {"instance": 名称, "items": [{filename, project, url}]}；没有则 {}。
+        """
+        out = self._manual_downloads or {}
+        self._manual_downloads = None
+        return out
+
+    def pending_login_profiles(self) -> list[dict]:
+        """上一次登录是否在等用户选角色；返回 [{id, name}]，没有则空。"""
+        pend = getattr(self, "_pending_login", None) or {}
+        return list(pend.get("profiles") or [])
+
+    def cancel_pending_login(self):
+        self._pending_login = None
+
+    def start_login_select(self, profile_id: str) -> str:
+        return self.start_task(tr("选择角色"), self._login_select_impl, profile_id)
+
+    def _login_select_impl(self, progress, log, profile_id):
+        pend = getattr(self, "_pending_login", None)
+        if not pend:
+            raise AuthError(tr("没有待选择的角色，请重新登录"))
+        profile = next((p for p in pend.get("profiles") or []
+                        if str(p.get("id")) == str(profile_id)), None)
+        if not profile:
+            raise AuthError(tr("角色不存在，请重新登录"))
+        progress(0, 0, tr("绑定角色"))
+        if pend.get("kind") == "nide8":
+            from mclauncher import nide8 as nide8_mod
+            account = nide8_mod.select_profile(
+                pend.get("server_id") or "", pend.get("access_token") or "",
+                pend.get("client_token") or "", profile, pend.get("username") or "")
+        else:
+            from mclauncher import authlib as authlib_mod
+            account = authlib_mod.select_profile(
+                pend.get("api") or "", pend.get("access_token") or "",
+                pend.get("client_token") or "", profile, pend.get("username") or "")
+        self._pending_login = None
+        self.accounts.add_account(account)
+        log(f"登录成功：{account.get('name')}")
+        return f"已登录 {account.get('name')}"
+
+    def get_running_games(self) -> list[dict]:
+        """运行中的游戏进程列表（多开管理：PCL2 可同时跑多个实例并结束指定游戏）。"""
+        with self._game_lock:
+            entries = list(self._game_procs)
+        now = time.time()
+        out = []
+        for e in entries:
+            proc = e["proc"]
+            if getattr(proc, "poll", lambda: 0)() is not None:
+                continue
+            out.append({
+                "pid": int(getattr(proc, "pid", 0) or 0),
+                "task_id": e.get("task_id") or "",
+                "instance": e.get("instance") or "",
+                "version": e.get("version") or "",
+                "account": e.get("account") or "",
+                "uptime": max(0, int(now - (e.get("started_at") or now))),
+            })
+        return out
+
+    def stop_game(self, pid: int = 0) -> int:
+        """结束游戏进程；pid=0 结束全部运行中的游戏。返回结束的数量。"""
+        with self._game_lock:
+            entries = list(self._game_procs)
+        n = 0
+        for e in entries:
+            proc = e["proc"]
+            if pid and int(getattr(proc, "pid", 0) or 0) != int(pid):
+                continue
+            if getattr(proc, "poll", lambda: 0)() is not None:
+                continue
+            try:
+                proc.kill()
+                n += 1
+            except Exception:
+                pass
+        return n

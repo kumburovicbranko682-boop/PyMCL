@@ -8,12 +8,17 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 import socket
 import struct
 import time
+from pathlib import Path
 
 DEFAULT_PORT = 25565
+_SRV_TIMEOUT = 1.5
+# resolv.conf 不可用时（主要是 Windows）兜底的公共 DNS
+_FALLBACK_DNS = ("223.5.5.5", "8.8.8.8")
 _COLOR_RE = re.compile("\u00a7.")
 
 
@@ -116,6 +121,22 @@ def _read_varint_sock(sock: socket.socket) -> int:
     raise PingError("VarInt 过长")
 
 
+def read_varint(recv) -> int:
+    """recv(n) -> bytes；最多 5 字节。"""
+    result = 0
+    for i in range(5):
+        chunk = recv(1)
+        if not chunk:
+            raise PingError("连接被服务器提前关闭")
+        byte = chunk[0]
+        result |= (byte & 0x7F) << (7 * i)
+        if not byte & 0x80:
+            if result >= 1 << 31:
+                result -= 1 << 32
+            return result
+    raise PingError("VarInt 过长，响应不是 Minecraft 协议")
+
+
 # ---------------------------------------------------------------- MOTD
 
 def describe_motd(desc) -> str:
@@ -137,27 +158,149 @@ def describe_motd(desc) -> str:
     return " ".join(text.split())
 
 
+# ---------------------------------------------------------------- MOTD 文本
+
+def motd_text(desc) -> str:
+    """把 status 响应里的 description（字符串 / chat 组件）拍平成纯文本。"""
+    parts: list[str] = []
+
+    def walk(node):
+        if node is None:
+            return
+        if isinstance(node, str):
+            parts.append(node)
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if isinstance(node, dict):
+            if node.get("text"):
+                parts.append(str(node["text"]))
+            if node.get("translate") and not node.get("text"):
+                parts.append(str(node["translate"]))
+            walk(node.get("extra"))
+
+    walk(desc)
+    text = "".join(parts)
+    text = _COLOR_RE.sub("", text)
+    return " ".join(text.split())
+
 # ---------------------------------------------------------------- SRV（尽力而为）
 
-def resolve_srv(host: str, timeout: float = 2.0) -> tuple[str, int] | None:
+# ---------------------------------------------------------------- SRV 解析
+
+def _dns_servers() -> list[str]:
+    servers = []
+    try:
+        for line in Path("/etc/resolv.conf").read_text("utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("nameserver"):
+                addr = line.split()[1] if len(line.split()) > 1 else ""
+                if addr and ":" not in addr:  # 只用 IPv4，UDP 编码简单
+                    servers.append(addr)
+    except OSError:
+        pass
+    servers.extend(_FALLBACK_DNS)
+    return servers[:3]
+
+
+def _label_bytes(label: str) -> bytes:
+    """DNS 标签编码。_minecraft 带下划线，idna codec 会拒绝，ASCII 优先。"""
+    try:
+        return label.encode("ascii")
+    except UnicodeEncodeError:
+        return label.encode("idna")
+
+
+def _encode_dns_query(name: str) -> tuple[bytes, int]:
+    tid = random.randint(0, 0xFFFF)
+    header = struct.pack(">HHHHHH", tid, 0x0100, 1, 0, 0, 0)
+    qname = b"".join(
+        bytes([len(encoded)]) + encoded
+        for label in name.strip(".").split(".") if label
+        for encoded in (_label_bytes(label),))
+    question = qname + b"\x00" + struct.pack(">HH", 33, 1)  # SRV IN
+    return header + question, tid
+
+
+def _read_dns_name(data: bytes, offset: int) -> tuple[str, int]:
+    labels = []
+    jumped = False
+    end = offset
+    for _ in range(64):
+        if offset >= len(data):
+            break
+        length = data[offset]
+        if length & 0xC0 == 0xC0:  # 压缩指针
+            if not jumped:
+                end = offset + 2
+            offset = ((length & 0x3F) << 8) | data[offset + 1]
+            jumped = True
+            continue
+        if length == 0:
+            if not jumped:
+                end = offset + 1
+            break
+        labels.append(data[offset + 1:offset + 1 + length].decode("ascii", "replace"))
+        offset += 1 + length
+    return ".".join(labels), end
+
+
+def parse_srv_response(data: bytes, tid: int) -> tuple[str, int] | None:
+    """从 DNS 响应中取 priority 最小的 SRV 记录 (target, port)。"""
+    if len(data) < 12:
+        return None
+    rid, flags, qd, an = struct.unpack(">HHHH", data[:8])
+    if rid != tid or not flags & 0x8000 or an == 0:
+        return None
+    offset = 12
+    for _ in range(qd):  # 跳过 question
+        _, offset = _read_dns_name(data, offset)
+        offset += 4
+    best: tuple[int, str, int] | None = None
+    for _ in range(an):
+        _, offset = _read_dns_name(data, offset)
+        if offset + 10 > len(data):
+            return None
+        rtype, _rclass, _ttl, rdlen = struct.unpack(
+            ">HHIH", data[offset:offset + 10])
+        offset += 10
+        rdata_at = offset
+        offset += rdlen
+        if rtype != 33 or rdlen < 7:
+            continue
+        priority, _weight, port = struct.unpack(
+            ">HHH", data[rdata_at:rdata_at + 6])
+        target, _ = _read_dns_name(data, rdata_at + 6)
+        if target and (best is None or priority < best[0]):
+            best = (priority, target, port)
+    if best is None:
+        return None
+    return best[1], best[2]
+
+
+def resolve_srv(host: str, timeout: float = _SRV_TIMEOUT) -> tuple[str, int] | None:
     """查 _minecraft._tcp.<host> 的 SRV 记录。查不到 / 出错返回 None。
 
-    优先用 dnspython（若装了），否则跳过——SLP 直连绝大多数服务器可用，
-    SRV 只是锦上添花，不值得为它手写 DNS 客户端引入故障面。
+    纯标准库手写 DNS 查询（UDP 53），不依赖 dnspython；
+    resolv.conf 读不到（Windows）时用公共 DNS 兜底。
     """
     if not host or _looks_like_ip(host):
         return None
-    try:
-        import dns.resolver  # type: ignore
-    except ImportError:
-        return None
-    try:
-        answers = dns.resolver.resolve(f"_minecraft._tcp.{host}", "SRV",
-                                       lifetime=timeout)
-        best = min(answers, key=lambda r: (r.priority, -r.weight))
-        return str(best.target).rstrip("."), int(best.port)
-    except Exception:
-        return None
+    query, tid = _encode_dns_query(f"_minecraft._tcp.{host}")
+    for server in _dns_servers():
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.settimeout(timeout or _SRV_TIMEOUT)
+                sock.sendto(query, (server, 53))
+                data, _ = sock.recvfrom(2048)
+            result = parse_srv_response(data, tid)
+            if result:
+                return result
+        except OSError:
+            continue
+    return None
 
 
 def _looks_like_ip(host: str) -> bool:

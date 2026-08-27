@@ -159,5 +159,58 @@ class PingProtocolTests(unittest.TestCase):
         self.assertEqual(out["port"], server.port)
 
 
+class ReadVarintTests(unittest.TestCase):
+    def test_roundtrip(self):
+        for value in (0, 1, 127, 128, 255, 25565, 2097151, 2 ** 31 - 1, -1):
+            packed = sp.pack_varint(value)
+            buf = bytearray(packed)
+
+            def recv(n):
+                out = bytes(buf[:n])
+                del buf[:n]
+                return out
+
+            self.assertEqual(sp.read_varint(recv), value, value)
+
+
+class MotdTextTests(unittest.TestCase):
+    def test_plain_string_strips_section_codes(self):
+        self.assertEqual(sp.motd_text("§aHello §lWorld"), "Hello World")
+
+    def test_chat_component_with_extra(self):
+        desc = {"text": "A", "extra": [{"text": "B"}, {"text": "§cC"}]}
+        self.assertEqual(sp.motd_text(desc), "ABC")
+
+    def test_list_form(self):
+        self.assertEqual(sp.motd_text(["x", {"text": "y"}]), "xy")
+
+    def test_none(self):
+        self.assertEqual(sp.motd_text(None), "")
+
+
+class SrvParseTests(unittest.TestCase):
+    def test_parse_srv_answer(self):
+        # 手工构造带压缩指针的 SRV 响应
+        tid = 0x1234
+        name = b"\x0a_minecraft\x04_tcp\x07example\x03com\x00"
+        header = struct.pack(">HHHHHH", tid, 0x8180, 1, 1, 0, 0)
+        question = name + struct.pack(">HH", 33, 1)
+        target = b"\x02mc\x07example\x03com\x00"
+        rdata = struct.pack(">HHH", 5, 0, 25599) + target
+        answer = (b"\xc0\x0c" + struct.pack(">HHIH", 33, 1, 300, len(rdata))
+                  + rdata)
+        data = header + question + answer
+        result = sp.parse_srv_response(data, tid)
+        self.assertEqual(result, ("mc.example.com", 25599))
+
+    def test_wrong_tid_rejected(self):
+        data = struct.pack(">HHHHHH", 1, 0x8180, 0, 1, 0, 0)
+        self.assertIsNone(sp.parse_srv_response(data, 2))
+
+    def test_no_answers(self):
+        data = struct.pack(">HHHHHH", 7, 0x8180, 0, 0, 0, 0)
+        self.assertIsNone(sp.parse_srv_response(data, 7))
+
+
 if __name__ == "__main__":
     unittest.main()
