@@ -56,6 +56,9 @@ Thumbs.db
 _*.txt
 _*.json
 !requirements.txt
+# 根目录一次性探针/审计脚本（调试产物，勿提交）
+/_*.py
+/playtime.json
 会话-*.md
 *.mp4
 
