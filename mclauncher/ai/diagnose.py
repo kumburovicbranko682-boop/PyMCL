@@ -19,16 +19,20 @@ def diagnose(instance: Instance, extra_log: str = "") -> dict:
         })
     return {
         "instance": report.get("instance") or instance.name,
+        "version": report.get("version") or "",
         "has_latest": bool(report.get("has_latest")),
         "has_crash": bool(report.get("has_crash")),
         "has_hs_err": bool(report.get("has_hs_err")),
         "latest_path": next((f for f in report.get("files") or [] if f.lower().endswith("latest.log")), ""),
         "crash_path": report.get("direct_file") or "",
         "findings": findings,
+        # 可一键执行的修复（crash.build_actions 生成），UI 渲染成按钮
+        "actions": list(report.get("actions") or []),
         "hint": report.get("summary") or report.get("detail") or "",
         "detail": report.get("detail") or "",
-        "latest_tail": report.get("log_mc") or "",
-        "crash_tail": report.get("log_crash") or "",
+        # 尾部日志截短：完整版靠 get_latest_log / get_crash_report 再要
+        "latest_tail": (report.get("log_mc") or "")[-3000:],
+        "crash_tail": (report.get("log_crash") or "")[-3000:],
     }
 
 

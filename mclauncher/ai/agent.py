@@ -5,11 +5,15 @@ from __future__ import annotations
 
 import json
 
+from . import memory as memory_mod
 from .client import AIClientError, chat_once, chat_stream
-from .defaults import DANGEROUS_TOOLS, LONG_TOOLS, MAX_HISTORY, MAX_TOOL_ROUNDS
+from .defaults import (
+    DANGEROUS_TOOLS, DIAGNOSE_MAX_TOKENS, DIAGNOSE_MODEL, DIAGNOSE_TOOLS,
+    LONG_TOOLS, MAX_HISTORY, MAX_TOOL_ROUNDS,
+)
 from .prompt import system_prompt
 from .tools import (
-    TOOL_SCHEMAS, confirm_label, is_ask_tool, is_write_tool,
+    TOOL_SCHEMAS, confirm_label, exact_match_hit, is_ask_tool, is_write_tool,
     normalize_ask_args, parse_args, run_tool, runtime_context,
 )
 
@@ -26,12 +30,20 @@ def _trim_history(history: list) -> list:
     return list(history[-MAX_HISTORY:])
 
 
-def _system_messages(backend, settings: dict) -> list:
+def _system_messages(backend, settings: dict, chat_notes: list | None = None) -> list:
     ctx = runtime_context(backend)
     msgs = [
         {"role": "system", "content": system_prompt()},
         {"role": "system", "content": "当前启动器状态：\n" + ctx},
     ]
+    mem = memory_mod.system_note()
+    if mem:
+        msgs.append({"role": "system", "content": mem})
+    if chat_notes:
+        recent = [str(n) for n in chat_notes[-8:] if str(n).strip()]
+        if recent:
+            msgs.append({"role": "system", "content":
+                         "[本对话此前几轮实际执行过的操作]\n" + "\n".join(recent)})
     note = _permission_note(settings or {})
     if note:
         msgs.append({"role": "system", "content": note})
@@ -62,22 +74,33 @@ def _confirm_policy(settings: dict, tname: str) -> bool:
     return True
 
 
+def _round_kwargs(settings: dict, deep: bool) -> dict:
+    """诊断轮：放宽 token；公益模式尝试切深度诊断模型（网关白名单不认就回落）。"""
+    if not deep:
+        return {}
+    out = {"max_tokens": DIAGNOSE_MAX_TOKENS}
+    if (settings.get("ai_mode") or "public").strip().lower() not in ("custom", "newapi", "自定义"):
+        out["model"] = DIAGNOSE_MODEL
+    return out
+
+
 def run_agent(backend, settings: dict, history: list, user_text: str,
               on_delta=None, on_status=None, confirm_fn=None, ask_fn=None,
-              cancelled=None, http_cancel=None):
+              cancelled=None, http_cancel=None, chat_notes: list | None = None):
     """
     on_delta(text)
     on_status(kind, payload)
     confirm_fn(tool_name, args, label) -> bool
     ask_fn(questions, title) -> dict | None
     cancelled() -> bool
+    chat_notes: 本对话此前几轮的工具执行摘要（跨轮记忆）
     返回最终助手文本。
     """
     def _check():
         if cancelled and cancelled():
             raise AgentCancelled()
 
-    messages = _system_messages(backend, settings) + _trim_history(history)
+    messages = _system_messages(backend, settings, chat_notes) + _trim_history(history)
     messages.append({"role": "user", "content": user_text})
 
     final = ""
@@ -86,6 +109,8 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
     search_done: dict = {}
     need_pick = False
     pick_nudged = False
+    deep_round = False        # 本轮跑过诊断类工具：后续回复放宽 token/换诊断模型
+    skip_confirm_next = False  # ask_user 刚选完：下一个非破坏性写操作免二次确认
     for _round in range(MAX_TOOL_ROUNDS):
         _check()
         if on_status:
@@ -95,8 +120,10 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
         text_parts = []
         truncated = False
         stream_failed = False
+        round_kwargs = _round_kwargs(settings, deep_round)
         try:
-            for ev in chat_stream(settings, messages, TOOL_SCHEMAS, http_cancel=http_cancel):
+            for ev in chat_stream(settings, messages, TOOL_SCHEMAS,
+                                  http_cancel=http_cancel, **round_kwargs):
                 _check()
                 kind = ev.get("type")
                 if kind == "delta":
@@ -121,7 +148,8 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
 
         if not tool_calls and (stream_failed or not "".join(text_parts)):
             _check()
-            data = chat_once(settings, messages, TOOL_SCHEMAS, http_cancel=http_cancel)
+            data = chat_once(settings, messages, TOOL_SCHEMAS,
+                             http_cancel=http_cancel, **round_kwargs)
             if not text_parts and data.get("content"):
                 text_parts.append(data["content"])
                 if on_delta:
@@ -190,12 +218,14 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
                         on_status("tool_skip", {"name": tname, "label": label})
                 else:
                     asked = True
+                    skip_confirm_next = True
                     result = answered if isinstance(answered, str) else json.dumps(
                         answered, ensure_ascii=False)
                     result = (
                         f"{result}\n"
                         "[系统] 用户已选完。下一步必须调用对应工具："
                         "装游戏 → install_game（纯原版 loader=无）。不要结束对话。"
+                        "刚选完的这件事不会再弹确认，直接执行。"
                     )
                     if on_status:
                         on_status("tool_done", {"name": tname, "label": "已选择", "result": str(result)[:400]})
@@ -214,18 +244,40 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
                     if on_status:
                         on_status("tool_run", {"name": tname, "label": label})
                     result = run_tool(backend, tname, args, wait=False, cancelled=cancelled)
-                    hint = (
-                        "\n[系统] 搜索结束。下一动作必须是 ask_user 让用户从上述结果里选。"
-                        "禁止用相同关键词再次调用该搜索。"
-                    )
+                    hit = None
+                    try:
+                        rows = json.loads(result) if isinstance(result, str) else None
+                        if isinstance(rows, list):
+                            hit = exact_match_hit(rows, str(args.get("query") or ""))
+                    except Exception:
+                        hit = None
+                    if hit is not None and tname != "search_versions":
+                        # 用户点名的东西搜到了精确唯一命中：直接装，别再让用户点一遍
+                        ident = hit.get("slug") or hit.get("id") or hit.get("name") or ""
+                        hint = (
+                            f"\n[系统] 结果精确唯一命中：{hit.get('name')}"
+                            f"（source={hit.get('source')}, slug/id={ident}）。"
+                            "直接调用对应 install_* 安装它，不要 ask_user。"
+                        )
+                        skip_confirm_next = False
+                    else:
+                        hint = (
+                            "\n[系统] 搜索结束。下一动作必须是 ask_user 让用户从上述结果里选。"
+                            "禁止用相同关键词再次调用该搜索。"
+                        )
+                        need_pick = True
                     result = f"{result}{hint}"
                     search_done[qkey] = result
-                    need_pick = True
                     if on_status:
                         on_status("tool_done", {"name": tname, "label": label, "result": str(result)[:400]})
             elif is_write_tool(tname):
                 ok = True
-                if confirm_fn and _confirm_policy(settings, tname):
+                need_confirm = bool(confirm_fn) and _confirm_policy(settings, tname)
+                if (need_confirm and skip_confirm_next
+                        and tname not in DANGEROUS_TOOLS):
+                    # ask_user 刚选完：这次写操作就是用户点的那件事，不再弹一次确认
+                    need_confirm = False
+                if need_confirm:
                     ok = bool(confirm_fn(tname, args, label))
                 if not ok:
                     result = "用户取消了这次操作"
@@ -233,6 +285,7 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
                         on_status("tool_skip", {"name": tname, "label": label})
                 else:
                     wrote = True
+                    skip_confirm_next = False
                     if on_status:
                         on_status("tool_run", {"name": tname, "label": label})
                     wait = tname not in LONG_TOOLS and tname != "launch_game"
@@ -252,8 +305,17 @@ def run_agent(backend, settings: dict, history: list, user_text: str,
                 if on_status:
                     on_status("tool_run", {"name": tname, "label": label})
                 result = run_tool(backend, tname, args, wait=False, cancelled=cancelled)
+                if tname in DIAGNOSE_TOOLS:
+                    deep_round = True
+                payload = {"name": tname, "label": label, "result": str(result)[:400]}
+                if tname == "diagnose_launch":
+                    # 一键修复动作走旁路（结果字符串可能被截断，不能靠解析它）
+                    diag = getattr(backend, "_last_diagnose", None) or {}
+                    if diag.get("actions"):
+                        payload["actions"] = diag["actions"]
+                        payload["report"] = diag.get("report") or {}
                 if on_status:
-                    on_status("tool_done", {"name": tname, "label": label, "result": str(result)[:400]})
+                    on_status("tool_done", payload)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.get("id") or "",

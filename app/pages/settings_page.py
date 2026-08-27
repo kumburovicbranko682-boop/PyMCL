@@ -547,7 +547,7 @@ class SettingsPage(QWidget):
         self.rec_btn.clicked.connect(self._show_recommendation)
 
         ai_group = SettingCardGroup(tr("AI 助手"), host)
-        mode_card = SettingCard(getattr(FIF, "CHAT", None) or FIF.HELP, tr("接入方式"), tr("公益接口已内置，小白不用填密钥"))
+        mode_card = SettingCard(getattr(FIF, "CHAT", None) or FIF.HELP, tr("接入方式"), tr("公益接口走网关，不在本机存密钥"))
         self.ai_mode = ComboBox(mode_card)
         self.ai_mode.addItems([tr("公益接口"), tr("自定义 NewAPI")])
         self.ai_mode.setCurrentText(
@@ -556,7 +556,8 @@ class SettingsPage(QWidget):
         mode_card.hBoxLayout.addWidget(self.ai_mode, 0, Qt.AlignRight)
         mode_card.hBoxLayout.addSpacing(16)
         self.gw_card, self.ai_gateway = _line_card(
-            FIF.CLOUD_DOWNLOAD, tr("自建网关（可选）"), tr("一般留空，走内置公益接口"))
+            FIF.CLOUD_DOWNLOAD, tr("公益网关地址"),
+            tr("HTTPS 地址；发行版已内置，自建填自己的（不带 /v1）"))
         self.ai_gateway.setText(settings.get("ai_gateway_url") or "")
         self.base_card, self.ai_base = _line_card(
             FIF.VIEW, "NewAPI Base URL", tr("自定义模式：填到 /v1 为止"))
@@ -565,7 +566,7 @@ class SettingsPage(QWidget):
             FIF.VPN, tr("NewAPI 令牌"), tr("只在自定义模式使用，不要用站长无限额令牌"), password=True)
         self.ai_key.setText(settings.get("ai_api_key") or "")
         self.model_card, self.ai_model = _line_card(
-            FIF.EDIT, tr("模型名"), tr("公益模式锁定 deepseek-v4-flash；自定义才改得了"))
+            FIF.EDIT, tr("模型名"), tr("公益模式在网关白名单内可切换，不在名单会回落默认"))
         self.ai_model.setText(settings.get("ai_model") or "deepseek-v4-flash")
         ai_group.addSettingCard(mode_card)
         ai_group.addSettingCard(self.gw_card)
@@ -707,7 +708,8 @@ class SettingsPage(QWidget):
         self.gw_card.setVisible(not custom)
         self.base_card.setVisible(custom)
         self.key_card.setVisible(custom)
-        self.model_card.setVisible(custom)
+        # 模型名两种模式都能改：公益模式由网关白名单把关
+        self.model_card.setVisible(True)
 
     def _apply_theme_now(self):
         win = self.window()

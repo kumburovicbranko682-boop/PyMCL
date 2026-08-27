@@ -28,16 +28,25 @@ from mclauncher.ai.defaults import DEFAULT_MODEL
 from ..pcl_chrome import Theme
 from mclauncher.i18n import tr
 
-_STOP = {tr("已停止"), tr("已取消")}
-_CHIPS = (tr("下一款游戏 1.20.1 Fabric"), tr("装钠和光影"), tr("启动闪退了帮我看"))
-_WELCOME = (
-    tr("我是启动器助手。可以帮你下游戏、装模组和整合包、看启动报错、查模组冲突、改常用配置。\n"
-    "直接说你想做什么就行。写操作我会先让你确认。")
-)
-_WELCOME_NOCONFIRM = (
-    tr("我是启动器助手。可以帮你下游戏、装模组和整合包、看启动报错、查模组冲突、改常用配置。\n"
-    "直接说你想做什么就行。写操作会直接执行，不逐条询问。")
-)
+# 这些文案必须运行时求值：模块导入期调 tr() 会把语言钉死在启动时的设置上
+def _stop_texts() -> set:
+    return {tr("已停止"), tr("已取消")}
+
+
+def _chips() -> tuple:
+    return (tr("下一款游戏 1.20.1 Fabric"), tr("装钠和光影"), tr("启动闪退了帮我看"))
+
+
+def _welcome(confirm_on: bool) -> str:
+    base = tr(
+        "我是启动器助手。可以帮你下游戏、装模组和整合包、更新模组、看启动报错、"
+        "查模组冲突、调内存、改常用配置，也能查 Minecraft Wiki 回答玩法问题。\n"
+        "我只能操作这台电脑上的 PyMCL；游戏知识以 Wiki 查到的为准，查不到我会直说。")
+    if confirm_on:
+        return base + "\n" + tr("直接说你想做什么就行。写操作我会先让你确认。")
+    return base + "\n" + tr("直接说你想做什么就行。写操作会直接执行，不逐条询问。")
+
+
 _FENCE = re.compile(r"```(?:\w+)?\n([\s\S]*?)```")
 _CODE = re.compile(r"`([^`]+)`")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
@@ -78,12 +87,14 @@ class AgentThread(QThread):
     done = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, backend, settings, history, user_text, parent=None):
+    def __init__(self, backend, settings, history, user_text, parent=None,
+                 chat_notes=None):
         super().__init__(parent)
         self.backend = backend
         self.settings = settings
         self.history = history
         self.user_text = user_text
+        self.chat_notes = list(chat_notes or [])
         self._cancel = False
         self._http = HttpCancel()
         self._confirm_ev = threading.Event()
@@ -133,7 +144,7 @@ class AgentThread(QThread):
                 self.backend, self.settings, self.history, self.user_text,
                 on_delta=on_delta, on_status=on_status,
                 confirm_fn=confirm_fn, ask_fn=ask_fn, cancelled=cancelled,
-                http_cancel=self._http,
+                http_cancel=self._http, chat_notes=self.chat_notes,
             )
             if self._cancel:
                 self.failed.emit(tr("已停止"))
@@ -285,6 +296,59 @@ class ConfirmCard(QFrame):
         )
 
 
+class FixCard(QFrame):
+    """诊断后的一键修复：复用崩溃弹窗的 crash actions，点按钮直接执行。"""
+
+    def __init__(self, actions: list, report: dict, backend, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.report = dict(report or {})
+        self.restyle()
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(8)
+        lay.addWidget(BodyLabel(tr("一键修复：")))
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for action in list(actions or [])[:5]:
+            btn = PushButton(tr(action.get("label") or action.get("id") or "修复"))
+            btn.setFixedHeight(30)
+            btn.clicked.connect(lambda _=False, a=dict(action), b=btn: self._run(a, b))
+            row.addWidget(btn)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+    def restyle(self):
+        bg = "#173125" if Theme.dark else "#EFF8F2"
+        border = "#2E9B6B"
+        self.setStyleSheet(
+            f"FixCard {{ background: {bg}; border: 1px solid {border}; border-radius: 10px; }}")
+
+    def _run(self, action: dict, btn):
+        btn.setEnabled(False)
+        btn.setText(tr("执行中…"))
+
+        def work():
+            return self.backend.apply_crash_action(action, self.report)
+
+        def ok(result):
+            good = bool((result or {}).get("ok"))
+            msg = (result or {}).get("message") or (tr("已完成") if good else tr("失败"))
+            btn.setText(tr("已处理") if good else tr("失败"))
+            btn.setEnabled(not good)
+            (InfoBar.success if good else InfoBar.error)(
+                tr("一键修复"), msg, parent=self.window() or self,
+                position=InfoBarPosition.TOP, duration=4000)
+
+        def err(exc):
+            btn.setEnabled(True)
+            btn.setText(tr(action.get("label") or "修复"))
+            InfoBar.error(tr("修复失败"), str(exc), parent=self.window() or self,
+                          position=InfoBarPosition.TOP, duration=4500)
+
+        self.backend.call_async(work, ok, err)
+
+
 class AskCard(QFrame):
     submitted = Signal(object)
     cancelled = Signal()
@@ -293,6 +357,9 @@ class AskCard(QFrame):
         super().__init__(parent)
         self.restyle()
         self._qs = []
+        qs = list(questions or [])
+        # 单题单选：选项直接做成按钮，点了立刻提交——省掉「选完再点确定」那一步
+        self._instant = len(qs) == 1 and not bool(qs[0].get("allow_multiple"))
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 10, 12, 10)
         lay.setSpacing(10)
@@ -300,7 +367,10 @@ class AskCard(QFrame):
             t = BodyLabel(title)
             t.setWordWrap(True)
             lay.addWidget(t)
-        for q in questions or []:
+        if self._instant:
+            self._build_instant(lay, qs[0])
+            return
+        for q in qs:
             block = _AskBlock(q)
             self._qs.append(block)
             lay.addWidget(block)
@@ -311,6 +381,43 @@ class AskCard(QFrame):
         no.clicked.connect(self.cancelled.emit)
         row.addWidget(ok)
         row.addWidget(no)
+        row.addStretch(1)
+        lay.addLayout(row)
+
+    def _build_instant(self, lay, q: dict):
+        qid = str(q.get("id") or "q1")
+        prompt = str(q.get("prompt") or tr("请选择"))
+        hint = BodyLabel(prompt)
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+
+        def pick(oid: str, label: str, other_text: str = ""):
+            self.setEnabled(False)
+            self.submitted.emit({"answers": {qid: {
+                "ids": [oid], "labels": [label],
+                "other_text": other_text,
+            }}})
+
+        other_edit = LineEdit()
+        other_edit.setPlaceholderText(tr("自己填，回车提交"))
+        other_edit.hide()
+        for i, o in enumerate(q.get("options") or []):
+            oid = str(o.get("id") or f"opt_{i}")
+            label = str(o.get("label") or oid)
+            btn = PrimaryPushButton(label) if i == 0 and oid != "other" else PushButton(label)
+            btn.setFixedHeight(32)
+            if oid == "other":
+                btn.clicked.connect(lambda *_a: (other_edit.show(), other_edit.setFocus()))
+            else:
+                btn.clicked.connect(lambda *_a, x=oid, l=label: pick(x, l))
+            lay.addWidget(btn)
+        other_edit.returnPressed.connect(
+            lambda: other_edit.text().strip() and pick("other", tr("其他"), other_edit.text().strip()))
+        lay.addWidget(other_edit)
+        skip = TransparentPushButton(tr("跳过"))
+        skip.clicked.connect(lambda: (self.setEnabled(False), self.cancelled.emit()))
+        row = QHBoxLayout()
+        row.addWidget(skip)
         row.addStretch(1)
         lay.addLayout(row)
 
@@ -580,7 +687,7 @@ class AiPage(QWidget):
         chips = QHBoxLayout(self._chips_host)
         chips.setContentsMargins(0, 0, 0, 0)
         chips.setSpacing(8)
-        for t in _CHIPS:
+        for t in _chips():
             b = PushButton(t)
             b.setFixedHeight(28)
             b.clicked.connect(lambda *_a, s=t: self._send_text(s))
@@ -660,7 +767,7 @@ class AiPage(QWidget):
         )
         self.status.setStyleSheet(f"color: {Theme.muted};")
         # 已经贴在对话流里的气泡 / 工具行 / 卡片不会自己跟主题走，逐个刷一遍
-        for kind in (Bubble, ToolLine, ConfirmCard, AskCard):
+        for kind in (Bubble, ToolLine, ConfirmCard, AskCard, FixCard):
             for w in self._host.findChildren(kind):
                 w.restyle()
         self._refresh_status()
@@ -668,10 +775,8 @@ class AiPage(QWidget):
     def _refresh_status(self):
         s = self.backend.get_settings()
         mode = s.get("ai_mode") or "public"
-        if mode == "custom":
-            label = f"{tr('自定义')} · {s.get('ai_model') or DEFAULT_MODEL}"
-        else:
-            label = f"{tr('公益接口')} · {DEFAULT_MODEL}"
+        model = s.get("ai_model") or DEFAULT_MODEL
+        label = f"{tr('自定义') if mode == 'custom' else tr('公益接口')} · {model}"
         self.status.setText(label)
 
     def _perm_level(self) -> str:
@@ -762,8 +867,7 @@ class AiPage(QWidget):
         self._wipe_messages()
         if not self._history:
             s = self.backend.get_settings()
-            welcome = _WELCOME if bool(s.get("ai_confirm_writes", True)) else _WELCOME_NOCONFIRM
-            self._add_bubble("assistant", welcome)
+            self._add_bubble("assistant", _welcome(bool(s.get("ai_confirm_writes", True))))
         else:
             for m in self._history:
                 role = m.get("role") or "assistant"
@@ -857,6 +961,22 @@ class AiPage(QWidget):
         self.input.clear()
         self._send(text)
 
+    def open_with_context(self, text: str, *, source: str = "", send: bool = True):
+        """从崩溃弹窗 / 预检 / 任务失败 / 模组页带上下文打开 AI 并直接发问。"""
+        self._stop(wait=True)
+        chat_store.new_chat(self._store)
+        self._load_active()
+        self._reload_list()
+        try:
+            self.backend._ui_context = {"source": source} if source else {}
+        except Exception:
+            pass
+        if send and (text or "").strip():
+            self._send_text(text)
+        else:
+            self.input.setPlainText(text or "")
+            self.input.setFocus()
+
     def _send(self, text: str, *, echo: bool = True):
         if echo:
             self._add_bubble("user", text)
@@ -868,9 +988,11 @@ class AiPage(QWidget):
         self._assistant_bubble = self._add_bubble("assistant", tr("正在想…"))
         settings = self.backend.get_settings()
         self.backend._ui_launch = self._launch_prefs()
+        chat = chat_store.get_chat(self._store, self._store.get("active_id") or "") or {}
         # 只截取最近 24 条喂给模型；完整历史留在 self._history 里，不能跟着截
         worker = AgentThread(
-            self.backend, settings, chat_store.api_messages(self._history[-24:]), text, self)
+            self.backend, settings, chat_store.api_messages(self._history[-24:]), text, self,
+            chat_notes=list(chat.get("notes") or []))
         self._worker = worker
         worker.delta.connect(self._on_delta, Qt.QueuedConnection)
         worker.status.connect(self._on_status, Qt.QueuedConnection)
@@ -950,6 +1072,10 @@ class AiPage(QWidget):
             if tid and line:
                 line.bind_task(tid)
                 self._task_lines[tid] = line
+            if payload.get("actions"):
+                # 诊断给出可一键执行的修复：直接贴按钮卡，不用等模型打字
+                self._add_widget(FixCard(
+                    payload["actions"], payload.get("report") or {}, self.backend))
             if label:
                 self._notes.append(label)
         elif kind == "tool_skip":
@@ -1027,6 +1153,15 @@ class AiPage(QWidget):
             self._history.append({"role": "user", "content": user})
             self._history.append({"role": "assistant" if ok else "error", "content": shown or ""})
             self._persist()
+            if self._notes:
+                # 工具执行摘要单独存：下一轮注入 system，模型不用靠气泡文字回忆
+                chat_store.append_notes(
+                    self._store, self._store.get("active_id") or "", self._notes)
+        # 「从哪打开的」只对带上下文的那一轮有意义，用完即清
+        try:
+            self.backend._ui_context = {}
+        except Exception:
+            pass
         self._pending_user = None
         self._worker = None
         self._assistant_bubble = None
@@ -1048,13 +1183,14 @@ class AiPage(QWidget):
             self._assistant_bubble.set_text(text)
         else:
             self._add_bubble("error", text)
-        if text in _STOP:
+        stopped = text in _stop_texts()
+        if stopped:
             InfoBar.info(tr("已停止"), tr("可以继续说下一句"), parent=self.window() or self,
                          position=InfoBarPosition.TOP, duration=2200)
         else:
             InfoBar.error(tr("助手出错"), text, parent=self.window() or self,
                           position=InfoBarPosition.TOP, duration=12000)
-        self._finish(text, text in _STOP)
+        self._finish(text, stopped)
 
     def _stop(self, wait=False):
         if self._worker:
@@ -1074,3 +1210,28 @@ class AiPage(QWidget):
         line.set_text((tr("完成：") if success else tr("失败：")) + (message or ""))
         if hasattr(line, "bar"):
             line.bar.setValue(100 if success else line.bar.value())
+        if not success and (message or "") != tr("已取消"):
+            self._writeback_task_failure(task_id, message or "")
+
+    def _writeback_task_failure(self, task_id: str, message: str):
+        """AI 发起的任务在后台失败：自动回写对话并给一键让 AI 重试的入口。
+
+        没有这个，模型说完「已开始安装」就失联了——装失败用户还以为装好了。
+        """
+        title = ""
+        try:
+            title = self.backend.task_title(task_id) or ""
+        except Exception:
+            title = ""
+        text = tr("任务「{0}」失败了：{1}").format(title or task_id, message or tr("未知原因"))
+        self._add_bubble("error", text)
+        self._history.append({"role": "error", "content": text})
+        self._persist()
+        ask = tr(
+            "刚才的任务「{0}」失败了：{1}。请分析失败原因，"
+            "看是否需要换下载源或换版本，需要的话直接帮我重试。"
+        ).format(title or task_id, message or tr("未知原因"))
+        btn = PushButton(FIF.SYNC, tr("让 AI 分析并重试"))
+        btn.setFixedHeight(30)
+        btn.clicked.connect(lambda *_a, t=ask, b=btn: (b.setEnabled(False), self._send_text(t)))
+        self._add_widget(btn)

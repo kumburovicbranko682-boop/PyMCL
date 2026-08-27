@@ -9,7 +9,10 @@
 import os
 import time
 
-from qfluentwidgets import FluentIcon as FIF, InfoBar, InfoBarPosition, setTheme, setThemeColor, Theme as FluentTheme
+from qfluentwidgets import (
+    FluentIcon as FIF, InfoBar, InfoBarPosition, PushButton, setTheme,
+    setThemeColor, Theme as FluentTheme,
+)
 from qfluentwidgets.window.fluent_window import FluentWindowBase
 from PySide6.QtCore import Qt, QEasingCurve, QPoint, QPropertyAnimation, QTimer
 from PySide6.QtWidgets import QApplication, QLabel
@@ -1250,6 +1253,15 @@ class MainWindow(FluentWindowBase):
             box.setCurrentText(pick)
         self.launch_page._on_launch()
 
+    def open_ai_with_context(self, text: str, *, source: str = "", send: bool = True):
+        """带上下文打开 AI 助手：崩溃弹窗、预检失败、任务失败、模组页都走这里。"""
+        page = self.ai_page
+        if page is None:
+            return
+        self.switchTo(page)
+        self.side.set_current("ai", emit=False)
+        page.open_with_context(text, source=source, send=send)
+
     def _notify_task(self, task_id, success, message):
         pending = self._launch_after.pop(task_id, None)
         title = self.backend.task_title(task_id)
@@ -1268,8 +1280,19 @@ class MainWindow(FluentWindowBase):
                             position=InfoBarPosition.TOP_RIGHT, duration=3000)
             self._maybe_show_manual_downloads()
         elif message != tr("已取消"):
-            InfoBar.error(title, message, parent=self,
-                          position=InfoBarPosition.TOP_RIGHT, duration=5000)
+            bar = InfoBar.error(title, message, parent=self,
+                                position=InfoBarPosition.TOP_RIGHT, duration=8000)
+            ask = PushButton(tr("问 AI"))
+            ask.setFixedHeight(26)
+            prompt = tr(
+                "下载任务「{0}」失败了：{1}。请分析失败原因，"
+                "看是否需要换下载源或换版本，需要的话直接帮我重试。"
+            ).format(title, message or tr("未知原因"))
+            ask.clicked.connect(
+                lambda *_a, t=prompt, b=bar: (
+                    self.open_ai_with_context(t, source=tr("下载任务失败提示")),
+                    b.close()))
+            bar.addWidget(ask)
 
     def _maybe_show_manual_downloads(self):
         """整合包里有作者禁止第三方下载的 Mod 时，弹清单引导手动下载（对标 PCL2）。"""

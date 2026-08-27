@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
-    CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
-    LineEdit, MessageBox, MessageBoxBase, PushButton, SubtitleLabel, SwitchButton,
+    Action, CaptionLabel, CheckBox, ComboBox, FluentIcon as FIF, InfoBar, InfoBarPosition,
+    LineEdit, MessageBox, MessageBoxBase, PushButton, RoundMenu, SubtitleLabel, SwitchButton,
     TransparentPushButton, TransparentTogglePushButton, TransparentToolButton,
 )
 
@@ -50,6 +50,7 @@ class _ModRow(QFrame):
     def __init__(self, entry: dict, page):
         super().__init__(page)
         self.entry = entry
+        self._page = page
         self.setObjectName("modMgrRow")
         self.setStyleSheet(row_qss("modMgrRow"))
         self.setFixedHeight(60)
@@ -110,6 +111,17 @@ class _ModRow(QFrame):
         btn.setToolTip(tr("删除"))
         btn.clicked.connect(lambda _, n=filename: page._delete(n))
         lay.addWidget(btn)
+
+    def contextMenuEvent(self, event):
+        name = self.entry.get("filename") or "?"
+        menu = RoundMenu(parent=self)
+        ask_mod = Action(getattr(FIF, "CHAT", None) or FIF.HELP, tr("问 AI 这个模组"))
+        ask_mod.triggered.connect(lambda: self._page._ask_ai_mod(self.entry))
+        scan = Action(FIF.SEARCH, tr("让 AI 扫描模组冲突"))
+        scan.triggered.connect(lambda: self._page._ask_ai_conflicts(name))
+        menu.addAction(ask_mod)
+        menu.addAction(scan)
+        menu.exec(event.globalPos())
 
     @staticmethod
     def _icon(icon_path, display: str) -> QWidget:
@@ -440,8 +452,11 @@ class ModManagerPage(QWidget):
         self.batch_btn = TransparentTogglePushButton(
             getattr(FIF, "CHECKBOX", FIF.EDIT), tr("批量管理"))
         self.batch_btn.setToolTip(tr("勾选多个模组批量启用/禁用/删除"))
+        self.ai_btn = TransparentPushButton(getattr(FIF, "CHAT", None) or FIF.HELP,
+                                            tr("AI 查冲突"))
         for b in (self.folder_btn, self.import_btn, self.update_btn, self.lock_btn,
-                  self.conflict_btn, self.export_btn, self.batch_btn):
+                  self.conflict_btn, self.export_btn, self.batch_btn,
+                  self.ai_btn):
             b.setFixedHeight(32)
             bar.addWidget(b)
         cv.addLayout(bar)
@@ -504,6 +519,7 @@ class ModManagerPage(QWidget):
         self.enable_sel_btn.clicked.connect(lambda: self._batch_apply("enable"))
         self.disable_sel_btn.clicked.connect(lambda: self._batch_apply("disable"))
         self.delete_sel_btn.clicked.connect(lambda: self._batch_apply("delete"))
+        self.ai_btn.clicked.connect(lambda: self._ask_ai_conflicts())
         self.setAcceptDrops(True)
 
         # 目录监视（PCL2 同款）：在文件管理器里往 mods 文件夹放/删文件，
@@ -893,6 +909,31 @@ class ModManagerPage(QWidget):
         self.backend.call_async(
             lambda i=inst, v=ver: self.backend.scan_mod_conflicts(i, v),
             guard(self, _done), guard(self, _fail))
+
+    def _open_ai(self, prompt: str):
+        win = self.window()
+        if hasattr(win, "open_ai_with_context"):
+            win.open_ai_with_context(prompt, source=tr("模组管理页"))
+        else:
+            InfoBar.warning(tr("无法打开 AI"), tr("主窗口没有 AI 助手页"), parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)
+
+    def _ask_ai_conflicts(self, focus: str = ""):
+        inst = self._current_instance()
+        prompt = tr("帮我扫描实例 {0} 的模组冲突、缺失依赖和加载器不匹配，"
+                    "给出禁用或补装建议。").format(inst)
+        if focus:
+            prompt += tr("我比较担心 {0} 这个模组。").format(focus)
+        self._open_ai(prompt)
+
+    def _ask_ai_mod(self, entry: dict):
+        inst = self._current_instance()
+        name = entry.get("filename") or "?"
+        state = tr("已启用") if entry.get("enabled") else tr("已禁用")
+        prompt = tr("实例 {0} 里有个模组文件 {1}（{2}）。"
+                    "这是干什么用的？和我现有模组会不会冲突、有没有缺依赖？"
+                    ).format(inst, name, state)
+        self._open_ai(prompt)
 
     # ------------------------------------------------------------------
     def dragEnterEvent(self, event):
