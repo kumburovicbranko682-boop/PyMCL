@@ -19,8 +19,21 @@ GITHUB_PROXY_PREFIXES = (
 DEAD_PROXY_PREFIXES = (
     "https://gitproxy.mrhjx.cn/",
 )
-REMOTE_SOURCE_URLS = (
-    "https://raw.githubusercontent.com/LQS660/pymcl-download-sources/main/sources.txt",
+REMOTE_SOURCE_RAW_URL = (
+    "https://raw.githubusercontent.com/LQS660/pymcl-download-sources/main/sources.txt"
+)
+RAW_GITHUB_MIRROR_PREFIXES = (
+    # 仅用于拉取公开链接表；gitproxy 仍不参与普通 GitHub 文件下载。
+    "https://gitproxy.mrhjx.cn/",
+    "https://ghproxy.vip/",
+    "https://gh-proxy.com/",
+    "https://v6.gh-proxy.org/",
+    "https://cdn.gh-proxy.com/",
+)
+REMOTE_SOURCE_URLS = tuple(
+    prefix + REMOTE_SOURCE_RAW_URL for prefix in RAW_GITHUB_MIRROR_PREFIXES
+) + (
+    REMOTE_SOURCE_RAW_URL,
     "https://cdn.jsdelivr.net/gh/LQS660/pymcl-download-sources@main/sources.txt",
 )
 REMOTE_SOURCE_TTL = 12 * 60 * 60

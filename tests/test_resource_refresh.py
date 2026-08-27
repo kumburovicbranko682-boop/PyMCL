@@ -170,6 +170,25 @@ class GithubProxyTests(unittest.TestCase):
         self.assertIn("https://ghfast.top/", mirrors.GITHUB_PROXY_PREFIXES)
         self.assertIn("https://gh.llkk.cc/", mirrors.GITHUB_PROXY_PREFIXES)
 
+    def test_remote_source_fetch_uses_built_in_raw_mirrors(self):
+        expected_prefixes = (
+            "https://gitproxy.mrhjx.cn/",
+            "https://ghproxy.vip/",
+            "https://gh-proxy.com/",
+            "https://v6.gh-proxy.org/",
+            "https://cdn.gh-proxy.com/",
+        )
+        self.assertEqual(mirrors.RAW_GITHUB_MIRROR_PREFIXES, expected_prefixes)
+        self.assertEqual(
+            mirrors.REMOTE_SOURCE_URLS[:len(expected_prefixes)],
+            tuple(prefix + mirrors.REMOTE_SOURCE_RAW_URL for prefix in expected_prefixes),
+        )
+        self.assertEqual(
+            mirrors.REMOTE_SOURCE_URLS[len(expected_prefixes)],
+            mirrors.REMOTE_SOURCE_RAW_URL,
+        )
+        self.assertNotIn("https://gitproxy.mrhjx.cn/", mirrors.GITHUB_PROXY_PREFIXES)
+
     def test_old_config_with_dead_proxy_is_migrated(self):
         old = ["https://gitproxy.mrhjx.cn/", "https://my.custom.proxy/", "https://gh-proxy.com/"]
         got = self._prefixes_with(old)
