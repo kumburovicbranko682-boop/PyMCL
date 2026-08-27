@@ -393,7 +393,16 @@ class LaunchPage(QWidget):
         if errors:
             body = "\n\n".join(
                 f"· {e.get('title')}\n{e.get('detail')}" for e in errors)
-            MessageBox(tr("启动预检未通过"), body, self).exec()
+            box = MessageBox(tr("启动预检未通过"), body, self)
+            box.yesButton.setText(tr("让 AI 帮我修"))
+            box.cancelButton.setText(tr("关闭"))
+            win = self.window()
+            if box.exec() and hasattr(win, "open_ai_with_context"):
+                prompt = tr(
+                    "启动预检没通过，实例 {0}、版本 {1}。问题如下：\n{2}\n"
+                    "请帮我修好这些问题，然后告诉我能不能启动。"
+                ).format(instance, version, body)
+                win.open_ai_with_context(prompt, source=tr("启动预检"))
             return
         if warns:
             body = "\n\n".join(

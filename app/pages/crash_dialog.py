@@ -67,6 +67,9 @@ class CrashDialog(QDialog):
             root.addLayout(act_row)
 
         btns = QHBoxLayout()
+        self.ai_btn = PrimaryPushButton(tr("让 AI 分析并修复"), self)
+        self.ai_btn.clicked.connect(self._ask_ai)
+        btns.addWidget(self.ai_btn)
         btns.addStretch(1)
         self.relaunch_btn = PushButton(tr("重新启动"), self)
         self.ok_btn = PrimaryPushButton(tr("确定"), self)
@@ -84,12 +87,51 @@ class CrashDialog(QDialog):
         self.relaunch_btn.setVisible(can_relaunch)
         self.view_btn.setVisible(has_file)
         self.export_btn.setVisible(bool(self.report))
+        # 找不到能开 AI 页的主窗口（如独立错误弹窗）就藏掉，不给死按钮
+        self.ai_btn.setVisible(self._ai_host() is not None)
         btns.addWidget(self.relaunch_btn)
         btns.addWidget(self.view_btn)
         btns.addWidget(self.export_btn)
         btns.addWidget(self.send_btn)
         btns.addWidget(self.ok_btn)
         root.addLayout(btns)
+
+    def _ai_host(self):
+        w = self.parent()
+        while w is not None:
+            if hasattr(w, "open_ai_with_context"):
+                return w
+            w = w.parent()
+        return None
+
+    def _ai_context_text(self) -> str:
+        """把崩溃现场压成一条能直接发给 AI 的消息：结论 + 日志尾巴 + 文件路径。"""
+        rep = self.report or {}
+        parts = [tr("游戏启动失败/崩溃了，帮我分析并修复。")]
+        if rep.get("instance"):
+            line = tr("实例：{0}").format(rep.get("instance"))
+            if rep.get("version"):
+                line += tr("，版本：{0}").format(rep.get("version"))
+            parts.append(line)
+        if rep.get("headline"):
+            parts.append(tr("启动器初步判断：{0}").format(rep.get("headline")))
+        detail = (rep.get("detail") or "").strip()
+        if detail:
+            parts.append(tr("报告摘录：") + "\n" + detail[-2500:])
+        tail = (rep.get("output_tail") or "").strip()
+        if tail and tail != detail:
+            parts.append(tr("崩溃前输出（末尾）：") + "\n" + tail[-1500:])
+        if rep.get("direct_file"):
+            parts.append(tr("崩溃文件：{0}").format(rep.get("direct_file")))
+        return "\n\n".join(parts)
+
+    def _ask_ai(self):
+        host = self._ai_host()
+        if host is None:
+            return
+        text = self._ai_context_text()
+        self.accept()
+        host.open_ai_with_context(text, source=tr("崩溃弹窗"))
 
     def _relaunch(self):
         self.want_relaunch = True
