@@ -44,13 +44,31 @@ NEWAPI_BASE = os.environ.get("NEWAPI_BASE_URL", "").rstrip("/")
 NEWAPI_KEY = os.environ.get("NEWAPI_API_KEY", "")
 NEWAPI_MODEL = os.environ.get("NEWAPI_MODEL", "pymcl-assistant")
 DEGRADE_MODEL = os.environ.get("NEWAPI_DEGRADE_MODEL", "") or NEWAPI_MODEL
+# 客户端可请求的模型白名单（逗号分隔）。默认模型永远在名单里。
+# 用途：AI 助手的「深度诊断」档可以切到更强的模型，其余请求回落默认。
+ALLOWED_MODELS = [
+    m.strip() for m in os.environ.get("NEWAPI_ALLOWED_MODELS", "").split(",")
+    if m.strip()
+]
 BIND = os.environ.get("BIND", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8787") or 8787)
 RATE_PER_MIN = int(os.environ.get("RATE_PER_MIN", "40"))
 RATE_PER_DAY = int(os.environ.get("RATE_PER_DAY", "800"))
 MAX_INFLIGHT = int(os.environ.get("MAX_INFLIGHT", "4"))
 MAX_BODY = int(os.environ.get("MAX_BODY", str(512 * 1024)))
+# 单次回复 token 上限：诊断类长报告需要 6k+，默认放到 8192，可用环境变量再调
+MAX_TOKENS_CAP = int(os.environ.get("MAX_TOKENS_CAP", "8192"))
 DEGRADE_AFTER = max(8, RATE_PER_MIN // 2)
+
+
+def pick_model(requested: str, degrade: bool = False) -> str:
+    """按白名单选模型：降级优先；白名单里才放行请求的模型，否则回默认。"""
+    if degrade:
+        return DEGRADE_MODEL
+    req = (requested or "").strip()
+    if req and (req == NEWAPI_MODEL or req in ALLOWED_MODELS):
+        return req
+    return NEWAPI_MODEL
 
 
 class _Limiter:
@@ -116,6 +134,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "service": "pymcl-ai-gateway",
                 "model": NEWAPI_MODEL,
+                "models": sorted({NEWAPI_MODEL, *ALLOWED_MODELS}),
             }, ensure_ascii=False).encode("utf-8"))
             return
         self._err(404, "not found")
@@ -165,11 +184,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         want_stream = bool(body.get("stream", True))
         out = {
-            "model": DEGRADE_MODEL if degrade else NEWAPI_MODEL,
+            "model": pick_model(str(body.get("model") or ""), degrade),
             "messages": messages,
             "temperature": min(float(body.get("temperature") or 0.3), 0.8),
             "stream": want_stream,
-            "max_tokens": min(int(body.get("max_tokens") or 2048), 2048),
+            "max_tokens": min(int(body.get("max_tokens") or 4096), MAX_TOKENS_CAP),
         }
         if body.get("tools"):
             out["tools"] = body["tools"]

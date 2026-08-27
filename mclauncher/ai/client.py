@@ -9,9 +9,8 @@ from typing import Iterator
 import requests
 from requests.exceptions import ReadTimeout, ChunkedEncodingError
 
-from . import builtin
 from .defaults import (
-    CLIENT_HEADER, DEFAULT_GATEWAY_URL, DEFAULT_MODEL,
+    CLIENT_HEADER, DEFAULT_GATEWAY_URL, DEFAULT_MODEL, MAX_TOKENS,
     ONCE_TIMEOUT, STREAM_CONNECT_TIMEOUT, STREAM_READ_TIMEOUT,
 )
 
@@ -67,8 +66,31 @@ def normalize_base(url: str) -> str:
     return u + "/v1"
 
 
+_PRIVATE_HOST_PREFIXES = ("localhost", "127.", "0.0.0.0", "192.168.", "10.", "[::1]")
+
+
+def _check_gateway_scheme(url: str):
+    """公益网关必须走 HTTPS；本机/内网调试地址放行。"""
+    low = url.lower()
+    if low.startswith("https://"):
+        return
+    if low.startswith("http://"):
+        host = low[len("http://"):].split("/", 1)[0].split(":", 1)[0]
+        if host.startswith(_PRIVATE_HOST_PREFIXES) or host.endswith(".local"):
+            return
+        raise AIClientError(
+            "公益网关地址必须是 HTTPS（内网调试地址除外）。"
+            "明文 HTTP 会泄露对话内容，请给网关配好证书再填。")
+        return
+    raise AIClientError("网关地址要以 https:// 开头")
+
+
 def resolve_endpoint(settings: dict) -> dict:
-    """返回 {mode, url, headers, model, public}。"""
+    """返回 {mode, url, headers, model, public}。
+
+    公益模式只走网关（ai_gateway/server.py），客户端不再内嵌上游令牌。
+    模型名允许用户在设置里改；网关侧有白名单，不在名单里会回落默认。
+    """
     mode = (settings.get("ai_mode") or "public").strip().lower()
     model = (settings.get("ai_model") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
     if mode in ("custom", "newapi", "自定义"):
@@ -89,30 +111,21 @@ def resolve_endpoint(settings: dict) -> dict:
             "model": model,
             "public": False,
         }
-    builtin_ep = builtin.public_endpoint()
     gateway = (settings.get("ai_gateway_url") or DEFAULT_GATEWAY_URL or "").strip().rstrip("/")
-    if gateway:
-        return {
-            "mode": "public",
-            "url": gateway + "/pymcl/chat",
-            "models_url": gateway + "/health",
-            "headers": {
-                "Content-Type": "application/json",
-                "X-PyMCL-Client": CLIENT_HEADER,
-            },
-            "model": builtin_ep["model"],
-            "public": True,
-        }
+    if not gateway:
+        raise AIClientError(
+            "公益接口需要网关地址：请在「设置 → AI 助手」填写公益网关（HTTPS），"
+            "或切到「自定义 NewAPI」用自己的接口。")
+    _check_gateway_scheme(gateway)
     return {
         "mode": "public",
-        "url": builtin_ep["base"] + "/chat/completions",
-        "models_url": builtin_ep["base"] + "/models",
+        "url": gateway + "/pymcl/chat",
+        "models_url": gateway + "/health",
         "headers": {
-            "Authorization": "Bearer " + builtin_ep["token"],
             "Content-Type": "application/json",
             "X-PyMCL-Client": CLIENT_HEADER,
         },
-        "model": builtin_ep["model"],
+        "model": model,
         "public": True,
     }
 
@@ -131,13 +144,13 @@ def test_connection(settings: dict) -> str:
         return "已连通"
     if ep["public"]:
         if data.get("service"):
-            return f"公益接口正常（{data.get('service')}）"
-        models = data.get("data") or []
-        names = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
-        locked = ep.get("model") or DEFAULT_MODEL
-        if locked in names or not names:
-            return f"公益接口正常，模型 {locked}"
-        return f"公益接口已连通，但列表里没有 {locked}（当前有 {names[0]}）"
+            allowed = data.get("models") or []
+            want = ep.get("model") or DEFAULT_MODEL
+            if allowed and want not in allowed:
+                return (f"公益网关正常，但 {want} 不在白名单里"
+                        f"（可用：{'、'.join(allowed[:4])}），会回落默认模型")
+            return f"公益网关正常（{data.get('service')}），模型 {want}"
+        return "公益网关已连通"
     models = data.get("data") or []
     names = [m.get("id") for m in models if isinstance(m, dict) and m.get("id")]
     if names:
@@ -321,14 +334,15 @@ def _http_error(exc, http_cancel):
 
 
 def chat_stream(settings: dict, messages: list, tools: list | None = None,
-                temperature: float = 0.3, http_cancel=None) -> Iterator[dict]:
+                temperature: float = 0.3, http_cancel=None,
+                max_tokens: int = 0, model: str = "") -> Iterator[dict]:
     ep = resolve_endpoint(settings)
     body = {
-        "model": ep["model"],
+        "model": model or ep["model"],
         "messages": messages,
         "temperature": temperature,
         "stream": True,
-        "max_tokens": 2048,
+        "max_tokens": int(max_tokens or MAX_TOKENS),
     }
     if tools:
         body["tools"] = tools
@@ -356,14 +370,15 @@ def chat_stream(settings: dict, messages: list, tools: list | None = None,
 
 
 def chat_once(settings: dict, messages: list, tools: list | None = None,
-              temperature: float = 0.3, http_cancel=None) -> dict:
+              temperature: float = 0.3, http_cancel=None,
+              max_tokens: int = 0, model: str = "") -> dict:
     ep = resolve_endpoint(settings)
     body = {
-        "model": ep["model"],
+        "model": model or ep["model"],
         "messages": messages,
         "temperature": temperature,
         "stream": False,
-        "max_tokens": 2048,
+        "max_tokens": int(max_tokens or MAX_TOKENS),
     }
     if tools:
         body["tools"] = tools
