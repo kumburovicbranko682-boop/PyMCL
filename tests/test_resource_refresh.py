@@ -182,6 +182,54 @@ class GithubProxyTests(unittest.TestCase):
         custom = ["https://my.custom.proxy/"]
         self.assertEqual(self._prefixes_with(custom), ("https://my.custom.proxy/",))
 
+    def test_parse_remote_sources_ignores_comments_blanks_and_non_https(self):
+        text = """
+        # one URL per line
+
+        https://ghfast.top/
+        http://insecure.example/
+        not-a-url
+        https://bmclapi2.bangbang93.com
+        """
+        self.assertEqual(
+            mirrors.parse_source_urls(text),
+            (
+                "https://ghfast.top/",
+                "https://bmclapi2.bangbang93.com",
+            ),
+        )
+
+    def test_remote_fetch_failure_falls_back_to_builtins(self):
+        with (
+            mock.patch.object(mirrors, "_remote_prefixes", None),
+            mock.patch.object(mirrors, "_remote_fetched_at", 0.0),
+            mock.patch.object(mirrors, "_remote_fetch_succeeded", False),
+            mock.patch.object(mirrors, "_fetch_source_text", side_effect=OSError("offline")),
+        ):
+            got = mirrors.refresh_remote_sources(force=True)
+        self.assertEqual(got, mirrors.GITHUB_PROXY_PREFIXES)
+
+    def test_remote_refresh_merges_duplicates_and_filters_dead_prefixes(self):
+        text = """
+        https://new.gh-proxy.example/
+        https://gitproxy.mrhjx.cn/
+        https://new.gh-proxy.example
+        https://ghfast.top/
+        https://bmclapi2.bangbang93.com
+        """
+        with (
+            mock.patch.object(mirrors, "_remote_prefixes", None),
+            mock.patch.object(mirrors, "_remote_fetched_at", 0.0),
+            mock.patch.object(mirrors, "_remote_fetch_succeeded", False),
+            mock.patch.object(mirrors, "_fetch_source_text", return_value=text),
+        ):
+            got = mirrors.refresh_remote_sources(force=True)
+        self.assertEqual(
+            got,
+            ("https://new.gh-proxy.example/", "https://ghfast.top/"),
+        )
+        self.assertNotIn("https://gitproxy.mrhjx.cn/", got)
+
 
 class UpdaterTests(unittest.TestCase):
     def test_dead_default_url_detected(self):
