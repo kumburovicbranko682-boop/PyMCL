@@ -79,6 +79,26 @@ with tempfile.TemporaryDirectory() as d:
     codes = [x["code"] for x in r["reasons"]]
     check("Mod 重复", "mod_dup" in codes)
 
+with tempfile.TemporaryDirectory() as d:
+    text = (
+        'Exception in thread "main" java.lang.module.ResolutionException: '
+        "Module it.unimi.dsi.fastutil reads more than one module named "
+        "cpw.mods.bootstraplauncher\n"
+        "\tat java.base/java.lang.module.Resolver.resolveFail(Unknown Source)\n"
+        "\tat cpw.mods.bootstraplauncher@1.1.2/cpw.mods.bootstraplauncher."
+        "BootstrapLauncher.main(BootstrapLauncher.java:129)\n"
+    )
+    p = _inst(Path(d), latest=text)
+    r = analyze_launch(p, exit_code=1, output_lines=text.splitlines(), started_at=time.time())
+    codes = [x["code"] for x in r["reasons"]]
+    check("模块重复加载命中", r["is_crash"] and "dup_module" in codes)
+    check("模块重复文案", "cpw.mods.bootstraplauncher" in r["detail"] and "模块" in r["detail"])
+    check("模块重复给修复动作", any(a.get("id") == "repair_version"
+                                    for a in analyze_launch(
+                                        p, exit_code=1, output_lines=text.splitlines(),
+                                        started_at=time.time(), version="1.20.1-forge-x",
+                                    ).get("actions", [])))
+
 print("[3] 退出码 0 + Game crashed")
 with tempfile.TemporaryDirectory() as d:
     p = _inst(

@@ -93,6 +93,69 @@ def _coerce_java_exe(resolved, java_exe):
     )
 
 
+_MODULE_PATH_FLAGS = ("-p", "--module-path")
+
+
+def _module_entry_key(entry: str) -> str:
+    """maven 布局下同一 artifact 的不同版本视为同一个模块。
+
+    JPMS 不允许模块图里出现两个同名模块；同 artifact 换版本文件名会变
+    （bootstraplauncher-1.0.jar / bootstraplauncher-1.1.2.jar），必须按
+    <libdir>/<group>/<artifact> 归并。非 maven 布局退回完整路径（只去掉全同项）。
+    """
+    p = os.path.normpath(str(entry))
+    vdir, fname = os.path.split(p)
+    parent, ver = os.path.split(vdir)
+    stem, ext = os.path.splitext(fname)
+    if parent and ver and ext.lower() in (".jar", ".zip") and stem.endswith("-" + ver):
+        return os.path.join(parent, stem[: -(len(ver) + 1)])
+    return p
+
+
+def _merge_module_paths(jvm_args):
+    """合并并去重 -p / --module-path，返回 (jvm_args, 模块 jar 列表)。
+
+    inherit 链拼接父子 jvm 参数时，Forge/NeoForge 版本 JSON 之上再叠一层
+    （整合包、二次导出的版本 JSON）会带来第二个 -p，或同一 artifact 的两个
+    版本。JPMS 对同名模块直接抛
+    ResolutionException: ... reads more than one module named ...，
+    游戏退出码 1。同 artifact 保留后出现的路径、位置仍在第一次出现处，
+    与 classpath 的去重语义一致。
+    """
+    if not any(a in _MODULE_PATH_FLAGS for a in jvm_args):
+        return list(jvm_args), []
+    by_key = {}
+    order = []
+    i = 0
+    while i < len(jvm_args):
+        if jvm_args[i] in _MODULE_PATH_FLAGS and i + 1 < len(jvm_args):
+            for entry in str(jvm_args[i + 1]).split(os.pathsep):
+                if not entry:
+                    continue
+                key = _module_entry_key(entry)
+                if key not in by_key:
+                    order.append(key)
+                by_key[key] = entry
+            i += 2
+            continue
+        i += 1
+    entries = [by_key[k] for k in order]
+    out = []
+    placed = False
+    i = 0
+    while i < len(jvm_args):
+        if jvm_args[i] in _MODULE_PATH_FLAGS and i + 1 < len(jvm_args):
+            if not placed and entries:
+                out.append("--module-path")
+                out.append(os.pathsep.join(entries))
+                placed = True
+            i += 2
+            continue
+        out.append(jvm_args[i])
+        i += 1
+    return out, entries
+
+
 def _patch_ignore_list(jvm_args, filenames):
     """把客户端 jar 等补进 -DignoreList=。
 
@@ -356,8 +419,25 @@ def build_launch_command(instance, version_id, account_props, java_exe,
         game_args = [utils.replace_placeholders(a, placeholders) for a in game_args]
         jvm_args = [f"-Djava.library.path={natives_dir}", "-cp", classpath]
 
+    jvm_args, module_entries = _merge_module_paths(jvm_args)
+
+    # BootstrapLauncher 会把 classpath（legacyClassPath）里未被 -DignoreList
+    # 前缀命中的 jar 全部装进 MC-BOOTSTRAP 模块层；模块 jar（bootstraplauncher
+    # 等）同时在 classpath 上时若没被 ignoreList 覆盖，就会出现两个同名模块：
+    # ResolutionException: Module xxx reads more than one module named
+    # cpw.mods.bootstraplauncher，退出码 1。这里把 -p 上每个 jar 的文件名
+    # 都补进 ignoreList；ignoreList 整个缺失时补一条。
+    ignore_names = _ignore_list_jars(jar, resolved, cp)
+    ignore_names += [os.path.basename(e) for e in module_entries]
     if any(isinstance(a, str) and a.startswith("-DignoreList=") for a in jvm_args):
-        jvm_args = _patch_ignore_list(jvm_args, _ignore_list_jars(jar, resolved, cp))
+        jvm_args = _patch_ignore_list(jvm_args, ignore_names)
+    elif module_entries:
+        names = []
+        for n in ignore_names:
+            base = os.path.basename(str(n or "").strip())
+            if base and base not in names:
+                names.append(base)
+        jvm_args.append("-DignoreList=" + ",".join(names))
 
     # 旧版 Forge（tweakClass）
     if "tweakClass" in mine_args_text or any("tweakClass" in a for a in game_args):

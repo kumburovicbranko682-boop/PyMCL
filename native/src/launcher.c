@@ -88,14 +88,122 @@ static void apply_memory(char ***args, int *n, int memory_mb) {
     *args = out; *n = no;
 }
 
+static int is_mp_flag(const char *a) {
+    return strcmp(a, "-p") == 0 || strcmp(a, "--module-path") == 0;
+}
+
+/* maven 布局 <...>/<artifact>/<version>/<artifact>-<version>.jar 归并成
+ * <...>/<artifact>：JPMS 不允许同名模块出现两次，同 artifact 换版本文件名
+ * 会变，必须按 artifact 归并；非 maven 布局退回完整路径（只去掉全同项）。 */
+static void module_entry_key(const char *entry, char *out, size_t n) {
+    const char *fname = entry;
+    for (const char *p = entry; *p; p++) if (*p == '/' || *p == '\\') fname = p + 1;
+    size_t lf = strlen(fname);
+    if (fname > entry && lf > 4
+        && (pymcl_ieq(fname + lf - 4, ".jar") || pymcl_ieq(fname + lf - 4, ".zip"))) {
+        const char *vend = fname - 1;   /* version 目录后的分隔符 */
+        const char *vstart = entry;
+        for (const char *p = entry; p < vend; p++) if (*p == '/' || *p == '\\') vstart = p + 1;
+        size_t lv = (size_t)(vend - vstart);
+        if (vstart > entry && lv > 0 && lf > lv + 5
+            && fname[lf - 4 - lv - 1] == '-'
+            && strncmp(fname + lf - 4 - lv, vstart, lv) == 0) {
+            size_t plen = (size_t)(vstart - entry);  /* 含结尾分隔符 */
+            size_t alen = lf - 4 - lv - 1;           /* artifact 名长度 */
+            if (plen + alen < n) {
+                memcpy(out, entry, plen);
+                memcpy(out + plen, fname, alen);
+                out[plen + alen] = 0;
+                return;
+            }
+        }
+    }
+    snprintf(out, n, "%s", entry);
+}
+
+/* 对齐 mclauncher/launcher.py::_merge_module_paths：合并多个 -p/--module-path
+ * 并按 artifact 去重（后出现的路径生效、位置保持第一次出现处）。inherit 链
+ * 上叠了两层 Forge/NeoForge 参数时会出现第二个 -p 或同一 artifact 的两个
+ * 版本，JPMS 对同名模块直接 ResolutionException（"reads more than one
+ * module named ..."），游戏退出码 1。 */
+static void merge_module_paths(char ***args, int *n, char ***entries_out, int *nout) {
+    char **in = *args; int nin = *n;
+    *entries_out = NULL; *nout = 0;
+    int has = 0;
+    for (int i = 0; i < nin; i++) if (is_mp_flag(in[i])) { has = 1; break; }
+    if (!has) return;
+    char **keys = NULL; char **vals = NULL; int ne = 0;
+    for (int i = 0; i + 1 < nin; i++) {
+        if (!is_mp_flag(in[i])) continue;
+        char *dup = pymcl_strdup(in[i + 1]);
+        char *tok = strtok(dup, ";");
+        while (tok) {
+            if (tok[0]) {
+                char key[PYMCL_PATH];
+                module_entry_key(tok, key, sizeof(key));
+                int found = -1;
+                for (int k = 0; k < ne; k++) if (strcmp(keys[k], key) == 0) { found = k; break; }
+                if (found >= 0) {
+                    free(vals[found]);
+                    vals[found] = pymcl_strdup(tok);
+                } else {
+                    keys = (char **)realloc(keys, sizeof(char *) * (size_t)(ne + 1));
+                    vals = (char **)realloc(vals, sizeof(char *) * (size_t)(ne + 1));
+                    keys[ne] = pymcl_strdup(key);
+                    vals[ne] = pymcl_strdup(tok);
+                    ne++;
+                }
+            }
+            tok = strtok(NULL, ";");
+        }
+        free(dup);
+        i++;
+    }
+    char joined[8192]; joined[0] = 0;
+    for (int k = 0; k < ne; k++) {
+        if (k) strncat(joined, ";", sizeof(joined) - strlen(joined) - 1);
+        strncat(joined, vals[k], sizeof(joined) - strlen(joined) - 1);
+    }
+    char **out = (char **)calloc((size_t)nin + 2, sizeof(char *));
+    int no = 0, placed = 0;
+    for (int i = 0; i < nin; i++) {
+        if (is_mp_flag(in[i]) && i + 1 < nin) {
+            if (!placed && ne > 0) {
+                out[no++] = pymcl_strdup("--module-path");
+                out[no++] = pymcl_strdup(joined);
+                placed = 1;
+            }
+            free(in[i]); free(in[i + 1]);
+            i++;
+            continue;
+        }
+        out[no++] = in[i];
+    }
+    free(in);
+    for (int k = 0; k < ne; k++) free(keys[k]);
+    free(keys);
+    *args = out; *n = no;
+    *entries_out = vals; *nout = ne;
+}
+
 static void patch_ignore(char **args, int n, const char **names, int nn) {
     for (int i = 0; i < n; i++) {
         if (!pymcl_startswith(args[i], "-DignoreList=")) continue;
-        char buf[2048];
+        char buf[4096];
         snprintf(buf, sizeof(buf), "%s", args[i]);
         for (int k = 0; k < nn; k++) {
             if (!names[k] || !names[k][0]) continue;
-            if (!strstr(buf, names[k])) {
+            /* 对齐 mclauncher/launcher.py::_patch_ignore_list 的 startswith
+             * 语义：已有前缀能命中该文件名就不追加。 */
+            char list[4096];
+            snprintf(list, sizeof(list), "%s", buf + strlen("-DignoreList="));
+            int covered = 0;
+            char *tok = strtok(list, ",");
+            while (tok) {
+                if (tok[0] && pymcl_startswith(names[k], tok)) { covered = 1; break; }
+                tok = strtok(NULL, ",");
+            }
+            if (!covered) {
                 size_t L = strlen(buf);
                 snprintf(buf + L, sizeof(buf) - L, ",%s", names[k]);
             }
@@ -308,13 +416,39 @@ int build_launch_command(const char *instance, const char *version, cJSON *accou
         jvm[nj++] = pymcl_strdup(classpath);
     }
     drop_orphan(&jvm, &nj);
-    const char *ign[8]; int ni = 0;
+    char **mp_entries = NULL; int nmp = 0;
+    merge_module_paths(&jvm, &nj, &mp_entries, &nmp);
+    /* BootstrapLauncher 会把 classpath（legacyClassPath）里未被 -DignoreList
+     * 前缀命中的 jar 装进 MC-BOOTSTRAP 模块层；-p 上的 jar 若没被覆盖，
+     * classpath 副本会重复加载出第二个同名模块（ResolutionException，
+     * 退出码 1）。把 -p 上每个 jar 的文件名都补进 ignoreList，缺失时补一条。 */
+    const char **ign = (const char **)calloc((size_t)(2 + ncp + nmp), sizeof(char *));
+    int ni = 0;
     ign[ni++] = pymcl_basename(jar);
     const char *parent = cJSON_GetStringValue(cJSON_GetObjectItem(resolved, "inheritsFrom"));
     char pjar[128];
     if (parent) { snprintf(pjar, sizeof(pjar), "%s.jar", parent); ign[ni++] = pjar; }
     for (int i = 0; i < ncp; i++) if (pymcl_endswith(cp[i], "-extra.jar")) ign[ni++] = pymcl_basename(cp[i]);
+    for (int i = 0; i < nmp; i++) ign[ni++] = pymcl_basename(mp_entries[i]);
     patch_ignore(jvm, nj, ign, ni);
+    if (nmp > 0) {
+        int has_ign = 0;
+        for (int i = 0; i < nj; i++) if (pymcl_startswith(jvm[i], "-DignoreList=")) { has_ign = 1; break; }
+        if (!has_ign) {
+            char buf[4096];
+            snprintf(buf, sizeof(buf), "-DignoreList=");
+            for (int k = 0; k < ni; k++) {
+                if (!ign[k] || !ign[k][0] || strstr(buf, ign[k])) continue;
+                size_t L = strlen(buf);
+                snprintf(buf + L, sizeof(buf) - L, "%s%s", buf[L - 1] == '=' ? "" : ",", ign[k]);
+            }
+            jvm = (char **)realloc(jvm, sizeof(char *) * (size_t)(nj + 1));
+            jvm[nj++] = pymcl_strdup(buf);
+        }
+    }
+    for (int i = 0; i < nmp; i++) free(mp_entries[i]);
+    free(mp_entries);
+    free((void *)ign);
     if (mine_args && strstr(mine_args, "tweakClass")) {
         jvm = (char **)realloc(jvm, sizeof(char *) * (size_t)(nj + 2));
         jvm[nj++] = pymcl_strdup("-Dfml.ignoreInvalidMinecraftCertificates=true");
