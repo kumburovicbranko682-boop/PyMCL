@@ -433,6 +433,11 @@ class _Analyzer:
                 self.append("jvm_args")
             if "Found multiple arguments for option fml.forgeVersion, but you asked for only one" in mc:
                 self.append("multi_forge_json")
+            if "reads more than one module named" in mc:
+                self.append(
+                    "dup_module",
+                    seek(mc, r"(?<=reads more than one module named )[\w.$]+"),
+                )
             if "The driver does not appear to support OpenGL" in mc:
                 self.append("no_opengl")
             if "java.lang.ClassCastException: java.base/jdk" in mc or "java.lang.ClassCastException: class jdk." in mc:
@@ -853,6 +858,13 @@ def _fmt_reason(code: str, extra: list[str], log_all: str, manual: bool) -> tupl
     if code in table:
         return table[code]
 
+    if code == "dup_module":
+        mod = f"（{one}）" if one else ""
+        return (
+            f"同一个 Java 模块被加载了两次{mod}，游戏在模块解析阶段直接退出。\n"
+            "通常是版本 JSON 被重复合并，或依赖库同时进入 --module-path 与 classpath "
+            "却没有被 ignoreList 排除。\n\n请重新安装或修复该版本后再启动。", True)
+
     if code == "java32":
         import platform
         if platform.machine().endswith("64") or "64" in platform.architecture()[0]:
@@ -1032,6 +1044,7 @@ def _title_of(reasons: dict) -> str:
         "fabric_solution": "Fabric 报错",
         "forge_error": "Forge 报错",
         "mod_dup": "Mod 重复安装",
+        "dup_module": "Java 模块重复加载",
         "mod_missing": "缺少前置 Mod",
         "mod_incompat": "Mod 不兼容",
         "nvidia_av": "显卡驱动崩溃",
@@ -1152,7 +1165,7 @@ def build_actions(report: dict, instance_path: Path | str | None = None) -> list
         "need_java11", "old_forge_new_java", "java_too_old",
     )
     repair_codes = (
-        "forge_incomplete", "verify_fail", "multi_forge_json",
+        "forge_incomplete", "verify_fail", "multi_forge_json", "dup_module",
         "libs_missing", "assets_index_missing", "assets_missing",
         "natives_missing", "loader_error", "forge_error",
     )
