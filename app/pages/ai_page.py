@@ -1157,6 +1157,11 @@ class AiPage(QWidget):
                 # 工具执行摘要单独存：下一轮注入 system，模型不用靠气泡文字回忆
                 chat_store.append_notes(
                     self._store, self._store.get("active_id") or "", self._notes)
+        # 「从哪打开的」只对带上下文的那一轮有意义，用完即清
+        try:
+            self.backend._ui_context = {}
+        except Exception:
+            pass
         self._pending_user = None
         self._worker = None
         self._assistant_bubble = None
