@@ -11,7 +11,9 @@ import urllib.request
 
 from mclauncher import sysinfo as sysinfo_mod
 from mclauncher.feedback_defaults import CLIENT_HEADER
-from feedback_hub.server import HUB, make_ingest_httpd, make_ui_httpd
+from feedback_hub.server import ADMIN_TOKEN, HUB, make_ingest_httpd, make_ui_httpd
+
+TOKEN_QS = ("?token=" + ADMIN_TOKEN) if ADMIN_TOKEN else ""
 
 
 def _req(url, data=None, headers=None, timeout=8):
@@ -60,6 +62,41 @@ def main():
     assert code == 404, posted
     print("[OK] ui rejects upload")
 
+    if ADMIN_TOKEN:
+        code, denied = _req(ui_base + "/api/v1/snapshot")
+        assert code == 401, denied
+        print("[OK] ui api requires token")
+
+    # 旧客户端兼容：最小报文（无 crash / 无新字段 / 旧版 UA 头）必须成功
+    code, legacy = _req(ingest_base + "/api/v1/feedback", {
+        "device_id": "legacy_device",
+        "category": "bug",
+        "title": "旧客户端报文",
+        "body": "只有老字段",
+        "contact": "",
+        "app_version": "0.9.0",
+        "sysinfo": {},
+    }, {"Content-Type": "application/json", "X-PyMCL-Client": "PyMCL/0.9.0"})
+    assert code == 200 and legacy.get("ok") and legacy.get("id"), legacy
+    print("[OK] legacy client payload accepted", legacy.get("id"))
+
+    # 新客户端：crash 附带日志尾部也要成功且被存储
+    code, crashed = _req(ingest_base + "/api/v1/feedback", {
+        "device_id": "test_device_verify",
+        "category": "crash",
+        "title": "崩溃带日志",
+        "body": "分析结论",
+        "app_version": "1.0.1",
+        "crash": {
+            "headline": "内存不足",
+            "output_tail": "java.lang.OutOfMemoryError\n" * 20,
+            "log_mc": "latest tail",
+            "exit_code": 1,
+        },
+    }, headers)
+    assert code == 200 and crashed.get("ok"), crashed
+    print("[OK] crash payload with log tails", crashed.get("id"))
+
     code, hb = _req(ingest_base + "/api/v1/heartbeat", {
         "device_id": "test_device_verify",
         "status": "online",
@@ -81,18 +118,22 @@ def main():
     assert code == 200 and fb.get("ok") and fb.get("id"), fb
     print("[OK] feedback", fb.get("id"))
 
-    code, snap = _req(ui_base + "/api/v1/snapshot")
+    code, snap = _req(ui_base + "/api/v1/snapshot" + TOKEN_QS)
     assert code == 200 and snap.get("ok"), snap
     machines = snap.get("machines") or []
     items = snap.get("feedback") or []
     assert any(m.get("device_id") == "test_device_verify" for m in machines), machines
     assert any(x.get("id") == fb.get("id") for x in items), items
-    print("[OK] snapshot machines=%s feedback=%s" % (len(machines), len(items)))
+    crash_rows = [x for x in items if x.get("id") == crashed.get("id")]
+    assert crash_rows, items
+    code, detail = _req(ui_base + "/api/v1/feedback/" + crashed["id"] + TOKEN_QS)
+    assert code == 200 and (detail.get("item") or {}).get("crash", {}).get("output_tail"), detail
+    print("[OK] snapshot machines=%s feedback=%s crash_logs=stored" % (len(machines), len(items)))
 
     got = {"snapshot": False}
 
     def on_sse():
-        req = urllib.request.Request(ui_base + "/api/v1/stream")
+        req = urllib.request.Request(ui_base + "/api/v1/stream" + TOKEN_QS)
         with urllib.request.urlopen(req, timeout=8) as resp:
             start = time.time()
             chunks = []
