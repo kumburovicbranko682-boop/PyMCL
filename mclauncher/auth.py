@@ -505,6 +505,28 @@ class AccountManager:
             uuid = utils.offline_uuid(username)
         return {"type": "offline", "name": username, "uuid": uuid, "skin": skin}
 
+    def set_offline_uuid(self, name, raw_uuid: str = "") -> str:
+        """离线账号自定义 UUID（HMCL 同款）。
+
+        换启动器 / 进带白名单绑定的离线服时，保持旧 UUID 才能保住
+        玩家数据与权限。raw_uuid 留空则重置为按用户名推导的标准
+        离线 UUID。返回保存后的带连字符 UUID。
+        """
+        acc = self.get_account(name)
+        if not acc or (acc.get("type") or "offline") != "offline":
+            raise AuthError(f"不是离线账号: {name}")
+        raw = str(raw_uuid or "").strip()
+        if not raw:
+            uuid = utils.offline_uuid(acc.get("name") or name)
+        else:
+            hex_str = raw.replace("-", "").lower()
+            if len(hex_str) != 32 or any(c not in "0123456789abcdef" for c in hex_str):
+                raise AuthError("UUID 格式不对：需要 32 位十六进制，可带连字符")
+            uuid = utils.dashed_uuid(hex_str)
+        acc["uuid"] = uuid
+        self.save()
+        return uuid
+
     def ensure_valid(self, account):
         """正版 / 皮肤站令牌过期则刷新；失败则抛 AuthError。"""
         if not account:
@@ -534,6 +556,29 @@ class AccountManager:
         client_id = CONFIG.get("microsoft_client_id") or "00000000402b5328"
         account = MicrosoftAuthenticator(client_id=client_id).refresh(account)
         return self.add_account(account)
+
+    def ensure_valid_or_fallback(self, account):
+        """启动路径专用：令牌刷新失败（断网 / 认证服务故障）时降级为
+        离线凭据，保住单机可玩性（PCL2 / HMCL 同款行为）。
+
+        返回 (account, fallback_reason)。fallback_reason 非空表示已降级：
+        返回的是临时离线账号（保留原用户名与 UUID，存档玩家数据不变，
+        但进不了正版验证服务器），不写回账号存储。没有用户名的账号
+        无法降级，异常原样抛出。
+        """
+        try:
+            return self.ensure_valid(account), ""
+        except Exception as e:
+            acc = account or {}
+            if not str(acc.get("name") or "").strip():
+                raise
+            utils.log.warning("账号令牌刷新失败，降级为离线身份启动: %s", e)
+            fallback = {
+                "type": "offline",
+                "name": acc.get("name"),
+                "uuid": acc.get("uuid") or "",
+            }
+            return fallback, str(e)
 
     def launch_props(self, account):
         """转换为启动参数。"""

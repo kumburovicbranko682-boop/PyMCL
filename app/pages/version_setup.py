@@ -22,6 +22,12 @@ class VersionSetupDialog(MessageBoxBase):
         hint = BodyLabel(tr("这些选项只作用于当前版本，对齐 PCL 的「版本设置」。"), self)
         hint.setWordWrap(True)
         self.viewLayout.addWidget(hint)
+        from qfluentwidgets import PushButton
+        self.copy_global_btn = PushButton(tr("复制全局游戏设置"))
+        self.copy_global_btn.setToolTip(
+            tr("把设置页的全局默认值（内存 / Java / JVM / 窗口等）填进本页，保存后生效"))
+        self.copy_global_btn.clicked.connect(self._copy_global)
+        self.viewLayout.addWidget(self.copy_global_btn)
 
         data = backend.get_version_settings(instance, version)
         form_host = QWidget(self)
@@ -72,6 +78,37 @@ class VersionSetupDialog(MessageBoxBase):
         if gck and gck in GC_LABELS:
             self.gc.setCurrentText(GC_LABELS[gck])
 
+        # 显卡偏好（PCL2「尝试使用独立显卡」同款），空 = 跟随全局设置
+        self._gpu_labels = {
+            "discrete": tr("强制独立显卡（高性能）"),
+            "integrated": tr("强制核芯显卡（省电）"),
+        }
+        self.gpu = ComboBox()
+        self.gpu.addItems([tr("跟随全局")] + list(self._gpu_labels.values()))
+        gpuk = data.get("gpu") or ""
+        if gpuk in self._gpu_labels:
+            self.gpu.setCurrentText(self._gpu_labels[gpuk])
+
+        # 渲染器（HMCL 同款，仅 Linux/Mesa 生效），空 = 跟随全局
+        self._rnd_labels = {
+            "auto": tr("默认（硬件 OpenGL）"),
+            "llvmpipe": tr("LLVMpipe（CPU 软渲染）"),
+            "zink": tr("Zink（OpenGL over Vulkan）"),
+        }
+        self.renderer = ComboBox()
+        self.renderer.addItems([tr("跟随全局")] + list(self._rnd_labels.values()))
+        rndk = data.get("renderer") or ""
+        if rndk in self._rnd_labels:
+            self.renderer.setCurrentText(self._rnd_labels[rndk])
+
+        # 启动时自动弹日志窗口（HMCL「显示日志」同款），空 = 跟随全局
+        self._log_labels = {"on": tr("开启"), "off": tr("关闭")}
+        self.show_log = ComboBox()
+        self.show_log.addItems([tr("跟随全局")] + list(self._log_labels.values()))
+        logk = data.get("show_log") or ""
+        if logk in self._log_labels:
+            self.show_log.setCurrentText(self._log_labels[logk])
+
         self.game = LineEdit()
         self.game.setPlaceholderText(tr("附加游戏参数"))
         self.game.setText(data.get("game_args") or "")
@@ -116,6 +153,10 @@ class VersionSetupDialog(MessageBoxBase):
         skin_map = {"steve": "Steve", "alex": "Alex"}
         self.skin.setCurrentText(skin_map.get(data.get("offline_skin") or "default", tr("默认")))
 
+        self.wrapper = LineEdit()
+        self.wrapper.setPlaceholderText(tr("包装 Java 进程的命令，如 gamemoderun / prime-run"))
+        self.wrapper.setText(data.get("wrapper") or "")
+
         self.pre = LineEdit()
         self.pre.setPlaceholderText(tr("启动前命令（cmd / 脚本）"))
         self.pre.setText(data.get("pre_launch") or "")
@@ -129,10 +170,29 @@ class VersionSetupDialog(MessageBoxBase):
         self.priority.addItems(["low", "normal", "high"])
         self.priority.setCurrentText(data.get("process_priority") or "normal")
 
+        # HMCL「高级设置」同款疑难杂症区
+        self.env = LineEdit()
+        self.env.setPlaceholderText(tr("KEY=VALUE，空格分隔，值含空格用引号"))
+        self.env.setToolTip(tr("附加到游戏进程的环境变量，如 MESA_GL_VERSION_OVERRIDE=4.6 MANGOHUD=1"))
+        self.env.setText(data.get("env_vars") or "")
+
+        self.natives = LineEdit()
+        self.natives.setPlaceholderText(tr("自定义 natives 目录，留空自动解压到版本目录"))
+        self.natives.setToolTip(tr("java.library.path 指向该目录，适合自编译 LWJGL 本地库"))
+        self.natives.setText(data.get("natives_dir") or "")
+
+        self.sys_glfw = CheckBox(tr("使用系统 GLFW（仅 Linux，解决 Wayland 崩溃等）"))
+        self.sys_glfw.setChecked(bool(data.get("use_system_glfw")))
+        self.sys_openal = CheckBox(tr("使用系统 OpenAL（仅 Linux）"))
+        self.sys_openal.setChecked(bool(data.get("use_system_openal")))
+
         form.addRow(form_label(tr("隔离")), self.iso)
         form.addRow(form_label(tr("内存 MB")), self.memory)
         form.addRow(form_label("Java"), self.java)
         form.addRow(form_label("GC"), self.gc)
+        form.addRow(form_label(tr("显卡")), self.gpu)
+        form.addRow(form_label(tr("渲染器")), self.renderer)
+        form.addRow(form_label(tr("显示日志")), self.show_log)
         form.addRow(form_label(tr("JVM 参数")), self.jvm)
         form.addRow(form_label(tr("游戏参数")), self.game)
         form.addRow(form_label(tr("绑定账号")), self.login)
@@ -145,16 +205,56 @@ class VersionSetupDialog(MessageBoxBase):
         form.addRow(form_label(tr("窗口宽度")), self.win_w)
         form.addRow(form_label(tr("窗口高度")), self.win_h)
         form.addRow(form_label(tr("离线皮肤")), self.skin)
+        form.addRow(form_label(tr("包装器")), self.wrapper)
         form.addRow(form_label(tr("启动前")), self.pre)
         form.addRow("", self.wait)
         form.addRow(form_label(tr("退出后")), self.post)
         form.addRow(form_label(tr("优先级")), self.priority)
+        form.addRow(form_label(tr("环境变量")), self.env)
+        form.addRow(form_label(tr("本地库路径")), self.natives)
+        form.addRow("", self.sys_glfw)
+        form.addRow("", self.sys_openal)
         self.viewLayout.addWidget(form_host)
         self.yesButton.setText(tr("保存"))
         self.cancelButton.setText(tr("取消"))
         self.widget.setMinimumWidth(540)
         # 对话框里保持实底，不透出主窗背景图
         paint_theme_surfaces(form_host, allow_transparent=False)
+
+    def _copy_global(self):
+        """HMCL 3.6.12「复制全局游戏设置」：全局默认值填进各控件，保存才落盘。"""
+        g = self.backend.global_version_defaults() or {}
+        self.iso.setCurrentText(
+            ISOLATION_LABELS.get(g.get("isolation") or "none", ISOLATION_LABELS["none"]))
+        self.memory.setText(str(g.get("memory_mb") or ""))
+        java = g.get("java") or tr("自动选择")
+        labels = [self.java.itemText(i) for i in range(self.java.count())]
+        picked = ""
+        for o in self._java_opts:
+            if o.get("value") == java or o.get("label") == java:
+                picked = o["label"]
+                break
+        if picked:
+            self.java.setCurrentText(picked)
+        elif java in labels:
+            self.java.setCurrentText(java)
+        else:
+            self.java.addItem(java)
+            self.java.setCurrentText(java)
+        self.jvm.setPlainText(g.get("jvm_args") or "")
+        self.gc.setCurrentText(GC_LABELS.get(g.get("gc") or "", tr("跟随全局")))
+        self.gpu.setCurrentText(self._gpu_labels.get(g.get("gpu") or "", tr("跟随全局")))
+        self.renderer.setCurrentText(
+            self._rnd_labels.get(g.get("renderer") or "", tr("跟随全局")))
+        self.show_log.setCurrentText(
+            self._log_labels.get(g.get("show_log") or "", tr("跟随全局")))
+        self.win_mode.setCurrentText(
+            tr("全屏") if g.get("window_mode") in FULLSCREEN_MODES else tr("窗口"))
+        self.win_w.setText(str(g.get("window_width") or ""))
+        self.win_h.setText(str(g.get("window_height") or ""))
+        skin_map = {"steve": "Steve", "alex": "Alex"}
+        self.skin.setCurrentText(skin_map.get(g.get("offline_skin") or "default", tr("默认")))
+        self.priority.setCurrentText(g.get("process_priority") or "normal")
 
     def _fill_java(self, opts):
         self._java_opts = opts or []
@@ -191,6 +291,7 @@ class VersionSetupDialog(MessageBoxBase):
             "java": java,
             "jvm_args": self.jvm.toPlainText().strip(),
             "game_args": self.game.text().strip(),
+            "wrapper": self.wrapper.text().strip(),
             "server": self.server.text().strip(),
             "port": self.port.text().strip(),
             "pre_launch": self.pre.text().strip(),
@@ -201,11 +302,21 @@ class VersionSetupDialog(MessageBoxBase):
             "nide8_id": self.nide8.text().strip(),
             "auth_server": self.auth_server.text().strip(),
             "gc": gc_inv.get(self.gc.currentText(), ""),
+            "gpu": {v: k for k, v in self._gpu_labels.items()}.get(
+                self.gpu.currentText(), ""),
+            "renderer": {v: k for k, v in self._rnd_labels.items()}.get(
+                self.renderer.currentText(), ""),
+            "show_log": {v: k for k, v in self._log_labels.items()}.get(
+                self.show_log.currentText(), ""),
             "window_title": self.title.text().strip(),
             "window_mode": "maximize" if self.win_mode.currentText() == tr("全屏") else "window",
             "window_width": size_of(self.win_w),
             "window_height": size_of(self.win_h),
             "offline_skin": skin,
+            "env_vars": self.env.text().strip(),
+            "natives_dir": self.natives.text().strip(),
+            "use_system_glfw": self.sys_glfw.isChecked(),
+            "use_system_openal": self.sys_openal.isChecked(),
         }
 
     def save(self) -> dict:

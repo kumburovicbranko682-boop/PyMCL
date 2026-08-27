@@ -22,6 +22,16 @@ def install_game(installer: Installer, version: str, loader: str = "无",
     mc = (version or "").strip()
     if not mc:
         raise InstallError("缺少 Minecraft 版本")
+    # 自定义版本名（HMCL/PCL2 安装新游戏同款）：先预检重名，装完统一改名
+    custom = str(extra.get("custom_name") or "").strip()
+    if custom:
+        from . import version_ops as vops
+        try:
+            custom = vops.sanitize_id(custom)
+        except vops.VersionOpError as exc:
+            raise InstallError(str(exc)) from exc
+        if (installer.instance.versions_dir() / custom).exists():
+            raise InstallError(f"已存在版本 {custom}，换个名字")
     primary = (loader or extra.get("loader") or "无").strip().lower()
     want_of = bool(extra.get("optifine")) or primary == "optifine"
     want_ll = bool(extra.get("liteloader")) or primary == "liteloader"
@@ -42,6 +52,8 @@ def install_game(installer: Installer, version: str, loader: str = "无",
         vid = installer.install_forge(mc, extra.get("forge_version") or lv)
     elif primary == "neoforge":
         vid = installer.install_neoforge(mc, extra.get("neoforge_version") or lv)
+    elif primary == "cleanroom":
+        vid = installer.install_cleanroom(mc, extra.get("cleanroom_version") or lv)
     elif primary not in ("", "无", "none"):
         raise InstallError(f"未知加载器: {loader}")
     else:
@@ -61,8 +73,8 @@ def install_game(installer: Installer, version: str, loader: str = "无",
                 raise
 
     if want_of:
-        if primary in ("fabric", "quilt", "neoforge"):
-            installer._note("OptiFine 不能与 Fabric / Quilt / NeoForge 同装，已跳过")
+        if primary in ("fabric", "quilt", "neoforge", "cleanroom"):
+            installer._note("OptiFine 不能与 Fabric / Quilt / NeoForge / Cleanroom 同装，已跳过")
         elif primary == "forge":
             from . import optifine as optifine_mod
             mods = installer.instance.path / "mods"
@@ -70,4 +82,30 @@ def install_game(installer: Installer, version: str, loader: str = "无",
             installer._note(f"OptiFine 已作为 Forge 模组放入 mods/{name}")
         else:
             vid = installer.install_optifine(mc, typ=of_typ, patch=of_patch)
+
+    # Fabric API / QSL 随装（HMCL 安装页同款可选组件）。
+    # 失败只提示不炸游戏安装：加载器已装好，前置可以稍后手动补。
+    if extra.get("fabric_api"):
+        if primary in ("fabric", "quilt"):
+            from . import mods as mods_mod
+            slug = "fabric-api" if primary == "fabric" else "qsl"
+            try:
+                info = mods_mod.install_modrinth_mod(
+                    installer.dm, slug, installer.instance,
+                    mc_version=mc, loader=primary)
+                installer._note(
+                    f"{slug} {info.get('version') or ''} 已放入 mods（{', '.join(info.get('files') or [])}）")
+            except Exception as exc:
+                installer._note(f"{slug} 安装失败（可稍后到下载页手动安装）: {exc}")
+        else:
+            installer._note("Fabric API 只适用于 Fabric / Quilt，已跳过")
+
+    if custom and custom != vid:
+        from . import version_ops as vops
+        try:
+            vid = vops.rename_version(installer.instance, vid, custom)
+            installer._note(f"版本已命名: {vid}")
+        except vops.VersionOpError as exc:
+            # 命名失败不吞掉安装成果：保留自动名并提示
+            installer._note(f"自定义版本名失败（保留 {vid}）: {exc}")
     return vid

@@ -255,8 +255,11 @@ class MainWindow(FluentWindowBase):
         self.backend.task_count_changed.connect(self._update_task_badge)
         self.backend.game_started.connect(self._on_game_started)
         self.backend.game_exited.connect(self._on_game_exited)
+        self.backend.game_log_requested.connect(self._open_game_log)
         self.stackedWidget.currentChanged.connect(lambda *_: self._place_download_dock())
         self.resize(1180, 760)
+        # 拖拽导入：整合包 / 模组 / 世界 / 资源包 / 光影 / 数据包丢进窗口即装
+        self.setAcceptDrops(True)
         # 上面 apply_theme() 时 _pages 还是空的，ScrollArea 表面没刷到。
         # 页面全部就位后再刷一遍，深色启动才不会白字压浅底。
         self.apply_theme()
@@ -865,7 +868,26 @@ class MainWindow(FluentWindowBase):
             f" border-image: url('{path}') 0 0 0 0 stretch stretch; }}"
         )
 
+    def music_player(self):
+        """启动器背景音乐播放器（懒建，PCL2 音乐播放器同款）。"""
+        player = getattr(self, "_music_player", None)
+        if player is None:
+            from .music_player import MusicPlayer
+            player = self._music_player = MusicPlayer(self)
+        return player
+
+    def _boot_music(self):
+        from mclauncher.config import CONFIG
+        if not CONFIG.get("music_enabled", False):
+            return
+        try:
+            self.music_player().start()
+        except Exception as exc:
+            from mclauncher import utils
+            utils.log.warning("背景音乐启动失败: %s", exc)
+
     def _boot_extras(self):
+        self._boot_music()
         if self.backend.get_setting("first_run", True):
             from .pages.first_run import FirstRunDialog
             dlg = FirstRunDialog(self.backend, self)
@@ -901,6 +923,70 @@ class MainWindow(FluentWindowBase):
         if self._quit_on_exit:
             self._quit_on_exit = False
             QApplication.instance().quit()
+
+    def _open_game_log(self, task_id: str, version: str):
+        """启动设置勾了「显示日志」时自动弹出实时日志窗口（HMCL 同款）。"""
+        from .pages.game_log_window import GameLogWindow
+        win = GameLogWindow(self.backend, task_id or "", version or "", parent=self)
+        win.show()
+
+    # ------------------------------------------------------------------
+    # 拖拽导入（对标 PCL2：文件拖进窗口自动识别安装）
+    # ------------------------------------------------------------------
+    def dragEnterEvent(self, e):
+        from mclauncher.import_files import SUPPORTED_EXTS
+        md = e.mimeData()
+        if md.hasUrls() and any(
+                u.isLocalFile() and u.toLocalFile().lower().endswith(SUPPORTED_EXTS)
+                for u in md.urls()):
+            e.acceptProposedAction()
+            return
+        super().dragEnterEvent(e)
+
+    def dropEvent(self, e):
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        if not paths:
+            super().dropEvent(e)
+            return
+        e.acceptProposedAction()
+        self._import_dropped(paths)
+
+    def _import_dropped(self, paths: list):
+        infos = [self.backend.classify_import(p) for p in paths]
+        known = [i for i in infos if i.get("kind") != "unknown"]
+        unknown = [i for i in infos if i.get("kind") == "unknown"]
+        if not known:
+            InfoBar.warning(
+                tr("无法识别"),
+                tr("支持整合包(.mrpack/.zip)、模组(.jar)、世界、资源包、光影包、数据包、版本 JSON(.json)"),
+                parent=self, position=InfoBarPosition.TOP, duration=4000)
+            return
+        from mclauncher.config import CONFIG
+        from qfluentwidgets import MessageBox
+        inst = str(CONFIG.get("default_instance") or "default")
+        lines = [f"· {i['name']} → {tr(i.get('label') or '')}" for i in known]
+        lines += [f"· {i['name']} → {tr('无法识别，跳过')}" for i in unknown]
+        body = (tr("检测到 {n} 个可导入文件：").format(n=len(known)) + "\n"
+                + "\n".join(lines) + "\n\n"
+                + tr("导入到实例「{inst}」？整合包会安装对应游戏版本，其余直接放入对应目录。").format(inst=inst))
+        box = MessageBox(tr("拖拽导入"), body, self)
+        box.yesButton.setText(tr("导入"))
+        box.cancelButton.setText(tr("取消"))
+        if not box.exec():
+            return
+        started = 0
+        for i in known:
+            try:
+                self.backend.import_local_file(i["path"], kind=i["kind"])
+                started += 1
+            except Exception as err:
+                InfoBar.error(tr("导入失败"), f"{i['name']}: {err}", parent=self,
+                              position=InfoBarPosition.TOP_RIGHT, duration=5000)
+        if started:
+            InfoBar.success(
+                tr("已开始导入"),
+                tr("共 {n} 个任务，进度见「下载任务」").format(n=started),
+                parent=self, position=InfoBarPosition.TOP_RIGHT, duration=3500)
             return
         mode = self.backend.get_setting("launcher_visibility") or "keep"
         if mode == "hide_reopen":

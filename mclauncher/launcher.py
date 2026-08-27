@@ -4,6 +4,7 @@ import ctypes
 import os
 import subprocess
 import threading
+from pathlib import Path
 
 from . import APP_ID, LAUNCHER_NAME, LAUNCHER_VERSION
 from . import java as java_mod
@@ -32,6 +33,69 @@ _JVM_VALUE_FLAGS = {
     "-p", "-cp", "-classpath", "--class-path", "--module-path",
     "--add-modules", "--add-opens", "--add-exports", "--add-reads",
 }
+
+
+def _extract_server(extras):
+    """从额外游戏参数里剥离 --server / --port，交给版本感知的直连逻辑统一处理。
+
+    旧调用方习惯直接塞 ["--server", host, "--port", port]；1.20+ 已改用
+    Quick Play（--quickPlayMultiplayer），旧参数会被游戏忽略。这里统一
+    提取，由 build_launch_command 按版本能力生成正确参数。
+    """
+    host = ""
+    port = 0
+    out = []
+    i = 0
+    extras = list(extras or [])
+    while i < len(extras):
+        a = str(extras[i])
+        if a == "--server" and i + 1 < len(extras):
+            host = str(extras[i + 1]).strip()
+            i += 2
+            continue
+        if a == "--port" and i + 1 < len(extras):
+            try:
+                port = int(str(extras[i + 1]).strip())
+            except ValueError:
+                port = 0
+            i += 2
+            continue
+        out.append(a)
+        i += 1
+    return out, host, port
+
+
+def _extract_world(extras):
+    """从额外游戏参数里剥离 --quickPlaySingleplayer（快速进入存档）。
+
+    与 _extract_server 同一套路：调用方把存档文件夹名塞进 extras，
+    这里提取后由 build_launch_command 按版本能力生成参数——
+    1.20+ 走 Quick Play 特性注入；老版本没有等价参数，直接给可读报错，
+    而不是把游戏莫名其妙启动到主界面。
+    """
+    world = ""
+    out = []
+    i = 0
+    extras = list(extras or [])
+    while i < len(extras):
+        a = str(extras[i])
+        if a == "--quickPlaySingleplayer" and i + 1 < len(extras):
+            world = str(extras[i + 1]).strip()
+            i += 2
+            continue
+        out.append(a)
+        i += 1
+    return out, world
+
+
+def _server_game_args(game_args, extras, server, server_port):
+    """没有 Quick Play 参数（老版本）时补旧式 --server/--port 直连参数。"""
+    if not server:
+        return []
+    joined = list(game_args) + list(extras)
+    if any(str(a).startswith("--quickPlay") for a in joined):
+        return []
+    return ["--server", str(server), "--port", str(int(server_port or 25565))]
 
 
 def _expand_args(args_raw, placeholders, features):
@@ -299,10 +363,20 @@ def watch_window_title(proc, title: str, timeout: float = 90.0):
 def build_launch_command(instance, version_id, account_props, java_exe,
                          memory_mb=4096, width=None, height=None,
                          extra_game_args=None, extra_jvm_args=None,
-                         game_directory=None, authlib_api=None):
+                         game_directory=None, authlib_api=None,
+                         server="", server_port=0,
+                         use_system_glfw=False, use_system_openal=False,
+                         natives_dir_override=None):
     """
     构建启动命令。返回 (cmd, natives_dir, version_dir, game_dir)。
     account_props: {'name', 'uuid', 'token', 'user_type', 'xuid'}
+    server/server_port: 启动后直连的服务器。1.20+ 使用 Quick Play
+    （--quickPlayMultiplayer），老版本回退 --server/--port。extra_game_args
+    里带的 --server/--port 也会被提取并按同样逻辑处理。
+    use_system_glfw / use_system_openal: 不解压捆绑 GLFW/OpenAL，回落系统库
+    （HMCL「使用系统 GLFW/OpenAL」同款，Linux 下解决 Wayland 崩溃等问题）。
+    natives_dir_override: 自定义本地库目录（HMCL「自定义 natives 路径」），
+    指定后跳过解压，java.library.path 直接指向该目录。
     """
     vjson = instance.version_json(version_id)
     if not vjson:
@@ -330,16 +404,25 @@ def build_launch_command(instance, version_id, account_props, java_exe,
     assets_id = assets_idx.get("id", "legacy")
     assets_dir = instance.assets_dir()
     libs_dir = instance.libraries_dir()
-    natives_dir = extract_natives(instance, resolved, version_id)
-    needs_natives = any(
-        select_native_classifier(lib)
-        for lib in resolved.get("libraries") or []
-        if lib.get("clientreq") is not False and utils.check_rules(lib.get("rules"))
-    )
-    if needs_natives and not natives_present(natives_dir):
-        raise LaunchError(
-            "缺少 LWJGL 本地库（natives）。请重新安装该 Minecraft 版本后再启动。"
+    custom_natives = str(natives_dir_override or "").strip()
+    if custom_natives:
+        # 自定义目录由用户负责内容完整（HMCL 同款），不解压也不做 lwjgl 检查
+        natives_dir = Path(custom_natives)
+        if not natives_dir.is_dir():
+            raise LaunchError(f"自定义本地库目录不存在: {natives_dir}")
+    else:
+        natives_dir = extract_natives(instance, resolved, version_id,
+                                      skip_glfw=use_system_glfw,
+                                      skip_openal=use_system_openal)
+        needs_natives = any(
+            select_native_classifier(lib)
+            for lib in resolved.get("libraries") or []
+            if lib.get("clientreq") is not False and utils.check_rules(lib.get("rules"))
         )
+        if needs_natives and not natives_present(natives_dir):
+            raise LaunchError(
+                "缺少 LWJGL 本地库（natives）。请重新安装该 Minecraft 版本后再启动。"
+            )
 
     # ---- classpath（同名库保留后出现的路径，位置仍在第一次出现处）
     cp_by_id = {}
@@ -370,6 +453,16 @@ def build_launch_command(instance, version_id, account_props, java_exe,
 
     main_class = resolved.get("mainClass") or "net.minecraft.client.main.Main"
 
+    # ---- 直连服务器：统一提取（调用方可能塞在 extra_game_args 里）
+    extras_in, ex_host, ex_port = _extract_server(
+        [str(a) for a in (extra_game_args or []) if a not in (None, "")])
+    server = str(server or "").strip() or ex_host
+    server_port = int(server_port or 0) or ex_port
+    if server:
+        server_port = int(server_port or 25565)
+    # ---- 快速进入单人存档（HMCL 同款；1.20+ 才有对应参数）
+    extras_in, world = _extract_world(extras_in)
+
     # ---- 占位符
     props = account_props or {}
     auth_uuid = utils.dashed_uuid(props.get("uuid") or "") or "00000000-0000-0000-0000-000000000000"
@@ -398,7 +491,16 @@ def build_launch_command(instance, version_id, account_props, java_exe,
         "resolution_width": str(width or 854),
         "resolution_height": str(height or 480),
     }
-    features = {"is_demo_user": False, "has_custom_resolution": bool(width or height)}
+    if server:
+        placeholders["quickPlayMultiplayer"] = f"{server}:{server_port}"
+    if world:
+        placeholders["quickPlaySingleplayer"] = world
+    features = {
+        "is_demo_user": False,
+        "has_custom_resolution": bool(width or height),
+        "is_quick_play_multiplayer": bool(server),
+        "is_quick_play_singleplayer": bool(world),
+    }
 
     # ---- 参数
     if resolved.get("arguments"):
@@ -462,7 +564,12 @@ def build_launch_command(instance, version_id, account_props, java_exe,
         if lp.is_file() and not any("log4j.configurationFile" in a for a in jvm_args):
             jvm_args.append(f"-Dlog4j.configurationFile={lp}")
 
-    extras = [str(a) for a in (extra_game_args or []) if a not in (None, "")]
+    if world and "--quickPlaySingleplayer" not in game_args:
+        raise LaunchError(
+            f"版本 {version_id} 不支持直接进入存档（需要 1.20 及以上）。请正常启动后在游戏里选择该世界。")
+
+    extras = extras_in
+    game_args += _server_game_args(game_args, extras, server, server_port)
     extra_jvm = []
     if extra_jvm_args:
         extra_jvm = list(extra_jvm_args) if isinstance(extra_jvm_args, (list, tuple)) else split_args(extra_jvm_args)
@@ -511,18 +618,37 @@ class GameProcess:
         watch_window_title(self.proc, window_title)
         self.on_line = on_line
         self.started_at = _time.time()
-        self.lines = collections.deque(maxlen=200)
+        # 2000 行够日志窗口回看；崩溃分析仍然只取尾部
+        self.lines = collections.deque(maxlen=2000)
+        self.total_lines = 0
         self._thread = threading.Thread(target=self._reader, daemon=True)
         self._thread.start()
 
     def last_lines(self):
         return list(self.lines)
 
+    def tail(self, since: int = 0) -> dict:
+        """增量取日志：since 为已读到的绝对行号。
+
+        返回 {start, total, lines}，start 是 lines[0] 的绝对行号。
+        环形缓冲丢掉的早期行拿不回来，start 可能大于 since。"""
+        lines = list(self.lines)
+        total = int(self.total_lines)
+        start = total - len(lines)
+        since = max(0, int(since or 0))
+        if since >= total:
+            return {"start": total, "total": total, "lines": []}
+        if since > start:
+            lines = lines[since - start:]
+            start = since
+        return {"start": start, "total": total, "lines": lines}
+
     def _reader(self):
         try:
             for line in self.proc.stdout:
                 line = line.rstrip("\n")
                 self.lines.append(line)
+                self.total_lines += 1
                 if self.on_line:
                     try:
                         self.on_line(line)

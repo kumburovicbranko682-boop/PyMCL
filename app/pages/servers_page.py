@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QFileDialog, QFrame, QHBoxLayout, QHeaderView, QStackedWidget, QTableWidget,
     QTableWidgetItem, QVBoxLayout, QWidget,
@@ -56,6 +57,10 @@ class ServerPage(QWidget):
         self.instance_box.currentTextChanged.connect(self._on_instance_changed)
         tl.addWidget(self.instance_box)
         tl.addStretch(1)
+        ping_btn = PushButton(tr("刷新状态"))
+        ping_btn.setIcon(FIF.SYNC)
+        ping_btn.clicked.connect(self._ping_all)
+        tl.addWidget(ping_btn)
         add_btn = PushButton(tr("添加服务器"))
         add_btn.setIcon(FIF.ADD)
         add_btn.clicked.connect(self._on_add)
@@ -70,13 +75,15 @@ class ServerPage(QWidget):
 
         # 表格
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels([tr("名称"), tr("地址"), tr("端口"), tr("描述"), tr("操作")])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(
+            [tr("名称"), tr("地址"), tr("端口"), tr("状态"), tr("描述"), tr("操作")])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.verticalHeader().hide()
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -144,20 +151,84 @@ class ServerPage(QWidget):
             self.table.setItem(i, 0, QTableWidgetItem(s.get("name", "?")))
             self.table.setItem(i, 1, QTableWidgetItem(s.get("ip", "")))
             self.table.setItem(i, 2, QTableWidgetItem(str(s.get("port", 25565))))
+            self.table.setItem(i, 3, QTableWidgetItem("—"))
             desc = (s.get("description", "") or "")[:40]
-            self.table.setItem(i, 3, QTableWidgetItem(desc))
+            self.table.setItem(i, 4, QTableWidgetItem(desc))
             btn_w = QWidget()
             btn_l = QHBoxLayout(btn_w)
             btn_l.setContentsMargins(4, 2, 4, 2)
             # 不再 setFixedWidth(40)：两个汉字加内边距根本放不下，会被省略号截成「编…」，
             # 切英文后 Edit/Delete 更放不下。让按钮按自身 sizeHint 走，最后一列本来就 stretch。
+            join_b = TransparentPushButton(tr("加入"))
+            join_b.clicked.connect(lambda checked, idx=i: self._on_join(idx))
             edit_b = TransparentPushButton(tr("编辑"))
             edit_b.clicked.connect(lambda checked, idx=i: self._on_edit(idx))
             del_b = TransparentPushButton(tr("删除"))
             del_b.clicked.connect(lambda checked, idx=i: self._on_delete(idx))
+            btn_l.addWidget(join_b)
             btn_l.addWidget(edit_b)
             btn_l.addWidget(del_b)
-            self.table.setCellWidget(i, 4, btn_w)
+            self.table.setCellWidget(i, 5, btn_w)
+        self._ping_all()
+
+    # ------------------------------------------------------------------
+    # 在线状态（Server List Ping）：逐行异步查询，切实例/重载后旧结果作废
+    def _ping_all(self):
+        self._ping_gen = getattr(self, "_ping_gen", 0) + 1
+        gen = self._ping_gen
+        call_async = getattr(self.backend, "call_async", None)
+        ping = getattr(self.backend, "ping_server", None)
+        if not callable(call_async) or not callable(ping):
+            return
+        for i, s in enumerate(self._servers):
+            addr = (s.get("ip") or "").strip()
+            if not addr:
+                continue
+            item = self.table.item(i, 3)
+            if item is not None:
+                item.setText(tr("查询中…"))
+            port = int(s.get("port") or 0)
+
+            def _ok(result, row=i, g=gen):
+                self._on_ping_result(row, g, result)
+
+            def _err(err, row=i, g=gen):
+                self._on_ping_result(row, g, {"online": False, "error": str(err)})
+
+            call_async(lambda a=addr, p=port: ping(a, p), _ok, _err)
+
+    def _on_ping_result(self, row: int, gen: int, result: dict):
+        if gen != getattr(self, "_ping_gen", 0) or row >= self.table.rowCount():
+            return
+        item = self.table.item(row, 3)
+        if item is None:
+            return
+        result = result or {}
+        if result.get("online"):
+            players = f"{result.get('players_online', 0)}/{result.get('players_max', 0)}"
+            version = (result.get("version") or "").strip()
+            text = f"{result.get('latency_ms', 0)}ms · {players}"
+            if version:
+                text += f" · {version[:24]}"
+            item.setText(text)
+            item.setForeground(QColor("#2E9B6B"))
+            item.setToolTip(result.get("motd") or "")
+        else:
+            item.setText(tr("离线"))
+            item.setForeground(QColor("#D95568"))
+            item.setToolTip(result.get("error") or "")
+
+    def _on_join(self, index: int):
+        s = self._servers[index]
+        try:
+            self.backend.join_server(
+                self._instance, s.get("ip") or "", int(s.get("port") or 25565))
+            InfoBar.success(
+                tr("正在启动"),
+                tr("启动后将自动加入 {name}").format(name=s.get("name") or s.get("ip") or "?"),
+                duration=3000, parent=self)
+        except Exception as e:
+            InfoBar.error(tr("启动失败"), str(e), duration=4000, parent=self)
 
     def _on_add(self):
         dlg = InputDialog(tr("添加服务器"), tr("服务器名称"), placeholder=tr("可选"))

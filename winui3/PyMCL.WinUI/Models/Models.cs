@@ -12,6 +12,7 @@ public sealed class InstanceInfo
     [JsonPropertyName("mc_version")] public string McVersion { get; set; } = "";
     public string Java { get; set; } = "";
     [JsonPropertyName("java_label")] public string JavaLabel { get; set; } = "";
+    public string Icon { get; set; } = "";
 }
 
 public sealed class VersionRow
@@ -19,6 +20,24 @@ public sealed class VersionRow
     public string Version { get; set; } = "";
     public string Type { get; set; } = "";
     public string Date { get; set; } = "";
+}
+
+public sealed class ModpackUpdateInfo
+{
+    public bool Update { get; set; }
+    public string Name { get; set; } = "";
+    public string Current { get; set; } = "";
+    public string Latest { get; set; } = "";
+    public string Source { get; set; } = "";
+}
+
+/// <summary>classify_import 的识别结果（拖拽导入）。</summary>
+public sealed class ImportInfo
+{
+    public string Kind { get; set; } = "unknown";
+    public string Name { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string Path { get; set; } = "";
 }
 
 public sealed class CatalogItem
@@ -138,6 +157,23 @@ public sealed class ModEntry
 {
     public string Filename { get; set; } = "";
     public bool Enabled { get; set; } = true;
+    // get_mod_details 附带的展示元数据（get_installed_mod_entries 没有这些字段）
+    public string Name { get; set; } = "";
+    public string Version { get; set; } = "";
+    public string Loader { get; set; } = "";
+    public string Description { get; set; } = "";
+}
+
+public sealed class PackEntry
+{
+    public string Filename { get; set; } = "";
+    [JsonPropertyName("is_dir")] public bool IsDir { get; set; }
+    public long Bytes { get; set; }
+    public string Path { get; set; } = "";
+    public string Description { get; set; } = "";
+    [JsonPropertyName("pack_format")] public int PackFormat { get; set; }
+    [JsonPropertyName("mc_range")] public string McRange { get; set; } = "";
+    public string Icon { get; set; } = "";
 }
 
 public sealed class AiStoreDto

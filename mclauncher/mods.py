@@ -61,6 +61,7 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         version = _pick_version(dm, slug, mc_version, loader)
 
     seen = set()
+    seen_projects = set()
     downloaded = []
 
     def _download(v, depth=0):
@@ -68,6 +69,8 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         if not vid or vid in seen or depth > 3:
             return
         seen.add(vid)
+        if v.get("project_id"):
+            seen_projects.add(v["project_id"])
         f = _primary_file(v)
         if not f or not f.get("url"):
             return
@@ -79,19 +82,26 @@ def install_modrinth_mod(dm: DownloadManager, slug, instance: Instance,
         dm.download(tried[0], dest, sha1=f.get("sha1"), size=f.get("size"),
                     sha512=f.get("sha512"), urls=tried)
         downloaded.append(dest)
-        # 必需依赖（如 Fabric API）递归下载
+        # 必需依赖（如 Fabric API）递归下载。Modrinth 的依赖大多只给
+        # project_id（version_id 为空），这类要按实例 MC 版本 + 加载器
+        # 现场挑一个版本，和 PCL2 / HMCL 行为一致。
         for dep in v.get("dependencies") or []:
             if dep.get("dependency_type") != "required":
                 continue
             dep_vid = dep.get("version_id")
-            if not dep_vid:
-                continue
+            dep_pid = dep.get("project_id")
             try:
-                dep_version = dm.fetch_json(f"{MODRINTH_API}/version/{dep_vid}", timeout=60)
+                if dep_vid:
+                    dep_version = dm.fetch_json(f"{MODRINTH_API}/version/{dep_vid}", timeout=60)
+                elif dep_pid and dep_pid not in seen_projects:
+                    seen_projects.add(dep_pid)
+                    dep_version = _pick_version(dm, dep_pid, mc_version, loader)
+                else:
+                    continue
                 _download(dep_version, depth + 1)
             except Exception as e:
                 utils.log.warning("下载依赖 %s 失败: %s",
-                                  dep.get("file_name") or dep_vid, e)
+                                  dep.get("file_name") or dep_vid or dep_pid, e)
 
     _download(version)
     if not downloaded:
@@ -109,6 +119,30 @@ class ModError(Exception):
 
 # ================================================================ 搜索
 
+# 统一排序键（下载页排序下拉，PCL2/HMCL 同款）→ (Modrinth index, CurseForge sortField)
+# CurseForge ModsSearchSortField: 2=Popularity 3=LastUpdated 6=TotalDownloads 11=ReleasedDate
+SORT_KEYS = {
+    "relevance": ("relevance", 2),
+    "downloads": ("downloads", 6),
+    "updated": ("updated", 3),
+    "newest": ("newest", 11),
+    "follows": ("follows", 2),   # CF 没有关注数，退回人气
+}
+
+
+def mr_sort_index(sort, query="") -> str:
+    """Modrinth search 的 index 参数；sort 留空保持旧行为（有词按相关度，无词按下载量）。"""
+    mr = SORT_KEYS.get(str(sort or "").strip().lower(), ("", 0))[0]
+    if mr:
+        return mr
+    return "relevance" if (query or "").strip() else "downloads"
+
+
+def cf_sort_field(sort) -> int:
+    """CurseForge search 的 sortField；sort 留空保持旧行为（按人气）。"""
+    return SORT_KEYS.get(str(sort or "").strip().lower(), ("", 2))[1] or 2
+
+
 def _mr_facets(project_type, game_version=None, categories=None):
     facets = [[f"project_type:{project_type}"]]
     if game_version:
@@ -119,14 +153,26 @@ def _mr_facets(project_type, game_version=None, categories=None):
     return json.dumps(facets)
 
 
-def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categories=None):
-    """搜索 Modrinth 模组（project_type:mod），官方与镜像短超时轮询。"""
+def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categories=None,
+                sort="", offset=0):
+    """搜索 Modrinth 模组（project_type:mod），官方与镜像短超时轮询。
+
+    中文关键词先经 mcmod.cn 中文名数据库翻成英文名再搜（HMCL/PCL2 同款）。
+    sort/offset：下载页排序与「加载更多」分页。
+    """
+    from . import mod_translate
+    rec = mod_translate.best_cn_match(query, "mod", dm=dm)
+    if rec:
+        query = rec.get("subname") or rec.get("curseforge") or rec.get("name") or query
     params = {
-        "query": query or " ",
+        # 注意不能用 " " 占位：Modrinth 会把空格当字面词搜出 0 条
+        "query": query or "",
         "facets": _mr_facets("mod", game_version, categories),
         "limit": limit,
-        "index": "relevance" if (query or "").strip() else "downloads",
+        "index": mr_sort_index(sort, query),
     }
+    if offset:
+        params["offset"] = int(offset)
     last_err = None
     from . import source
     for base in source.modrinth_api_bases():
@@ -140,7 +186,7 @@ def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categor
             data = None
     else:
         raise ModError(f"搜索模组失败（官方+镜像均不可用）: {last_err}")
-    return [
+    rows = [
         {
             "slug": h.get("slug"),
             "title": h.get("title", h.get("slug")),
@@ -154,6 +200,7 @@ def search_mods(dm: DownloadManager, query, limit=30, game_version=None, categor
         }
         for h in data.get("hits", [])
     ]
+    return mod_translate.annotate(rows, "mod")
 
 
 def list_versions(dm: DownloadManager, slug, game_version=None, loaders=None):
@@ -418,6 +465,9 @@ def detect_loader(instance: Instance):
             return "quilt"
         if "neoforge" in low:
             return "neoforge"
+        if "cleanroom" in low:
+            # Cleanroom 是 Forge 1.12.2 分支，装的就是 Forge 模组
+            return "forge"
         if "forge" in low:
             return "forge"
     return None
@@ -528,7 +578,8 @@ def delete_mod(instance: Instance, filename: str, mods_dir=None):
     p = _mod_file_at(mods_dir or (instance.path / "mods"), filename)
     if not p.is_file():
         raise ModError(f"模组文件不存在: {filename}")
-    p.unlink()
+    from . import trash
+    trash.trash_or_delete(p)
 
 
 def set_mod_enabled(instance: Instance, filename: str, enabled: bool, mods_dir=None) -> str:
@@ -734,6 +785,76 @@ def _cf_post(dm: DownloadManager, path, body, api_key=None, timeout=60):
     raise ModError(f"CurseForge POST 失败 {path}: {last_err}")
 
 
+def murmur2_hash(data: bytes, seed: int = 1) -> int:
+    """CurseForge 使用的 MurmurHash2（32 位）。"""
+    m = 0x5bd1e995
+    r = 24
+    length = len(data)
+    h = (seed ^ length) & 0xFFFFFFFF
+    n = length // 4
+    for i in range(n):
+        k = int.from_bytes(data[i * 4:i * 4 + 4], "little")
+        k = (k * m) & 0xFFFFFFFF
+        k ^= k >> r
+        k = (k * m) & 0xFFFFFFFF
+        h = (h * m) & 0xFFFFFFFF
+        h ^= k
+    rest = data[n * 4:]
+    if len(rest) >= 3:
+        h ^= rest[2] << 16
+    if len(rest) >= 2:
+        h ^= rest[1] << 8
+    if len(rest) >= 1:
+        h ^= rest[0]
+        h = (h * m) & 0xFFFFFFFF
+    h ^= h >> 13
+    h = (h * m) & 0xFFFFFFFF
+    h ^= h >> 15
+    return h & 0xFFFFFFFF
+
+
+def cf_fingerprint(path) -> int:
+    """CurseForge 文件指纹：剔除空白字节后的 MurmurHash2。"""
+    raw = Path(path).read_bytes()
+    cleaned = bytes(b for b in raw if b not in (9, 10, 13, 32))
+    return murmur2_hash(cleaned, 1)
+
+
+def cf_match_fingerprints(dm: DownloadManager, fingerprints, api_key=None) -> dict:
+    """批量指纹匹配 POST /v1/fingerprints。
+
+    返回 {fingerprint: {"projectID", "fileID", "fileName"}}；请求失败的
+    分片记日志后跳过（对应文件按未匹配处理）。
+    """
+    fps = []
+    for f in fingerprints or []:
+        try:
+            fps.append(int(f))
+        except (TypeError, ValueError):
+            continue
+    out = {}
+    for i in range(0, len(fps), 100):
+        chunk = fps[i:i + 100]
+        try:
+            data = _cf_post(dm, "/fingerprints", {"fingerprints": chunk}, api_key=api_key)
+        except Exception as e:
+            utils.log.warning("CurseForge 指纹匹配失败: %s", e)
+            continue
+        matches = ((data or {}).get("data") or {}).get("exactMatches") or []
+        for hit in matches:
+            f = hit.get("file") or {}
+            fp = f.get("fileFingerprint")
+            pid = f.get("modId") or hit.get("id")
+            fid = f.get("id")
+            if fp and pid and fid:
+                out[int(fp)] = {
+                    "projectID": int(pid),
+                    "fileID": int(fid),
+                    "fileName": f.get("fileName") or "",
+                }
+    return out
+
+
 def cf_files_by_ids(dm: DownloadManager, file_ids, api_key=None):
     """批量查询文件元数据 POST /v1/mods/files，返回 {fileId: file}。"""
     ids = []
@@ -760,20 +881,34 @@ def cf_files_by_ids(dm: DownloadManager, file_ids, api_key=None):
     return out
 
 
+_CF_TRANSLATE_KIND = {CF_CLASS_MOD: "mod", CF_CLASS_MODPACK: "modpack"}
+
+
 def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
                       class_id=CF_CLASS_MOD, slug=None, game_version=None,
-                      categories=None):
+                      categories=None, sort="", offset=0):
     """搜索 CurseForge（官方 API 优先，国内镜像兜底）。
 
     categories 是 canonical key 的展示名碎片（见 catalog_files.CF_TYPE_TOKENS）；
     CF 的 categoryFilter 对 slug 约束不稳定，这里改为拉回结果后按分类名过滤。
+    中文关键词经 mcmod.cn 中文名数据库翻译：先按 slug 精确找本体，再按英文名全文搜。
+    sort/offset：下载页排序与「加载更多」分页。
     """
+    from . import mod_translate
+    kind = _CF_TRANSLATE_KIND.get(class_id)
+    cn_slug = None
+    if query and not slug and kind:
+        rec = mod_translate.best_cn_match(query, kind, dm=dm)
+        if rec:
+            cn_slug = (rec.get("curseforge") or "").strip() or None
+            query = rec.get("subname") or rec.get("name") or query
     params = {
         "gameId": 432,
         "classId": class_id,
-        "sortField": 2,      # 按人气排序
+        "sortField": cf_sort_field(sort),
+        "sortOrder": "desc",
         "pageSize": limit * 2 if categories else limit,
-        "index": 0,
+        "index": int(offset or 0),
     }
     if query:
         params["searchFilter"] = query
@@ -784,12 +919,31 @@ def search_curseforge(dm: DownloadManager, query=None, limit=30, api_key=None,
 
     data = _cf_fetch(dm, "/mods/search", api_key=api_key, params=params)
     hits = [_cf_norm(m) for m in _cf_items(data)]
+    if cn_slug and not offset:
+        # 中文命中的本体置顶（只在第一页做，翻页别重复置顶）；
+        # 全文搜没带回来就按 slug 单独取一次
+        front = [h for h in hits if (h.get("slug") or "").lower() == cn_slug.lower()]
+        if front:
+            hits = front + [h for h in hits if h not in front]
+        else:
+            try:
+                exact_params = {
+                    "gameId": 432, "classId": class_id, "slug": cn_slug,
+                    "pageSize": 3, "index": 0,
+                }
+                if game_version:
+                    exact_params["gameVersion"] = game_version
+                exact = _cf_fetch(dm, "/mods/search", api_key=api_key, params=exact_params)
+                hits = [_cf_norm(m) for m in _cf_items(exact)] + hits
+            except Exception as e:
+                utils.log.debug("中文名精确 slug 查询失败 %s: %s", cn_slug, e)
     if categories:
         tokens = [str(t).lower() for t in categories if t]
         hits = [h for h in hits if any(
             tok and any(tok in c for c in h.get("cf_categories") or [])
             for tok in tokens)]
-    return hits[:limit]
+    hits = hits[:limit]
+    return mod_translate.annotate(hits, kind) if kind else hits
 
 
 def _cf_norm(m):
@@ -885,13 +1039,20 @@ def _resolve_mods_dir(instance: Instance, mods_dir=None) -> Path:
     return folder
 
 
+# CurseForge dependencies[].relationType == 3 表示必装依赖
+CF_RELATION_REQUIRED = 3
+
+
 def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
                            mc_version=None, loader=None, api_key=None, on_progress=None,
-                           file_id=None, mods_dir=None):
-    """安装 CurseForge 模组：自动匹配实例 MC 版本与加载器。"""
+                           file_id=None, mods_dir=None, _seen=None, _depth=0):
+    """安装 CurseForge 模组：自动匹配实例 MC 版本与加载器，含必需依赖。"""
     inst = instance
     inst.ensure_standard_dirs()
     dest_dir = _resolve_mods_dir(inst, mods_dir)
+    if _seen is None:
+        _seen = set()
+    _seen.add(str(addon_id))
     if not mc_version:
         mc_version = detect_mc_version(inst)
     if loader is None:
@@ -938,6 +1099,9 @@ def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
     filename = f.get("fileName") or f"mod-{addon_id}-{file_id}.jar"
     download_url = f.get("downloadUrl")  # API 可能返回此字段
     dest = dest_dir / filename
+    # 官方 API 带 sha1（algo=1）：传给下载器做完整性校验，已有相同文件时直接跳过
+    sha1 = next((h.get("value") for h in (f.get("hashes") or [])
+                 if h.get("algo") == 1 and h.get("value")), None)
 
     last_err = None
     # 候选 URL：API 返回的 downloadUrl → 带文件名的 CDN 直链 → 不带文件名的通用 URL
@@ -948,6 +1112,7 @@ def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
     url_sets.append(_candidate_cf_urls(addon_id, file_id, None))
 
     tried = set()
+    ok = False
     for urls in url_sets:
         for url in urls:
             if url in tried:
@@ -956,12 +1121,35 @@ def install_curseforge_mod(dm: DownloadManager, addon_id, instance: Instance,
             try:
                 if on_progress:
                     on_progress(f"下载 CurseForge 模组 {filename}", 0, 1)
-                dm.download(url, dest, timeout=900)
-                return {"source": "curseforge", "title": mod.get("name"), "files": [dest.name]}
+                dm.download(url, dest, sha1=sha1, timeout=900)
+                ok = True
+                break
             except Exception as e:
                 last_err = e
                 utils.remove_tree(dest)
-    raise ModError(f"CurseForge 模组下载失败: {last_err}")
+        if ok:
+            break
+    if not ok:
+        raise ModError(f"CurseForge 模组下载失败: {last_err}")
+
+    files = [dest.name]
+    # 必需依赖递归安装（对齐 PCL2 / HMCL）。单个依赖失败只警告，不拖垮主模组。
+    if _depth < 3:
+        for dep in f.get("dependencies") or []:
+            if dep.get("relationType") != CF_RELATION_REQUIRED:
+                continue
+            dep_id = dep.get("modId")
+            if not dep_id or str(dep_id) in _seen:
+                continue
+            try:
+                sub = install_curseforge_mod(
+                    dm, dep_id, inst, mc_version=mc_version, loader=loader,
+                    api_key=api_key, on_progress=on_progress, mods_dir=dest_dir,
+                    _seen=_seen, _depth=_depth + 1)
+                files.extend((sub or {}).get("files") or [])
+            except Exception as e:
+                utils.log.warning("安装 CurseForge 依赖 %s 失败: %s", dep_id, e)
+    return {"source": "curseforge", "title": mod.get("name"), "files": files}
 
 
 def install_cf_mod(dm: DownloadManager, url, instance: Instance, on_progress=None, mods_dir=None):
@@ -1046,14 +1234,17 @@ CONTENT_KINDS = {
 
 
 def search_modrinth_projects(dm: DownloadManager, query, project_type, limit=30,
-                             game_version=None, categories=None):
+                             game_version=None, categories=None, sort="", offset=0):
     """按 project_type 搜 Modrinth（shader / resourcepack / datapack / mod）。"""
     params = {
-        "query": query or " ",
+        # 注意不能用 " " 占位：Modrinth 会把空格当字面词搜出 0 条
+        "query": query or "",
         "facets": _mr_facets(project_type, game_version, categories),
         "limit": limit,
-        "index": "relevance" if (query or "").strip() else "downloads",
+        "index": mr_sort_index(sort, query),
     }
+    if offset:
+        params["offset"] = int(offset)
     last_err = None
     data = None
     from . import source
@@ -1098,8 +1289,10 @@ def delete_content_file(instance: Instance, subdir: str, filename: str):
     p = (folder / filename).resolve()
     if p.parent != folder:
         raise ModError(f"非法路径: {filename}")
-    if p.is_file():
-        p.unlink()
+    # 文件夹形式的包（资源包/数据包都允许解压放置）也要能删
+    if p.exists():
+        from . import trash
+        trash.trash_or_delete(p)
 
 
 def install_modrinth_content(dm: DownloadManager, slug, instance: Instance, subdir: str,

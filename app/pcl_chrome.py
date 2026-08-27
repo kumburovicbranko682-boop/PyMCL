@@ -87,6 +87,32 @@ def _sync_aliases():
 
 PCL_GREEN = "#2E9B6B"
 PCL_GREEN_DEEP = "#1E7A52"
+
+# qfluentwidgets 的默认字族（getFont 硬编码同款）。自定义字体排最前，
+# 缺字时回落到这三个，避免中英混排出现豆腐块。
+FLUENT_FONT_STACK = ["Segoe UI", "Microsoft YaHei", "PingFang SC"]
+
+
+def apply_ui_font():
+    """按设置应用启动器界面字体（HMCL 设置「字体」同款）。
+
+    空值恢复默认字族。已构造的 Fluent 控件在创建时就固定了字体，
+    改动对它们要等重启才完全生效；新建的窗口/页面立即用新字体。
+    """
+    from PySide6.QtWidgets import QApplication
+    from qfluentwidgets import setFontFamilies
+    from mclauncher.config import CONFIG
+
+    family = str(CONFIG.get("ui_font_family", "") or "").strip()
+    families = list(FLUENT_FONT_STACK)
+    if family:
+        families = [family] + [f for f in families if f != family]
+    setFontFamilies(families, save=False)
+    app = QApplication.instance()
+    if app is not None:
+        font = app.font()
+        font.setFamilies(families)
+        app.setFont(font)
 PCL_BLUE = PCL_GREEN
 PCL_BLUE_DEEP = PCL_GREEN_DEEP
 PCL_BG = Theme.bg

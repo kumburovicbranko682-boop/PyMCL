@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""已装模组更新：按 sha1 查 Modrinth，比出版本。"""
+"""已装模组更新：按 sha1 查 Modrinth，比出版本。支持忽略与整包锁定（PCL2 同款）。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,32 +24,98 @@ def _mr_get(dm: DownloadManager, path: str, timeout=12):
         raise last
     raise RuntimeError("Modrinth 不可用")
 
+# 更新忽略表：{project_id: "*"（永不提醒）或 具体 latest 版本串（只忽略这个版本）}
+IGNORE_FILE = "pymcl_mod_ignores.json"
+
+# 实例级「禁止更新 Mod」开关（PCL 2.10.7 同款：防整合包玩家误更新拆包）。
+# PyMCL 的模组更新作用在实例共享 mods 上，所以锁也挂在实例 meta 里。
+LOCK_KEY = "lock_mod_updates"
+
+
+class UpdateLockedError(Exception):
+    """实例开启了 Mod 更新锁定时，检查/应用更新都拒绝执行。"""
+
+
+def is_locked(instance: Instance) -> bool:
+    return bool(instance.meta().get(LOCK_KEY))
+
+
+def set_locked(instance: Instance, locked: bool) -> bool:
+    instance.set_meta(LOCK_KEY, bool(locked))
+    return bool(locked)
+
+
+def _ensure_unlocked(instance: Instance):
+    if is_locked(instance):
+        raise UpdateLockedError(
+            "该实例已锁定 Mod 更新（整合包保护）。如确需更新，请先在模组管理页解除锁定。")
+
 
 def _game_mods(instance: Instance, mods_path: Path | None = None) -> Path:
     return Path(mods_path) if mods_path else instance.path / "mods"
 
 
+def _ignore_file(instance: Instance) -> Path:
+    return Path(instance.path) / IGNORE_FILE
+
+
+def ignores(instance: Instance) -> dict:
+    data = utils.read_json(_ignore_file(instance), None)
+    if not isinstance(data, dict):
+        return {}
+    return {str(k): str(v) for k, v in data.items() if k}
+
+
+def set_ignore(instance: Instance, project, latest: str = "*") -> dict:
+    """忽略某个 mod 的更新。latest='*' 永不提醒；否则只忽略该 latest 版本，
+    下次出更新的版本仍会提醒（PCL2「忽略此版本 / 不再提醒」两档）。"""
+    project = str(project or "").strip()
+    if not project:
+        raise ValueError("project 不能为空")
+    data = ignores(instance)
+    data[project] = str(latest or "*").strip() or "*"
+    utils.write_json(_ignore_file(instance), data)
+    return data
+
+
+def clear_ignore(instance: Instance, project) -> dict:
+    data = ignores(instance)
+    data.pop(str(project or "").strip(), None)
+    utils.write_json(_ignore_file(instance), data)
+    return data
+
+
+def is_ignored(row: dict, ignore_map: dict) -> bool:
+    v = ignore_map.get(str(row.get("project") or ""))
+    if v is None:
+        return False
+    return v == "*" or v == str(row.get("latest") or "")
+
+
 def check_updates(instance: Instance, dm: DownloadManager | None = None,
                   mods_path: Path | None = None, mc_version: str = "",
-                  loader: str = "") -> list:
+                  loader: str = "", include_ignored: bool = False) -> list:
+    _ensure_unlocked(instance)
     dm = dm or DownloadManager(threads=4)
     rows = []
     folder = _game_mods(instance, mods_path)
     if not folder.is_dir():
         return rows
+    ignore_map = ignores(instance)
     for entry in list_instance_mod_entries(instance) if mods_path is None else _entries(folder):
         path = folder / entry["filename"]
         if not path.is_file() or not entry.get("enabled"):
             continue
         info = inspect_jar(path)
         digest = utils.sha1_file(path)
-        row = _modrinth_update(dm, path, digest, mc_version, loader, info)
-        if row:
-            rows.append(row)
+        row = (_modrinth_update(dm, path, digest, mc_version, loader, info)
+               or _curseforge_update(dm, path, mc_version, loader, info))
+        if not row:
             continue
-        row = _curseforge_update(dm, path, mc_version, loader, info)
-        if row:
-            rows.append(row)
+        row["ignored"] = is_ignored(row, ignore_map)
+        if row["ignored"] and not include_ignored:
+            continue
+        rows.append(row)
     return rows
 
 
@@ -98,42 +164,10 @@ def _modrinth_update(dm, path: Path, digest: str, mc_version: str, loader: str, 
     }
 
 
-def _murmur2(data: bytes, seed=1) -> int:
-    m = 0x5bd1e995
-    r = 24
-    length = len(data)
-    h = (seed ^ length) & 0xFFFFFFFF
-    n = length // 4
-    for i in range(n):
-        k = int.from_bytes(data[i * 4:i * 4 + 4], "little")
-        k = (k * m) & 0xFFFFFFFF
-        k ^= k >> r
-        k = (k * m) & 0xFFFFFFFF
-        h = (h * m) & 0xFFFFFFFF
-        h ^= k
-    rest = data[n * 4:]
-    if len(rest) >= 3:
-        h ^= rest[2] << 16
-    if len(rest) >= 2:
-        h ^= rest[1] << 8
-    if len(rest) >= 1:
-        h ^= rest[0]
-        h = (h * m) & 0xFFFFFFFF
-    h ^= h >> 13
-    h = (h * m) & 0xFFFFFFFF
-    h ^= h >> 15
-    return h & 0xFFFFFFFF
-
-
-def _cf_fingerprint(path: Path) -> int:
-    raw = path.read_bytes()
-    cleaned = bytes(b for b in raw if b not in (9, 10, 13, 32))
-    return _murmur2(cleaned, 1)
-
-
 def _curseforge_update(dm, path: Path, mc_version: str, loader: str, info: dict):
+    from .mods import cf_fingerprint
     try:
-        fp = _cf_fingerprint(path)
+        fp = cf_fingerprint(path)
     except OSError:
         return None
     from .mods import _cf_post, cf_detail, cf_files, cf_mod_download_urls
@@ -193,6 +227,7 @@ def _entries(folder: Path) -> list:
 
 def apply_update(instance: Instance, row: dict, dm: DownloadManager | None = None,
                  mods_path: Path | None = None) -> str:
+    _ensure_unlocked(instance)
     dm = dm or DownloadManager(threads=2)
     folder = _game_mods(instance, mods_path)
     url = row.get("url")

@@ -202,26 +202,41 @@ def anchor_grid(grid, col: int, row: int):
 
 
 class IconTile(QWidget):
-    """圆角彩色磁贴，中间显示一个字符。"""
+    """圆角彩色磁贴，中间显示一个字符；传入 image（能加载的图片路径）时改画真图。"""
 
-    def __init__(self, text: str, color: str | None = None, size: int = 44, parent=None):
+    def __init__(self, text: str, color: str | None = None, size: int = 44, parent=None,
+                 image: str | None = None):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self._color = QColor(color or pick_color(text))
-        label = QLabel(text[:1].upper() if text else "?", self)
-        label.setAlignment(Qt.AlignCenter)
-        label.setStyleSheet("color: white; background: transparent;"
-                            f"font-size: {int(size * 0.42)}px; font-weight: 700;")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(label)
+        self._pixmap = None
+        if image:
+            pm = QPixmap(str(image))
+            if not pm.isNull():
+                self._pixmap = pm
+        if self._pixmap is None:
+            label = QLabel(text[:1].upper() if text else "?", self)
+            label.setAlignment(Qt.AlignCenter)
+            label.setStyleSheet("color: white; background: transparent;"
+                                f"font-size: {int(size * 0.42)}px; font-weight: 700;")
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(label)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         path = QPainterPath()
         path.addRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 10, 10)
-        painter.fillPath(path, self._color)
+        if self._pixmap is not None:
+            painter.setClipPath(path)
+            scaled = self._pixmap.scaled(
+                self.size(), Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
+        else:
+            painter.fillPath(path, self._color)
         super().paintEvent(event)
 
 

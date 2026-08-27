@@ -875,136 +875,17 @@ def write_lobby_server(game_dir, url: str) -> Path:
     address = host if port == 25565 else f"{host}:{port}"
     path = Path(game_dir) / "servers.dat"
     utils.ensure_dir(path.parent)
-    servers = _read_servers(path)
+    # 用 servers 模块的保真读写：其他条目的 icon / acceptTextures 不会被抹掉
+    from .servers import read_dat_entries, write_dat_entries
+    servers = read_dat_entries(path)
     entry = {"name": LOBBY_NAME, "ip": address, "hidden": 0}
     out = [entry]
     for row in servers:
         if str(row.get("name") or "") == LOBBY_NAME or str(row.get("ip") or "") == address:
             continue
         out.append(row)
-    _write_servers(path, out)
+    write_dat_entries(path, out)
     return path
-
-
-def _read_u8(buf: BytesIO) -> int:
-    data = buf.read(1)
-    if not data:
-        raise TerracottaError("servers.dat 已损坏")
-    return data[0]
-
-
-def _read_str(buf: BytesIO) -> str:
-    n = struct.unpack(">H", buf.read(2))[0]
-    return buf.read(n).decode("utf-8", "replace")
-
-
-def _skip_nbt(buf: BytesIO, tag: int):
-    if tag == 0:
-        return
-    if tag == 1:
-        buf.read(1)
-    elif tag == 2:
-        buf.read(2)
-    elif tag in (3, 5):
-        buf.read(4)
-    elif tag in (4, 6):
-        buf.read(8)
-    elif tag == 7:
-        buf.read(struct.unpack(">i", buf.read(4))[0])
-    elif tag == 8:
-        _read_str(buf)
-    elif tag == 9:
-        child = _read_u8(buf)
-        count = struct.unpack(">i", buf.read(4))[0]
-        for _ in range(max(count, 0)):
-            _skip_nbt(buf, child)
-    elif tag == 10:
-        while True:
-            child = _read_u8(buf)
-            if child == 0:
-                break
-            _read_str(buf)
-            _skip_nbt(buf, child)
-    elif tag == 11:
-        buf.read(struct.unpack(">i", buf.read(4))[0] * 4)
-    elif tag == 12:
-        buf.read(struct.unpack(">i", buf.read(4))[0] * 8)
-    else:
-        raise TerracottaError("servers.dat 含未知标签")
-
-
-def _read_compound_body(buf: BytesIO) -> dict:
-    data = {}
-    while True:
-        tag = _read_u8(buf)
-        if tag == 0:
-            return data
-        name = _read_str(buf)
-        if tag == 1:
-            data[name] = buf.read(1)[0]
-        elif tag == 8:
-            data[name] = _read_str(buf)
-        elif tag == 9:
-            child = _read_u8(buf)
-            count = struct.unpack(">i", buf.read(4))[0]
-            items = []
-            for _ in range(max(count, 0)):
-                if child == 10:
-                    items.append(_read_compound_body(buf))
-                else:
-                    _skip_nbt(buf, child)
-            data[name] = items
-        else:
-            _skip_nbt(buf, tag)
-    return data
-
-
-def _read_servers(path: Path) -> list:
-    if not path.is_file():
-        return []
-    try:
-        raw = gzip.decompress(path.read_bytes())
-        buf = BytesIO(raw)
-        if _read_u8(buf) != 10:
-            return []
-        _read_str(buf)
-        root = _read_compound_body(buf)
-        rows = root.get("servers") or []
-        return [row for row in rows if isinstance(row, dict)]
-    except Exception:
-        return []
-
-
-def _write_str(buf: BytesIO, text: str):
-    data = (text or "").encode("utf-8")
-    buf.write(struct.pack(">H", len(data)))
-    buf.write(data)
-
-
-def _write_servers(path: Path, servers: list):
-    buf = BytesIO()
-    buf.write(b"\x0a")
-    _write_str(buf, "")
-    buf.write(b"\x09")
-    _write_str(buf, "servers")
-    buf.write(b"\x0a")
-    buf.write(struct.pack(">i", len(servers)))
-    for row in servers:
-        name = str(row.get("name") or LOBBY_NAME)
-        ip = str(row.get("ip") or "")
-        hidden = 1 if row.get("hidden") else 0
-        buf.write(b"\x08")
-        _write_str(buf, "name")
-        _write_str(buf, name)
-        buf.write(b"\x08")
-        _write_str(buf, "ip")
-        _write_str(buf, ip)
-        buf.write(b"\x01")
-        _write_str(buf, "hidden")
-        buf.write(bytes([hidden]))
-        buf.write(b"\x00")
-    buf.write(b"\x00")
-    path.write_bytes(gzip.compress(buf.getvalue()))
 
 
 def snapshot(player: str = "Player", game_running: bool = False) -> dict:

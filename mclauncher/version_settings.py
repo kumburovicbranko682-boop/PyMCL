@@ -29,6 +29,7 @@ DEFAULTS = {
     "java": "自动选择",
     "jvm_args": "",
     "game_args": "",
+    "wrapper": "",
     "pre_launch": "",
     "post_launch": "",
     "pre_launch_wait": True,
@@ -42,17 +43,50 @@ DEFAULTS = {
     "auth_server_name": "",
     "nide8_id": "",
     "gc": "",
+    "gpu": "",
+    "renderer": "",
+    "show_log": "",
     "window_title": "",
     "window_mode": "window",
     "window_width": None,
     "window_height": None,
     "skip_assets": False,
     "offline_skin": "default",
+    # HMCL「高级设置」同款：游戏进程环境变量 + 系统 GLFW/OpenAL + 自定义 natives 目录
+    "env_vars": "",
+    "use_system_glfw": False,
+    "use_system_openal": False,
+    "natives_dir": "",
 }
 
 # UI 历史上写过 "maximize"，启动链早期只认 "fullscreen"，两边对不上导致全屏静默失效。
 # 以 "maximize" 为准，另一个作为别名容错。
 FULLSCREEN_MODES = ("maximize", "fullscreen")
+
+
+def from_global() -> dict:
+    """把全局设置折算成一份「版本设置」值（HMCL「复制全局游戏设置」同款）。
+
+    只覆盖有全局对应项的键；gpu 的全局 auto 没有版本级等价选项，折算成
+    ""（跟随全局），gc / renderer 的 auto 是版本级合法取值，原样复制。
+    """
+    gpu = str(CONFIG.get("gpu_mode") or "").strip().lower()
+    return {
+        "isolation": str(CONFIG.get("default_isolation") or ISOLATION_NONE),
+        "memory_mb": int(CONFIG.get("memory_mb") or 0) or None,
+        "java": str(CONFIG.get("default_java") or "").strip() or DEFAULTS["java"],
+        "jvm_args": str(CONFIG.get("default_jvm_args") or "").strip(),
+        "process_priority": str(CONFIG.get("default_priority") or "normal"),
+        "gc": str(CONFIG.get("gc_preset") or "auto"),
+        "gpu": "" if gpu in ("", "auto") else gpu,
+        "renderer": str(CONFIG.get("renderer") or "auto"),
+        "show_log": "on" if CONFIG.get("show_log_window") else "off",
+        "window_mode": ("maximize" if str(CONFIG.get("window_mode") or "")
+                        in FULLSCREEN_MODES else "window"),
+        "window_width": int(CONFIG.get("width") or 0) or None,
+        "window_height": int(CONFIG.get("height") or 0) or None,
+        "offline_skin": str(CONFIG.get("offline_skin") or "default"),
+    }
 
 
 def _file(instance, version_id) -> Path:

@@ -80,9 +80,8 @@ def _probe_official() -> bool:
     t0 = time.monotonic()
     try:
         session = requests.Session()
-        if not _cfg("use_system_proxy", True):
-            session.trust_env = False
-            session.proxies = {"http": None, "https": None}
+        from .net import apply_proxy_to_session
+        apply_proxy_to_session(session)
         resp = session.get(
             _OFFICIAL_PROBE, timeout=PROBE_LIMIT,
             headers={"User-Agent": f"{APP_NAME}/{APP_VERSION} (python; +minecraft launcher)"},

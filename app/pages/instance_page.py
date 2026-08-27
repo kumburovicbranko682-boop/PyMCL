@@ -24,12 +24,17 @@ class InstanceCard(SimpleCardWidget):
         layout.setSpacing(6)
 
         top = QHBoxLayout()
-        top.addWidget(IconTile(info["name"], size=40))
+        top.addWidget(IconTile(info["name"], size=40, image=info.get("icon") or None))
         name_box = QVBoxLayout()
         name_box.setSpacing(2)
         name_box.addWidget(StrongBodyLabel(info["name"]))
         name_box.addWidget(CaptionLabel(tr("{0} 个版本").format(info["versions"])))
         top.addLayout(name_box, 1)
+        if info.get("pack"):
+            update_btn = TransparentToolButton(getattr(FIF, "UPDATE", FIF.SYNC))
+            update_btn.setToolTip(tr("检查整合包更新"))
+            update_btn.clicked.connect(lambda: page.check_pack_update(info["name"]))
+            top.addWidget(update_btn)
         top.addWidget(Pill(tr("默认") if info["name"] == CONFIG.get("default_instance") else tr("实例"), "#4C8BF5"))
         layout.addLayout(top)
         layout.addWidget(CaptionLabel(str(info.get("mc") or "")))
@@ -65,6 +70,21 @@ class InstanceCard(SimpleCardWidget):
         actions.addWidget(export_btn)
         actions.addWidget(delete_btn)
         layout.addLayout(actions)
+
+    def contextMenuEvent(self, event):
+        from qfluentwidgets import Action, RoundMenu
+        menu = RoundMenu(parent=self)
+        dup = Action(FIF.COPY, tr("复制实例"))
+        dup.triggered.connect(lambda: self.page.duplicate(self.info["name"]))
+        menu.addAction(dup)
+        set_icon = Action(FIF.PHOTO, tr("设置图标…"))
+        set_icon.triggered.connect(lambda: self.page.set_icon(self.info["name"]))
+        menu.addAction(set_icon)
+        if self.info.get("icon"):
+            reset_icon = Action(FIF.CANCEL, tr("恢复默认图标"))
+            reset_icon.triggered.connect(lambda: self.page.reset_icon(self.info["name"]))
+            menu.addAction(reset_icon)
+        menu.exec(event.globalPos())
 
 
 class NewInstanceCard(SimpleCardWidget):
@@ -158,8 +178,10 @@ class InstancePage(QWidget):
             self.reload()
 
     def delete(self, name: str):
-        box = MessageBox(tr("删除实例"),
-                         tr("确定删除实例「{0}」？其中的存档与配置将一并移除。").format(name), self)
+        box = MessageBox(
+            tr("删除实例"),
+            tr("确定删除实例「{name}」？存档与配置会一并移除（会尽量移入系统回收站，可找回）。").format(name=name),
+            self)
         if box.exec():
             try:
                 self.backend.delete_instance(name)
@@ -176,8 +198,91 @@ class InstancePage(QWidget):
                 MessageBox(tr("重命名失败"), str(e), self).exec()
             self.reload()
 
+    def duplicate(self, name: str):
+        dlg = InputDialog(tr("复制实例"), tr("新实例名称（版本、模组、存档都会复制）"),
+                          text=f"{name}-副本", parent=self)
+        if dlg.exec() and dlg.value():
+            try:
+                self.backend.duplicate_instance(name, dlg.value())
+            except Exception as e:
+                MessageBox(tr("复制失败"), str(e), self).exec()
+
+    def set_icon(self, name: str):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, tr("选择实例图标"), "",
+            tr("图片文件") + " (*.png *.jpg *.jpeg *.gif *.webp *.bmp)")
+        if not path:
+            return
+        try:
+            self.backend.set_instance_icon(name, path)
+        except Exception as e:
+            MessageBox(tr("设置图标失败"), str(e), self).exec()
+        self.reload()
+
+    def reset_icon(self, name: str):
+        try:
+            self.backend.clear_instance_icon(name)
+        except Exception as e:
+            MessageBox(tr("设置图标失败"), str(e), self).exec()
+        self.reload()
+
+    def check_pack_update(self, name: str):
+        def done(info):
+            info = info or {}
+            if not info.get("update"):
+                MessageBox(
+                    tr("整合包更新"),
+                    tr("「{name}」已是最新版本（{v}）").format(
+                        name=info.get("name") or name, v=info.get("current") or "?"),
+                    self.window(),
+                ).exec()
+                return
+            box = MessageBox(
+                tr("发现整合包新版本"),
+                tr("{name}：{a} → {b}\n\n更新会重新安装整合包文件并清理旧版本残留的模组；"
+                   "存档、截图与手动添加的模组不受影响。是否更新？").format(
+                    name=info.get("name") or name,
+                    a=info.get("current") or "?", b=info.get("latest") or "?"),
+                self.window(),
+            )
+            if box.exec():
+                self.backend.update_modpack(name)
+
+        def failed(msg):
+            MessageBox(tr("检查整合包更新失败"), str(msg or tr("未知错误")), self.window()).exec()
+
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(lambda: self.backend.check_modpack_update(name), done, failed)
+            return
+        try:
+            done(self.backend.check_modpack_update(name))
+        except Exception as e:
+            failed(e)
+
     def export_pack(self, name: str):
-        self.backend.export_modpack(name)
+        from .export_dialog import ExportPackDialog
+
+        def open_dlg(info):
+            dlg = ExportPackDialog(info, parent=self.window())
+            if not dlg.exec():
+                return
+            p = dlg.payload()
+            self.backend.export_modpack(name, fmt=p["fmt"],
+                                        include=p["include"], meta=p["meta"])
+
+        def failed(msg):
+            MessageBox(tr("导出整合包"), str(msg or tr("未知错误")), self.window()).exec()
+
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(lambda: self.backend.export_pack_info(name), open_dlg, failed)
+            return
+        try:
+            open_dlg(self.backend.export_pack_info(name))
+        except Exception as e:
+            failed(e)
 
     def pick_java(self, name: str):
         if self._picking_java:

@@ -2,9 +2,12 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using PyMCL.Models;
 using PyMCL.Services;
+using Windows.Storage.Pickers;
 using Windows.UI;
+using WinRT.Interop;
 
 namespace PyMCL.Pages;
 
@@ -56,7 +59,7 @@ public sealed partial class InstancePage : UserControl
         var top = new Grid();
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var tile = IconTile(info.Name, 40);
+        var tile = IconTile(info.Name, 40, info.Icon);
         var names = new StackPanel { Margin = new Thickness(10, 0, 0, 0) };
         names.Children.Add(new TextBlock { Text = info.Name, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
         names.Children.Add(new TextBlock { Text = $"{info.Versions} 个版本", Foreground = Mute(), FontSize = 12 });
@@ -75,11 +78,26 @@ public sealed partial class InstancePage : UserControl
         actions.Children.Add(IconBtn("📁", () => _ = Open(info.Name)));
         actions.Children.Add(IconBtn("☕", () => _ = PickJava(info.Name)));
         actions.Children.Add(IconBtn("✎", () => _ = Rename(info.Name)));
+        actions.Children.Add(IconBtn("⧉", () => _ = Duplicate(info.Name)));
+        if (!string.IsNullOrEmpty(info.Pack))
+            actions.Children.Add(IconBtn("⟳", () => _ = CheckPackUpdate(info.Name)));
         actions.Children.Add(IconBtn("⇪", () => _ = Export(info.Name)));
         actions.Children.Add(IconBtn("🗑", () => _ = Delete(info.Name)));
         Grid.SetRow(actions, 4);
         root.Children.Add(actions);
         card.Child = root;
+
+        var flyout = new MenuFlyout();
+        var setIcon = new MenuFlyoutItem { Text = "设置图标…" };
+        setIcon.Click += (_, _) => _ = SetIcon(info.Name);
+        flyout.Items.Add(setIcon);
+        if (!string.IsNullOrEmpty(info.Icon))
+        {
+            var resetIcon = new MenuFlyoutItem { Text = "恢复默认图标" };
+            resetIcon.Click += (_, _) => _ = ResetIcon(info.Name);
+            flyout.Items.Add(resetIcon);
+        }
+        card.ContextFlyout = flyout;
         return card;
     }
 
@@ -109,8 +127,25 @@ public sealed partial class InstancePage : UserControl
         return b;
     }
 
-    private static Border IconTile(string name, int size)
+    private static Border IconTile(string name, int size, string iconPath = "")
     {
+        if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
+        {
+            try
+            {
+                return new Border
+                {
+                    Width = size, Height = size, CornerRadius = new CornerRadius(10),
+                    Child = new Image
+                    {
+                        Source = new BitmapImage(new Uri(iconPath)),
+                        Stretch = Stretch.UniformToFill,
+                        Width = size, Height = size,
+                    },
+                };
+            }
+            catch (UriFormatException) { }
+        }
         var ch = string.IsNullOrEmpty(name) ? "?" : name[..1].ToUpperInvariant();
         return new Border
         {
@@ -149,6 +184,69 @@ public sealed partial class InstancePage : UserControl
     {
         try { await AppServices.Client.CallAsync("open_instance_folder", new { name }); }
         catch (Exception ex) { AppServices.Toast?.Invoke("无法打开", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async Task SetIcon(string name)
+    {
+        if (AppServices.Client is null) return;
+        try
+        {
+            var picker = new FileOpenPicker();
+            InitializeWithWindow.Initialize(picker, AppServices.WindowHandle);
+            foreach (var ext in new[] { ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp" })
+                picker.FileTypeFilter.Add(ext);
+            var file = await picker.PickSingleFileAsync();
+            if (file is null) return;
+            await AppServices.Client.CallAsync("set_instance_icon", new { name, image_path = file.Path });
+            await ReloadAsync();
+        }
+        catch (Exception ex) { AppServices.Toast?.Invoke("设置图标失败", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async Task ResetIcon(string name)
+    {
+        if (AppServices.Client is null) return;
+        try
+        {
+            await AppServices.Client.CallAsync("clear_instance_icon", new { name });
+            await ReloadAsync();
+        }
+        catch (Exception ex) { AppServices.Toast?.Invoke("设置图标失败", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async Task Duplicate(string name)
+    {
+        var ne = await yrompt("复制实例", "新实例名称（版本、模组、存档都会复制）", "", name + "-副本");
+        if (string.IsNullOrWhiteSpace(ne) || AppServices.Client is null) return;
+        try
+        {
+            await AppServices.Client.StartTaskAsync("duplicate_instance", new { name, new_name = ne });
+            AppServices.Toast?.Invoke("开始复制", $"{name} → {ne}", InfoBarSeverity.Success);
+        }
+        catch (Exception ex) { AppServices.Toast?.Invoke("复制失败", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async Task CheckPackUpdate(string name)
+    {
+        if (AppServices.Client is null) return;
+        ModpackUpdateInfo? info;
+        try { info = await AppServices.Client.CallAsync<ModpackUpdateInfo>("check_modpack_update", new { instance = name }); }
+        catch (Exception ex)
+        {
+            AppServices.Toast?.Invoke("检查整合包更新失败", ex.Message, InfoBarSeverity.Error);
+            return;
+        }
+        if (info is null || !info.Update)
+        {
+            AppServices.Toast?.Invoke("整合包更新", $"「{info?.Name ?? name}」已是最新版本（{info?.Current ?? "?"}）", InfoBarSeverity.Informational);
+            return;
+        }
+        var ok = await Confirm(
+            "发现整合包新版本",
+            $"{info.Name}：{info.Current} → {info.Latest}\n\n更新会重新安装整合包文件并清理旧版本残留的模组；存档、截图与手动添加的模组不受影响。是否更新？");
+        if (!ok) return;
+        try { await AppServices.Client.StartTaskAsync("update_modpack", new { instance = name }); }
+        catch (Exception ex) { AppServices.Toast?.Invoke("更新失败", ex.Message, InfoBarSeverity.Error); }
     }
 
     private async Task Export(string name)

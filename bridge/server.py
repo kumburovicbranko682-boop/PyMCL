@@ -331,6 +331,8 @@ def main(argv=None):
     root = _prepare_root(Path(args.root))
     from mclauncher.guard import install as install_guard
     install_guard(root / "pymcl-error.log")
+    from mclauncher.utils import setup_file_logging
+    setup_file_logging()
     from bridge.api import BackendAPI, EventBus  # noqa: WPS433
 
     token = args.token or os.environ.get("PYMCL_BRIDGE_TOKEN") or secrets.token_urlsafe(32)

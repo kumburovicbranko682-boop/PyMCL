@@ -5,14 +5,84 @@ from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, InfoBar, InfoBarPosition, PrimaryPushButton,
-    PushButton, SimpleCardWidget, StrongBodyLabel, SubtitleLabel,
-    TransparentPushButton,
+    BodyLabel, CaptionLabel, InfoBar, InfoBarPosition, MessageBoxBase,
+    PrimaryPushButton, PushButton, SimpleCardWidget, StrongBodyLabel,
+    SubtitleLabel, TransparentPushButton,
 )
 
 from ..ui_alive import widget_alive
 from ..widgets import IconTile, InputDialog, Pill
 from mclauncher.i18n import tr
+
+
+class NetworkCheckDialog(MessageBoxBase):
+    """联机网络检测（PCL CE 同款）：STUN 测 NAT 类型 + IPv6。"""
+
+    def __init__(self, backend, parent=None):
+        super().__init__(parent)
+        self.backend = backend
+        self.viewLayout.addWidget(SubtitleLabel(tr("联机网络检测"), self))
+        self.viewLayout.addWidget(CaptionLabel(
+            tr("通过公共 STUN 服务器探测 NAT 类型；类型越「锥形」，P2P 联机越顺。"), self))
+        self.result = BodyLabel(tr("正在检测…（约 3-10 秒）"), self)
+        self.result.setWordWrap(True)
+        self.result.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.viewLayout.addWidget(self.result)
+        self.advice = CaptionLabel("", self)
+        self.advice.setWordWrap(True)
+        self.viewLayout.addWidget(self.advice)
+        self.yesButton.setText(tr("重新检测"))
+        self.cancelButton.setText(tr("关闭"))
+        self.widget.setMinimumWidth(480)
+        self._busy = False
+        self._start()
+
+    def validate(self) -> bool:
+        """点「重新检测」重跑，不关对话框。"""
+        self._start()
+        return False
+
+    def _start(self):
+        if self._busy:
+            return
+        self._busy = True
+        self.yesButton.setEnabled(False)
+        self.result.setText(tr("正在检测…（约 3-10 秒）"))
+        self.advice.setText("")
+        call_async = getattr(self.backend, "call_async", None)
+        if callable(call_async):
+            call_async(self.backend.network_diagnose, self._done, self._fail)
+            return
+        try:
+            self._done(self.backend.network_diagnose())
+        except Exception as exc:  # noqa: BLE001
+            self._fail(exc)
+
+    def _done(self, info):
+        if not widget_alive(self):
+            return
+        self._busy = False
+        self.yesButton.setEnabled(True)
+        info = info or {}
+        lines = [tr("NAT 类型：{label}").format(label=info.get("nat_label") or "?")]
+        if info.get("public"):
+            lines.append(tr("公网出口：{addr}").format(addr=info["public"]))
+        if info.get("ipv6"):
+            lines.append(tr("IPv6：可用（{addr}）").format(addr=info.get("ipv6_address") or ""))
+        else:
+            lines.append(tr("IPv6：不可用"))
+        if info.get("servers"):
+            lines.append(tr("响应的 STUN 服务器：{names}").format(
+                names="、".join(info["servers"])))
+        self.result.setText("\n".join(lines))
+        self.advice.setText(str(info.get("advice") or ""))
+
+    def _fail(self, err):
+        if not widget_alive(self):
+            return
+        self._busy = False
+        self.yesButton.setEnabled(True)
+        self.result.setText(tr("检测失败：{err}").format(err=err))
 
 
 class ActionCard(SimpleCardWidget):
@@ -130,6 +200,10 @@ class MultiplayerPage(QWidget):
         link = TransparentPushButton(tr("Terracotta 项目主页"))
         link.clicked.connect(self._open_home)
         foot.addWidget(link)
+        netchk = TransparentPushButton(tr("网络检测"))
+        netchk.setToolTip(tr("STUN 探测 NAT 类型与 IPv6，评估 P2P 联机质量"))
+        netchk.clicked.connect(lambda: NetworkCheckDialog(self.backend, self.window()).exec())
+        foot.addWidget(netchk)
         foot.addStretch(1)
         self.copy_label = CaptionLabel(tr("Terracotta | 陶瓦联机  © burningtnt  ·  基于 EasyTier"))
         foot.addWidget(self.copy_label)

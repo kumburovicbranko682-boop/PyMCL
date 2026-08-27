@@ -2,7 +2,7 @@
 """安装向导：原版 + 主加载器 + OptiFine / LiteLoader，可选加载器版本。"""
 from PySide6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 from qfluentwidgets import (
-    BodyLabel, CheckBox, ComboBox, MessageBoxBase, SubtitleLabel,
+    BodyLabel, CheckBox, ComboBox, LineEdit, MessageBoxBase, SubtitleLabel,
 )
 
 from mclauncher.config import CONFIG
@@ -25,8 +25,19 @@ class InstallWizardDialog(MessageBoxBase):
         form = QWidget(self)
         lay = QVBoxLayout(form)
         lay.setContentsMargins(0, 8, 0, 0)
+        # 版本名称（HMCL/PCL2 安装新游戏同款）：留空用默认自动名
+        self.name_edit = LineEdit()
+        self.name_edit.setPlaceholderText(tr("留空使用默认名（如 {mc}）").format(mc=mc_version))
+        row0 = QHBoxLayout()
+        row0.addWidget(BodyLabel(tr("版本名称")))
+        row0.addWidget(self.name_edit, 1)
+        lay.addLayout(row0)
         self.primary = ComboBox()
-        self.primary.addItems([tr("无（原版）"), "Fabric", "Forge", "Quilt", "NeoForge"])
+        loaders = [tr("无（原版）"), "Fabric", "Forge", "Quilt", "NeoForge"]
+        if mc_version == "1.12.2":
+            # Cleanroom：1.12.2 专属的现代化 Forge 分支（HMCL 3.7 同款）
+            loaders.append("Cleanroom")
+        self.primary.addItems(loaders)
         self.loader_ver = ComboBox()
         self.loader_ver.setMinimumWidth(280)
         self.loader_ver.addItem(tr("最新"))
@@ -39,6 +50,10 @@ class InstallWizardDialog(MessageBoxBase):
         row2.addWidget(self.loader_ver, 1)
         lay.addLayout(row2)
 
+        # Fabric API / QSL 随装（HMCL 安装页同款可选组件）
+        self.fabric_api = CheckBox(tr("同时安装 Fabric API（多数 Fabric 模组的必备前置）"))
+        self.fabric_api.setChecked(True)
+        lay.addWidget(self.fabric_api)
         self.optifine = CheckBox(tr("同时安装 OptiFine（Forge / 原版）"))
         self.liteloader = CheckBox(tr("同时安装 LiteLoader（1.7–1.12）"))
         self.skip_assets = CheckBox(tr("跳过资源文件校验（加快重装）"))
@@ -75,6 +90,12 @@ class InstallWizardDialog(MessageBoxBase):
         self.optifine.setEnabled(of_ok)
         if not of_ok:
             self.optifine.setChecked(False)
+        fab_ok = primary in ("Fabric", "Quilt")
+        self.fabric_api.setEnabled(fab_ok)
+        self.fabric_api.setText(
+            tr("同时安装 QSL / Quilted Fabric API（多数 Quilt 模组的必备前置）")
+            if primary == "Quilt"
+            else tr("同时安装 Fabric API（多数 Fabric 模组的必备前置）"))
 
     def _reload_loaders(self):
         self._sync()
@@ -100,40 +121,68 @@ class InstallWizardDialog(MessageBoxBase):
             self.of_ver.clear()
             self.of_ver.addItem(tr("最新"))
 
+    @staticmethod
+    def _decorate(row: dict) -> str:
+        """给版本行加「推荐 / 测试版」标注（PCL2/HMCL 同款），只影响显示文本。"""
+        base = str(row.get("label") or row.get("id") or "")
+        marks = []
+        if row.get("recommended"):
+            marks.append(tr("推荐"))
+        if not row.get("stable", True):
+            marks.append(tr("测试版"))
+        return f"{base}（{'，'.join(marks)}）" if marks else base
+
     def _fill_loader(self, rows):
-        cur = self.loader_ver.currentText()
+        prev = self.loader_ver.currentData()
         self.loader_ver.blockSignals(True)
         self.loader_ver.clear()
         self.loader_ver.addItem(tr("最新"))
         for r in rows or []:
-            self.loader_ver.addItem(r.get("label") or r.get("id") or "")
-        if cur and cur != tr("最新"):
-            self.loader_ver.setCurrentText(cur)
+            rid = str(r.get("id") or r.get("label") or "")
+            self.loader_ver.addItem(self._decorate(r), userData=rid)
+        if prev:
+            idx = self.loader_ver.findData(prev)
+            if idx >= 0:
+                self.loader_ver.setCurrentIndex(idx)
         self.loader_ver.blockSignals(False)
 
     def _fill_opti(self, rows):
-        cur = self.of_ver.currentText()
+        prev = self.of_ver.currentData()
         self.of_ver.blockSignals(True)
         self.of_ver.clear()
         self.of_ver.addItem(tr("最新"))
         for r in rows or []:
-            self.of_ver.addItem(r.get("label") or r.get("id") or "")
-        if cur:
-            self.of_ver.setCurrentText(cur)
+            rid = str(r.get("id") or r.get("label") or "")
+            self.of_ver.addItem(self._decorate(r), userData=rid)
+        if prev:
+            idx = self.of_ver.findData(prev)
+            if idx >= 0:
+                self.of_ver.setCurrentIndex(idx)
         self.of_ver.blockSignals(False)
 
     def payload(self) -> dict:
         primary = self.primary.currentText()
         loader = tr("无") if primary.startswith(tr("无")) else primary
-        lv = self.loader_ver.currentText()
+        # 版本号从 userData 取（显示文本带「推荐/测试版」标注，不能直接当版本号用）
+        lv = self.loader_ver.currentData()
+        if lv is None:
+            txt = self.loader_ver.currentText()
+            lv = "" if txt == tr("最新") else txt
         extra = {
             "optifine": self.optifine.isChecked(),
             "liteloader": self.liteloader.isChecked(),
             "skip_assets": self.skip_assets.isChecked(),
+            "fabric_api": self.fabric_api.isEnabled() and self.fabric_api.isChecked(),
         }
-        if lv and lv != tr("最新"):
-            extra["loader_version"] = lv
-        of = self.of_ver.currentText()
-        if of and of != tr("最新"):
-            extra["optifine_version"] = of
+        if lv:
+            extra["loader_version"] = str(lv)
+        of = self.of_ver.currentData()
+        if of is None:
+            txt = self.of_ver.currentText()
+            of = "" if txt == tr("最新") else txt
+        if of:
+            extra["optifine_version"] = str(of)
+        name = self.name_edit.text().strip()
+        if name:
+            extra["custom_name"] = name
         return {"loader": loader, "loader_version": extra.get("loader_version") or "", "extra": extra}

@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """实例（版本隔离）管理。每个实例是一个独立的 .minecraft 目录。"""
 import re
+import shutil
 from pathlib import Path
 
 from . import utils
 from .config import CONFIG
 
 INSTANCE_META = ".instance.json"
+ICON_STEM = ".instance_icon"
+_ICON_SUFFIXES = (".png", ".jpg", ".gif", ".webp", ".bmp")
+_ICON_MAX_BYTES = 4 * 1024 * 1024
 JAVA_AUTO = "自动选择"
 _MAX_INSTANCE_NAME = 48
 _ILLEGAL_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -27,6 +31,26 @@ _STANDARD_DIRS = [
 
 class InstanceError(Exception):
     pass
+
+
+def _sniff_image_suffix(path: Path):
+    """按文件头识别图片格式，返回规范扩展名；不认识返回 None。"""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return None
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if head.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return ".webp"
+    if head.startswith(b"BM"):
+        return ".bmp"
+    return None
 
 
 def list_instances() -> list:
@@ -105,7 +129,8 @@ class Instance:
     def delete(self):
         if not self.path.is_dir():
             raise InstanceError(f"实例 {self.name} 不存在。")
-        utils.remove_tree(self.path)
+        from . import trash
+        trash.trash_or_delete(self.path)
         if CONFIG.get("default_instance") == self.name:
             names = list_instances()
             CONFIG.set("default_instance", names[0] if names else "default")
@@ -143,6 +168,34 @@ class Instance:
         if v in ("auto", "default"):
             v = JAVA_AUTO
         self.set_meta("java", v)
+
+    # ---- 自定义图标（HMCL/PCL2 的「版本图标」）
+    def icon_path(self):
+        """自定义图标文件路径；没设置过返回 None。"""
+        for suffix in _ICON_SUFFIXES:
+            p = self.path / f"{ICON_STEM}{suffix}"
+            if p.is_file():
+                return p
+        return None
+
+    def set_icon(self, src):
+        """把一张图片设为实例图标。按内容（魔数）识别格式，与扩展名无关。"""
+        src = Path(src)
+        if not src.is_file():
+            raise InstanceError(f"图片不存在: {src}")
+        if src.stat().st_size > _ICON_MAX_BYTES:
+            raise InstanceError("图片太大（上限 4 MB），请换一张小一点的。")
+        suffix = _sniff_image_suffix(src)
+        if not suffix:
+            raise InstanceError("不是可识别的图片文件（支持 PNG / JPEG / GIF / WebP / BMP）。")
+        self.clear_icon()
+        shutil.copyfile(src, self.path / f"{ICON_STEM}{suffix}")
+
+    def clear_icon(self):
+        for suffix in _ICON_SUFFIXES:
+            p = self.path / f"{ICON_STEM}{suffix}"
+            if p.is_file():
+                p.unlink()
 
     # ---- 路径
     def versions_dir(self):
@@ -196,3 +249,48 @@ def create_unique_instance(raw, fallback="游戏", meta=None) -> Instance:
     inst = Instance(unique_instance_name(raw, fallback))
     inst.create(meta=meta)
     return inst
+
+
+# 复制实例时跳过的顶层目录：运行垃圾，副本里不需要。
+_DUPLICATE_SKIP = frozenset(("logs", "crash-reports"))
+
+
+def duplicate_instance(src_name, new_name="", on_progress=None) -> str:
+    """复制整个实例（版本、mods、config、存档、资源包等）。
+
+    对标 HMCL 的「复制实例」/ PCL2 隔离版本复制：给整合包实例留试验
+    副本、升级前留退路。logs 与 crash-reports 是运行垃圾不带。
+    new_name 留空自动用「原名-副本」，重名自动加序号。返回新实例名。
+    """
+    src = Instance(src_name)
+    if not src.path.is_dir():
+        raise InstanceError(f"实例 {src_name} 不存在。")
+    base = str(new_name or "").strip() or f"{src_name}-副本"
+    dest_name = unique_instance_name(base, fallback=f"{src_name}-2")
+    dest = get_instance_path(dest_name)
+
+    files = []
+    for item in src.path.iterdir():
+        if item.name in _DUPLICATE_SKIP:
+            continue
+        if item.is_file():
+            files.append(item)
+        elif item.is_dir():
+            files.extend(p for p in item.rglob("*") if p.is_file())
+    total = len(files)
+
+    utils.ensure_dir(dest)
+    try:
+        for i, p in enumerate(files):
+            target = dest / p.relative_to(src.path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(p, target)
+            if on_progress and (i % 50 == 0 or i == total - 1):
+                on_progress(i + 1, total)
+        inst = Instance(dest_name)
+        inst.ensure_standard_dirs()
+        inst.set_meta("name", dest_name)
+        return dest_name
+    except Exception:
+        utils.remove_tree(dest)
+        raise

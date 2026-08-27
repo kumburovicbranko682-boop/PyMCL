@@ -110,6 +110,26 @@ class SettingsPage(QWidget):
         game_card.hBoxLayout.addWidget(browse, 0, Qt.AlignRight)
         game_card.hBoxLayout.addSpacing(16)
         iso_group.addSettingCard(game_card)
+        # 目录列表（HMCL 目录列表 / PCL2 文件夹列表）：记住多个游戏目录，一键切换
+        self.dirs_card = SettingCard(
+            FIF.FOLDER_ADD if hasattr(FIF, "FOLDER_ADD") else FIF.FOLDER,
+            tr("目录列表"),
+            tr("记住多个游戏目录并随时切换；移除只出列表、不删文件"))
+        self._dir_entries = []
+        self._dirs_updating = False
+        self.dirs_box = ComboBox(self.dirs_card)
+        self.dirs_box.setFixedWidth(260)
+        self.dirs_box.currentIndexChanged.connect(self._switch_dir_entry)
+        dir_add = PushButton(tr("添加"))
+        dir_add.clicked.connect(self._add_game_dir_entry)
+        dir_del = PushButton(tr("移除"))
+        dir_del.clicked.connect(self._remove_game_dir_entry)
+        self.dirs_card.hBoxLayout.addWidget(self.dirs_box, 0, Qt.AlignRight)
+        self.dirs_card.hBoxLayout.addWidget(dir_add, 0, Qt.AlignRight)
+        self.dirs_card.hBoxLayout.addWidget(dir_del, 0, Qt.AlignRight)
+        self.dirs_card.hBoxLayout.addSpacing(16)
+        iso_group.addSettingCard(self.dirs_card)
+        self._reload_game_dirs()
         root.addWidget(iso_group)
 
         ui_group = SettingCardGroup(tr("界面"), host)
@@ -145,6 +165,23 @@ class SettingsPage(QWidget):
         self.bg_pick = PushButton(tr("选择文件"))
         self.bg_pick.clicked.connect(self._browse_background)
         self.bg_card.hBoxLayout.addWidget(self.bg_pick, 0, Qt.AlignRight)
+        # 界面字体（HMCL 设置「字体」同款）：默认 = Fluent 字族
+        self._font_default_label = tr("默认字体")
+        cur_font = str(settings.get("ui_font_family") or "").strip()
+        font_items = [self._font_default_label]
+        try:
+            from PySide6.QtGui import QFontDatabase
+            font_items += [f for f in QFontDatabase.families()
+                           if f and not f.startswith(".")]
+        except Exception:
+            pass
+        if cur_font and cur_font not in font_items:
+            # 字体被卸载后仍显示当前配置值，用户能看到并改掉
+            font_items.insert(1, cur_font)
+        self.font_card, self.font_box = _combo_card(
+            FIF.FONT if hasattr(FIF, "FONT") else FIF.EDIT,
+            tr("界面字体"), tr("新窗口立即生效；已打开的页面重启后全部生效"),
+            font_items, cur_font or self._font_default_label)
         vis_map = {
             "keep": tr("保持显示"),
             "minimize": tr("最小化"),
@@ -158,6 +195,11 @@ class SettingsPage(QWidget):
             tr("游戏启动后启动器窗口怎么处理。关闭不会杀掉游戏进程。"),
             list(vis_map.values()),
             vis_map.get(settings.get("launcher_visibility") or "keep", vis_map["keep"]))
+        # HMCL「显示日志」同款：启动游戏时自动弹实时日志窗口
+        self.show_log_card, self.show_log_sw = _switch_card(
+            FIF.DOCUMENT, tr("启动时显示游戏日志"),
+            tr("启动游戏后自动弹出实时日志窗口（级别高亮 / 搜索 / 导出）。版本设置可覆盖。"),
+            checked=bool(settings.get("show_log_window", False)))
         home_map = {"news": tr("Minecraft 新闻"), "custom": tr("本地 HTML"), "blank": tr("空白")}
         self._home_keys = {v: k for k, v in home_map.items()}
         self.home_card, self.home_box = _combo_card(
@@ -174,13 +216,29 @@ class SettingsPage(QWidget):
             tr("默认游戏窗口"), tr("可被版本设置覆盖"),
             list(win_map.values()),
             win_map.get(settings.get("window_mode") or "window", win_map["window"]))
+        glang_map = {
+            "auto": tr("跟随启动器语言"),
+            "zh_cn": tr("简体中文"),
+            "en_us": "English",
+            "off": tr("不设置"),
+        }
+        self._glang_keys = {v: k for k, v in glang_map.items()}
+        self.glang_card, self.glang_box = _combo_card(
+            FIF.LANGUAGE if hasattr(FIF, "LANGUAGE") else FIF.EDIT,
+            tr("游戏语言"),
+            tr("和 PCL 一样：版本首次启动时自动写入 options.txt，进游戏就是中文。已改过语言的存档不受影响"),
+            list(glang_map.values()),
+            glang_map.get(settings.get("game_lang") or "auto", glang_map["auto"]))
         ui_group.addSettingCard(self.dark_card)
         ui_group.addSettingCard(self.color_card)
         ui_group.addSettingCard(self.bg_card)
+        ui_group.addSettingCard(self.font_card)
         ui_group.addSettingCard(self.vis_card)
+        ui_group.addSettingCard(self.show_log_card)
         ui_group.addSettingCard(self.home_card)
         ui_group.addSettingCard(self.hp_card)
         ui_group.addSettingCard(self.win_card)
+        ui_group.addSettingCard(self.glang_card)
         # 语言
         self.lang_card, self.lang_box = _combo_card(
             FIF.EDIT if hasattr(FIF, "EDIT") else FIF.SETTING,
@@ -199,6 +257,23 @@ class SettingsPage(QWidget):
             theme_card.hBoxLayout.addWidget(b, 0, Qt.AlignRight)
         theme_card.hBoxLayout.addSpacing(8)
         ui_group.addSettingCard(theme_card)
+        # 启动器背景音乐（PCL2 音乐播放器同款）
+        music_card = SettingCard(
+            FIF.MUSIC if hasattr(FIF, "MUSIC") else FIF.PLAY,
+            tr("启动器背景音乐"),
+            tr("把音频文件放进 music 文件夹，启动器随机循环播放"))
+        self.music_open_btn = PushButton(tr("打开音乐文件夹"))
+        self.music_next_btn = PushButton(tr("下一曲"))
+        self.music_vol = SpinBox(music_card)
+        self.music_vol.setRange(0, 100)
+        self.music_vol.setValue(int(settings.get("music_volume") or 50))
+        self.music_vol.setFixedWidth(110)
+        self.music_sw = SwitchButton(music_card)
+        self.music_sw.setChecked(bool(settings.get("music_enabled")))
+        for w in (self.music_open_btn, self.music_next_btn, self.music_vol, self.music_sw):
+            music_card.hBoxLayout.addWidget(w, 0, Qt.AlignRight)
+        music_card.hBoxLayout.addSpacing(16)
+        ui_group.addSettingCard(music_card)
         root.addWidget(ui_group)
 
         # ---- 个性化布局：自由画布 + 方案 + 侧栏 ----
@@ -273,6 +348,10 @@ class SettingsPage(QWidget):
         self.memory_card, self.memory_spin = _spin_card(
             FIF.DEVELOPER_TOOLS, tr("默认内存 (MB)"), tr("新实例的默认 JVM 内存"),
             512, 32768, settings["default_memory_mb"])
+        self.auto_mem_card, self.auto_mem_sw = _switch_card(
+            FIF.ROBOT if hasattr(FIF, "ROBOT") else FIF.DEVELOPER_TOOLS, tr("自动分配内存"),
+            tr("和 PCL 一样：启动时按可用物理内存实时计算，低配不爆内存、高配吃得满。版本设置里的内存仍然优先"),
+            checked=bool(settings.get("auto_memory", False)))
         gc_map = {
             "auto": tr("G1（推荐）"),
             "g1": "G1",
@@ -285,6 +364,30 @@ class SettingsPage(QWidget):
             FIF.SPEED_HIGH if hasattr(FIF, "SPEED_HIGH") else FIF.DEVELOPER_TOOLS, tr("内存回收器"), tr("启动时写入 JVM。版本设置可覆盖。"),
             list(gc_map.values()),
             gc_map.get(settings.get("gc_preset") or "auto", gc_map["auto"]))
+        # 显卡偏好（PCL2「尝试使用独立显卡」/ HMCL PRIME offload 同款）
+        gpu_map = {
+            "auto": tr("自动（系统默认）"),
+            "discrete": tr("强制独立显卡（高性能）"),
+            "integrated": tr("强制核芯显卡（省电）"),
+        }
+        self._gpu_keys = {v: k for k, v in gpu_map.items()}
+        self.gpu_card, self.gpu_box = _combo_card(
+            FIF.GAME if hasattr(FIF, "GAME") else FIF.DEVELOPER_TOOLS, tr("游戏显卡"),
+            tr("双显卡设备可强制游戏走独显。Windows 写注册表偏好；Linux 注入 PRIME offload。版本设置可覆盖。"),
+            list(gpu_map.values()),
+            gpu_map.get(settings.get("gpu_mode") or "auto", gpu_map["auto"]))
+        # 渲染器（HMCL 同款，仅 Linux/Mesa 生效）
+        rnd_map = {
+            "auto": tr("默认（硬件 OpenGL）"),
+            "llvmpipe": tr("LLVMpipe（CPU 软渲染）"),
+            "zink": tr("Zink（OpenGL over Vulkan）"),
+        }
+        self._rnd_keys = {v: k for k, v in rnd_map.items()}
+        self.rnd_card, self.rnd_box = _combo_card(
+            FIF.BRUSH if hasattr(FIF, "BRUSH") else FIF.DEVELOPER_TOOLS, tr("渲染器"),
+            tr("驱动异常时可换 LLVMpipe 软渲染或 Zink。仅 Linux（Mesa）生效。版本设置可覆盖。"),
+            list(rnd_map.values()),
+            rnd_map.get(settings.get("renderer") or "auto", rnd_map["auto"]))
         self.limit_card, self.limit_spin = _spin_card(
             FIF.CLOUD_DOWNLOAD, tr("下载限速 (KB/s)"), tr("0 表示不限制"),
             0, 102400, int(settings.get("download_limit_kbps") or 0))
@@ -300,16 +403,60 @@ class SettingsPage(QWidget):
             FIF.LIBRARY, tr("社区资源源"),
             tr("模组 / 整合包：自动 = 官方优先，失败再走 MCIM 国内镜像"),
             list(comm_map.values()), comm_map.get(settings.get("community_source") or "auto", comm_map["auto"]))
-        self.proxy_card, self.proxy_sw = _switch_card(
-            FIF.VPN, tr("跟随系统代理"),
-            tr("默认开。Clash 7897 会生效；关掉才强制直连"),
-            checked=bool(settings.get("use_system_proxy", True)))
+        # 代理（HMCL 设置同款）：系统 / 直连 / 自定义 HTTP / SOCKS5
+        proxy_map = {
+            "system": tr("跟随系统代理"),
+            "direct": tr("直连（禁用代理）"),
+            "http": tr("HTTP 代理"),
+            "socks5": tr("SOCKS5 代理"),
+        }
+        self._proxy_keys = {v: k for k, v in proxy_map.items()}
+        cur_proxy = settings.get("proxy_mode") or (
+            "system" if settings.get("use_system_proxy", True) else "direct")
+        self.proxy_card, self.proxy_box = _combo_card(
+            FIF.VPN, tr("代理"),
+            tr("跟随系统时 Clash 7897 会生效；也可强制直连或自定义代理服务器"),
+            list(proxy_map.values()), proxy_map.get(cur_proxy, proxy_map["system"]))
+        self.proxy_addr_card = SettingCard(
+            FIF.GLOBE if hasattr(FIF, "GLOBE") else FIF.VPN,
+            tr("代理服务器"), tr("主机与端口"))
+        self.proxy_host_edit = LineEdit(self.proxy_addr_card)
+        self.proxy_host_edit.setPlaceholderText("127.0.0.1")
+        self.proxy_host_edit.setFixedWidth(200)
+        self.proxy_host_edit.setText(settings.get("proxy_host") or "")
+        self.proxy_port_spin = SpinBox(self.proxy_addr_card)
+        self.proxy_port_spin.setRange(0, 65535)
+        self.proxy_port_spin.setValue(int(settings.get("proxy_port") or 0))
+        self.proxy_port_spin.setFixedWidth(130)
+        self.proxy_test_btn = PushButton(tr("测试代理"))
+        for w in (self.proxy_test_btn, self.proxy_host_edit, self.proxy_port_spin):
+            self.proxy_addr_card.hBoxLayout.addWidget(w, 0, Qt.AlignRight)
+        self.proxy_addr_card.hBoxLayout.addSpacing(16)
+        self.proxy_auth_card = SettingCard(
+            FIF.PEOPLE if hasattr(FIF, "PEOPLE") else FIF.VPN,
+            tr("代理认证"), tr("可选。代理不要账号密码就留空"))
+        self.proxy_user_edit = LineEdit(self.proxy_auth_card)
+        self.proxy_user_edit.setPlaceholderText(tr("用户名"))
+        self.proxy_user_edit.setFixedWidth(160)
+        self.proxy_user_edit.setText(settings.get("proxy_user") or "")
+        self.proxy_pass_edit = PasswordLineEdit(self.proxy_auth_card)
+        self.proxy_pass_edit.setFixedWidth(180)
+        self.proxy_pass_edit.setText(settings.get("proxy_pass") or "")
+        for w in (self.proxy_user_edit, self.proxy_pass_edit):
+            self.proxy_auth_card.hBoxLayout.addWidget(w, 0, Qt.AlignRight)
+        self.proxy_auth_card.hBoxLayout.addSpacing(16)
         perf_group.addSettingCard(self.threads_card)
         perf_group.addSettingCard(self.src_card)
         perf_group.addSettingCard(self.comm_card)
         perf_group.addSettingCard(self.proxy_card)
+        perf_group.addSettingCard(self.proxy_addr_card)
+        perf_group.addSettingCard(self.proxy_auth_card)
+        self._sync_proxy_mode()
         perf_group.addSettingCard(self.memory_card)
+        perf_group.addSettingCard(self.auto_mem_card)
         perf_group.addSettingCard(self.gc_card)
+        perf_group.addSettingCard(self.gpu_card)
+        perf_group.addSettingCard(self.rnd_card)
         perf_group.addSettingCard(self.limit_card)
 
         self.jvm_card, self.jvm_edit = _line_card(
@@ -361,12 +508,14 @@ class SettingsPage(QWidget):
             tr("允许多开"), tr("取消勾选 = 游戏运行时再次启动会提示"),
             checked=bool(settings.get("allow_multi_instance", False)))
         maint_group.addSettingCard(self.multi_card)
-        # 官方启动器迁移
+        # 游戏目录迁移：官方自动检测 + 任意目录（PCL / HMCL / 旧电脑拷来的 .minecraft）
         mig_card = SettingCard(
             FIF.DOWNLOAD if hasattr(FIF, "DOWNLOAD") else FIF.SYNC,
-            tr("官方启动器迁移"), tr("从官方 .minecraft 导入版本和账号"))
+            tr("游戏目录迁移"), tr("从官方启动器 / PCL / HMCL 的 .minecraft 导入已装版本"))
         self.mig_btn = PushButton(tr("检测并迁移"))
+        self.mig_pick_btn = PushButton(tr("选目录导入…"))
         mig_card.hBoxLayout.addWidget(self.mig_btn, 0, Qt.AlignRight)
+        mig_card.hBoxLayout.addWidget(self.mig_pick_btn, 0, Qt.AlignRight)
         mig_card.hBoxLayout.addSpacing(8)
         maint_group.addSettingCard(mig_card)
         # 智能推荐
@@ -394,6 +543,7 @@ class SettingsPage(QWidget):
         self.load_theme_btn.clicked.connect(self._load_theme)
         self.del_theme_btn.clicked.connect(self._del_theme)
         self.mig_btn.clicked.connect(self._migrate_official)
+        self.mig_pick_btn.clicked.connect(self._migrate_from_dir)
         self.rec_btn.clicked.connect(self._show_recommendation)
 
         ai_group = SettingCardGroup(tr("AI 助手"), host)
@@ -441,6 +591,13 @@ class SettingsPage(QWidget):
         fb_group.addSettingCard(self.fb_consent_card)
         fb_group.addSettingCard(self.fb_url_card)
         fb_group.addSettingCard(self.fb_hb_card)
+        self.log_card = SettingCard(
+            FIF.DOCUMENT, tr("启动器日志"),
+            tr("每次运行一个文件，保留最近 5 次；崩溃日志也在这里"))
+        self.open_log_btn = PushButton(tr("打开日志文件夹"))
+        self.log_card.hBoxLayout.addWidget(self.open_log_btn, 0, Qt.AlignRight)
+        self.log_card.hBoxLayout.addSpacing(16)
+        fb_group.addSettingCard(self.log_card)
         root.addWidget(fb_group)
 
         row = QHBoxLayout()
@@ -462,6 +619,18 @@ class SettingsPage(QWidget):
         self.color_edit.editingFinished.connect(self._on_theme_color_committed)
         # 背景图同理：手输路径回车/失焦就应用，不必先点「保存设置」
         self.bg_edit.editingFinished.connect(self._on_bg_committed)
+        # 字体选完就落盘并应用到 Fluent 字族；已建控件等重启
+        self.font_box.currentTextChanged.connect(self._on_font_changed)
+        # 背景音乐：开关立即播/停；音量拖动即时生效、失焦才落盘
+        self.music_sw.checkedChanged.connect(self._on_music_toggled)
+        self.music_vol.valueChanged.connect(self._on_music_volume_live)
+        self.music_vol.editingFinished.connect(self._on_music_volume_commit)
+        self.music_next_btn.clicked.connect(self._music_next)
+        self.music_open_btn.clicked.connect(self._open_music_folder)
+        # 代理：切模式即时显隐地址/认证卡；测试按钮先落盘再试连
+        self.proxy_box.currentTextChanged.connect(self._sync_proxy_mode)
+        self.proxy_test_btn.clicked.connect(self._test_proxy)
+        self.open_log_btn.clicked.connect(self._open_launcher_logs)
 
     def refresh_from_config(self):
         """把磁盘上的最新设置推回控件。
@@ -473,7 +642,65 @@ class SettingsPage(QWidget):
         self.dark_sw.setChecked(bool(settings.get("ui_dark")))
         self.color_edit.setText(settings.get("theme_color") or "#2E9B6B")
         self.bg_edit.setText(settings.get("ui_background") or "")
+        cur_font = str(settings.get("ui_font_family") or "").strip()
+        # blockSignals：回填不算用户改动，别再触发一次落盘+应用
+        self.font_box.blockSignals(True)
+        if cur_font and self.font_box.findText(cur_font) < 0:
+            self.font_box.insertItem(1, cur_font)
+        self.font_box.setCurrentText(cur_font or self._font_default_label)
+        self.font_box.blockSignals(False)
         self.multi_sw.setChecked(bool(settings.get("allow_multi_instance", False)))
+
+    def _open_launcher_logs(self):
+        try:
+            self.backend.open_launcher_logs()
+        except Exception as e:
+            InfoBar.error(tr("无法打开"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+
+    def _sync_proxy_mode(self, _text=""):
+        mode = self._proxy_keys.get(self.proxy_box.currentText(), "system")
+        custom = mode in ("http", "socks5")
+        self.proxy_addr_card.setVisible(custom)
+        self.proxy_auth_card.setVisible(custom)
+
+    def _collect_proxy(self) -> dict:
+        mode = self._proxy_keys.get(self.proxy_box.currentText(), "system")
+        return {
+            "proxy_mode": mode,
+            # 旧开关跟着走：system=跟随系统，其余都不读环境变量
+            "use_system_proxy": mode == "system",
+            "proxy_host": self.proxy_host_edit.text().strip(),
+            "proxy_port": int(self.proxy_port_spin.value()),
+            "proxy_user": self.proxy_user_edit.text().strip(),
+            "proxy_pass": self.proxy_pass_edit.text(),
+        }
+
+    def _test_proxy(self):
+        # 先把当前代理输入落盘并应用策略，测试的才是用户眼前的配置
+        self.backend.save_settings(self._collect_proxy())
+        self.proxy_test_btn.setEnabled(False)
+        self.proxy_test_btn.setText(tr("测试中…"))
+
+        def done(result):
+            self.proxy_test_btn.setEnabled(True)
+            self.proxy_test_btn.setText(tr("测试代理"))
+            result = result or {}
+            if result.get("ok"):
+                InfoBar.success(tr("代理可用"),
+                                tr("连通，延迟 {ms} 毫秒").format(ms=result.get("latency_ms", "?")),
+                                parent=self, position=InfoBarPosition.TOP, duration=3500)
+            else:
+                InfoBar.error(tr("代理不可用"), str(result.get("message") or ""),
+                              parent=self, position=InfoBarPosition.TOP, duration=5000)
+
+        def failed(exc):
+            self.proxy_test_btn.setEnabled(True)
+            self.proxy_test_btn.setText(tr("测试代理"))
+            InfoBar.error(tr("代理不可用"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=5000)
+
+        self.backend.call_async(self.backend.test_proxy, done, failed)
 
     def _sync_ai_mode(self, _text=""):
         custom = self.ai_mode.currentText() == tr("自定义 NewAPI")
@@ -522,6 +749,66 @@ class SettingsPage(QWidget):
             return
         self.backend.save_settings({"ui_background": path})
         self._apply_theme_now()
+
+    def _on_font_changed(self, text: str):
+        family = "" if (text or "") == self._font_default_label else (text or "").strip()
+        if family == (self.backend.get_setting("ui_font_family") or ""):
+            return
+        self.backend.save_settings({"ui_font_family": family})
+        from ..pcl_chrome import apply_ui_font
+        apply_ui_font()
+        InfoBar.success(tr("已应用"), tr("新窗口立即生效；已打开的页面重启后全部生效"),
+                        parent=self, position=InfoBarPosition.TOP, duration=3000)
+
+    # ------------------------------------------------------------------
+    # 启动器背景音乐（PCL2 音乐播放器同款）
+    # ------------------------------------------------------------------
+    def _music_player(self):
+        win = self.window()
+        return win.music_player() if hasattr(win, "music_player") else None
+
+    def _on_music_toggled(self, checked: bool):
+        self.backend.save_settings({"music_enabled": bool(checked)})
+        player = self._music_player()
+        if player is None:
+            return
+        if checked:
+            if not player.start():
+                InfoBar.info(tr("提示"), tr("music 文件夹里还没有音频文件"),
+                             parent=self, position=InfoBarPosition.TOP, duration=3000)
+        else:
+            player.stop()
+
+    def _on_music_volume_live(self, value: int):
+        # 拖动即时改音量；落盘等 editingFinished，避免每格都触发一次保存
+        player = self._music_player()
+        if player is not None:
+            player.set_volume(int(value))
+
+    def _on_music_volume_commit(self):
+        value = int(self.music_vol.value())
+        if value == int(self.backend.get_setting("music_volume", 50) or 0):
+            return
+        self.backend.save_settings({"music_volume": value})
+
+    def _music_next(self):
+        player = self._music_player()
+        if player is None:
+            return
+        name = player.next_track()
+        if name:
+            InfoBar.success(tr("正在播放"), name, parent=self,
+                            position=InfoBarPosition.TOP, duration=3000)
+        else:
+            InfoBar.info(tr("提示"), tr("music 文件夹里还没有音频文件"),
+                         parent=self, position=InfoBarPosition.TOP, duration=3000)
+
+    def _open_music_folder(self):
+        try:
+            self.backend.open_music_folder()
+        except Exception as e:
+            InfoBar.error(tr("无法打开"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
 
     # ------------------------------------------------------------------
     # 个性化布局
@@ -634,6 +921,7 @@ class SettingsPage(QWidget):
         if typed and typed != (self.backend.get_setting("game_dir") or ""):
             try:
                 self.backend.set_game_dir(typed)
+                self._reload_game_dirs()
             except Exception as e:
                 InfoBar.error(tr("游戏目录无效"), str(e), parent=self,
                               position=InfoBarPosition.TOP, duration=4000)
@@ -706,6 +994,71 @@ class SettingsPage(QWidget):
         except Exception as e:
             InfoBar.error(tr("切换失败"), str(e), parent=self,
                           position=InfoBarPosition.TOP, duration=4000)
+        self._reload_game_dirs()
+
+    def _reload_game_dirs(self):
+        """重建目录列表下拉；active 项即当前生效目录。"""
+        self._dirs_updating = True
+        try:
+            self._dir_entries = self.backend.list_game_dirs()
+            self.dirs_box.clear()
+            labels, active_idx = [], 0
+            for i, e in enumerate(self._dir_entries):
+                label = e.get("name") or e.get("path") or ""
+                if not e.get("exists"):
+                    label += tr("（不存在）")
+                labels.append(label)
+                if e.get("active"):
+                    active_idx = i
+            if labels:
+                self.dirs_box.addItems(labels)
+                self.dirs_box.setCurrentIndex(active_idx)
+        except Exception:
+            pass
+        finally:
+            self._dirs_updating = False
+
+    def _switch_dir_entry(self, idx: int):
+        if self._dirs_updating or idx < 0 or idx >= len(self._dir_entries):
+            return
+        entry = self._dir_entries[idx]
+        if entry.get("active"):
+            return
+        try:
+            self.backend.set_game_dir(entry.get("raw") or entry.get("path") or "")
+            self.game_dir.setText(self.backend.get_setting("game_dir") or "")
+            InfoBar.success(tr("已切换目录"), entry.get("path") or "", parent=self,
+                            position=InfoBarPosition.TOP, duration=2500)
+        except Exception as e:
+            InfoBar.error(tr("切换失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+        self._reload_game_dirs()
+
+    def _add_game_dir_entry(self):
+        path = QFileDialog.getExistingDirectory(self, tr("选择要添加的游戏目录"), "")
+        if not path:
+            return
+        try:
+            self.backend.add_game_dir(path)
+        except Exception as e:
+            InfoBar.error(tr("添加失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+            return
+        self._reload_game_dirs()
+
+    def _remove_game_dir_entry(self):
+        idx = self.dirs_box.currentIndex()
+        if idx < 0 or idx >= len(self._dir_entries):
+            return
+        entry = self._dir_entries[idx]
+        try:
+            self.backend.remove_game_dir(entry.get("raw") or entry.get("path") or "")
+            InfoBar.success(tr("已移除"), tr("仅从列表移除，磁盘文件未动"), parent=self,
+                            position=InfoBarPosition.TOP, duration=2500)
+        except Exception as e:
+            InfoBar.error(tr("移除失败"), str(e), parent=self,
+                          position=InfoBarPosition.TOP, duration=4000)
+        self._reload_game_dirs()
 
     def _global_mods(self):
         from .global_mods_dialog import GlobalModsDialog
@@ -764,8 +1117,15 @@ class SettingsPage(QWidget):
 
     def _export(self):
         from mclauncher.config import CONFIG
+        from ..widgets import ComboDialog
         name = CONFIG.get("default_instance") or "default"
-        self.backend.export_modpack(name)
+        items = [tr("Modrinth 整合包 (.mrpack)"), tr("CurseForge 整合包 (.zip)")]
+        dlg = ComboDialog(tr("导出整合包"), tr("选择导出格式"), items=items,
+                          current=items[0], parent=self.window())
+        if not dlg.exec():
+            return
+        fmt = "curseforge" if dlg.value() == items[1] else "mrpack"
+        self.backend.export_modpack(name, fmt=fmt)
         InfoBar.success(tr("开始导出"), tr("实例 {0} → exports/").format(name), parent=self,
                         position=InfoBarPosition.TOP, duration=3000)
 
@@ -823,6 +1183,8 @@ class SettingsPage(QWidget):
             self.refresh_from_config()
             InfoBar.success(tr("已加载"), tr("主题包「{0}」已应用").format(name), parent=self,
                             position=InfoBarPosition.TOP, duration=2500)
+            from ..pcl_chrome import apply_ui_font
+            apply_ui_font()
             win = self.window()
             if hasattr(win, "apply_theme"):
                 win.apply_theme()
@@ -867,8 +1229,15 @@ class SettingsPage(QWidget):
             self.mig_btn.setEnabled(True)
             self.mig_btn.setText(tr("检测并迁移"))
             if not found:
-                InfoBar.info(tr("提示"), tr("未检测到官方启动器数据目录"), parent=self,
-                             position=InfoBarPosition.TOP, duration=3000)
+                from qfluentwidgets import MessageBox
+                box = MessageBox(
+                    tr("未检测到官方启动器"),
+                    tr("没有找到官方启动器的 .minecraft。也可以手动选择 PCL / HMCL "
+                       "或其他启动器的游戏目录导入。"), self)
+                box.yesButton.setText(tr("选目录导入…"))
+                box.cancelButton.setText(tr("取消"))
+                if box.exec():
+                    self._migrate_from_dir()
                 return
             from qfluentwidgets import MessageBox
             msg = tr("发现官方启动器目录: {0}\n\n发现 {1} 个版本\n\n要导入吗？").format(
@@ -890,6 +1259,49 @@ class SettingsPage(QWidget):
                           position=InfoBarPosition.TOP, duration=4000)
 
         self.backend.call_async(probe, scanned, failed)
+
+    def _migrate_from_dir(self):
+        """手动选任意游戏目录导入（PCL / HMCL / 旧电脑拷来的 .minecraft）。"""
+        path = QFileDialog.getExistingDirectory(self, tr("选择要导入的游戏目录"), "")
+        if not path:
+            return
+        self.mig_pick_btn.setEnabled(False)
+        self.mig_pick_btn.setText(tr("扫描中…"))
+
+        def _restore():
+            self.mig_pick_btn.setEnabled(True)
+            self.mig_pick_btn.setText(tr("选目录导入…"))
+
+        def scanned(found):
+            _restore()
+            found = found or {}
+            versions = found.get("versions") or []
+            if not versions:
+                InfoBar.warning(tr("没有版本"), tr("该目录里没有可导入的版本。"), parent=self,
+                                position=InfoBarPosition.TOP, duration=3500)
+                return
+            from qfluentwidgets import MessageBox
+            msg = (f"游戏目录: {found.get('dir')}\n\n"
+                   f"发现 {len(versions)} 个版本:\n"
+                   + "\n".join(f"· {v}" for v in versions[:12])
+                   + ("\n…" if len(versions) > 12 else "") + "\n\n要导入吗？")
+            if not MessageBox(tr("导入游戏目录"), msg, self).exec():
+                return
+            try:
+                task_id = self.backend.migrate_official_launcher(src_dir=found.get("dir") or path)
+                InfoBar.success(tr("迁移中"), f"导入任务已启动: {task_id}", parent=self,
+                                position=InfoBarPosition.TOP, duration=4000)
+            except Exception as e:
+                InfoBar.error(tr("迁移失败"), str(e), parent=self,
+                              position=InfoBarPosition.TOP, duration=4000)
+
+        def failed(exc):
+            _restore()
+            InfoBar.error(tr("无法导入"), str(exc), parent=self,
+                          position=InfoBarPosition.TOP, duration=4500)
+
+        self.backend.call_async(lambda p=path: self.backend.scan_game_dir(p),
+                                scanned, failed)
 
     def _show_recommendation(self):
         """取硬件信息会调 WMI / PowerShell，首次几秒起步，放后台线程。"""
@@ -930,8 +1342,9 @@ class SettingsPage(QWidget):
             "download_threads": self.threads_spin.value(),
             "download_source": self._src_keys.get(self.src_box.currentText(), "auto"),
             "community_source": self._comm_keys.get(self.comm_box.currentText(), "auto"),
-            "use_system_proxy": self.proxy_sw.isChecked(),
+            **self._collect_proxy(),
             "default_memory_mb": self.memory_spin.value(),
+            "auto_memory": self.auto_mem_sw.isChecked(),
             "default_resolution": [self.width_spin.value(), self.height_spin.value()],
             "ms_client_id": self.ms_client_edit.text().strip(),
             "curseforge_api_key": self.curse_key_edit.text().strip(),
@@ -952,13 +1365,17 @@ class SettingsPage(QWidget):
             "default_jvm_args": self.jvm_edit.text().strip(),
             "update_url": self.upd_url.text().strip(),
             "launcher_visibility": self._vis_keys.get(self.vis_box.currentText(), "keep"),
+            "show_log_window": self.show_log_sw.isChecked(),
             "gc_preset": self._gc_keys.get(self.gc_box.currentText(), "auto"),
+            "gpu_mode": self._gpu_keys.get(self.gpu_box.currentText(), "auto"),
+            "renderer": self._rnd_keys.get(self.rnd_box.currentText(), "auto"),
             "download_limit_kbps": self.limit_spin.value(),
             "auto_check_update": self.auto_upd.isChecked(),
             "ui_motion": self.motion_sw.isChecked(),
             "homepage_mode": self._home_keys.get(self.home_box.currentText(), "news"),
             "custom_homepage": self.hp_edit.text().strip(),
             "window_mode": self._win_keys.get(self.win_box.currentText(), "window"),
+            "game_lang": self._glang_keys.get(self.glang_box.currentText(), "auto"),
             "allow_multi_instance": self.multi_sw.isChecked(),
             "language": lang,
         }

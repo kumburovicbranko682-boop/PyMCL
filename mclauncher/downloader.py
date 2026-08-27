@@ -616,18 +616,26 @@ class DownloadManager:
             raise DownloadError(f"不支持的压缩格式: {p.name}")
 
     @staticmethod
-    def extract_jar_natives(jar_path, dest, exclude=None):
-        """把 natives jar 解压到目录，支持 extract.exclude 规则。"""
+    def extract_jar_natives(jar_path, dest, exclude=None, skip_names=None):
+        """把 natives jar 解压到目录，支持 extract.exclude 规则。
+
+        skip_names: 文件名（小写）包含任一子串则跳过——HMCL「使用系统
+        GLFW/OpenAL」靠不解压捆绑库、让 JVM 回落系统库实现。
+        """
         import zipfile
 
         dest = utils.ensure_dir(dest)
         exclude = exclude or []
+        skip_names = [s.lower() for s in (skip_names or [])]
         with zipfile.ZipFile(jar_path) as zf:
             for info in zf.infolist():
                 name = info.filename
                 if info.is_dir():
                     continue
                 if any(name.startswith(prefix) for prefix in exclude):
+                    continue
+                base = os.path.basename(name).lower()
+                if any(s in base for s in skip_names):
                     continue
                 target = (dest / name).resolve()
                 if not str(target).startswith(str(dest.resolve()) + os.sep):

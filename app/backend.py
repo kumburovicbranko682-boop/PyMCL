@@ -157,6 +157,8 @@ class BackendAPI(QObject):
     task_count_changed = Signal(int)
     game_started = Signal()
     game_exited = Signal(object)
+    # 启动时按设置自动弹日志窗口（HMCL「显示日志」同款）：task_id, version
+    game_log_requested = Signal(str, str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -165,6 +167,9 @@ class BackendAPI(QObject):
         self._titles: dict[str, str] = {}
         self.accounts = AccountManager()
         self._game_proc = None
+        # 多开时的进程注册表：task_id -> {proc, instance, version, account, started_at}
+        # 以前只有 _game_proc 单槽，开第二个游戏后第一个就失管（杀不掉、看不见）。
+        self._game_procs: dict[str, dict] = {}
         self._game_lock = threading.Lock()
         self._launch_task_id = None
         self._pack_cache: list[dict] = []
@@ -326,10 +331,10 @@ class BackendAPI(QObject):
         worker = self._workers.get(task_id)
         if worker:
             worker.cancel()
-        if task_id != self._launch_task_id:
-            return
         with self._game_lock:
-            proc = self._game_proc
+            entry = self._game_procs.get(task_id)
+            proc = entry["proc"] if entry else (
+                self._game_proc if task_id == self._launch_task_id else None)
         if proc:
             try:
                 proc.kill()
@@ -533,9 +538,49 @@ class BackendAPI(QObject):
         return self.start_task(f"安装世界 {Path(str(name)).name}", self._install_world_impl,
                                name, instance, extra or {})
 
+    def install_version_json(self, path: str, name: str = "", instance: str = "") -> str:
+        """通过本地版本 JSON 文件安装版本（HMCL「通过版本 JSON 安装」同款）。"""
+        inst = instance or CONFIG.get("default_instance", "default")
+        title = tr("安装版本 JSON ") + (name or Path(str(path)).name)
+        return self.start_task(title, self._install_version_json_impl, path, name, inst)
+
+    def classify_import(self, path: str) -> dict:
+        """识别本地文件类型（整合包/模组/世界/资源包/光影/数据包/版本 JSON），供拖拽导入用。"""
+        from mclauncher import import_files
+        return import_files.classify_file(path)
+
+    def import_local_file(self, path: str, instance: str = "", kind: str = "") -> str:
+        """把本地文件按识别结果分发到既有安装通道，返回任务 id。"""
+        from mclauncher import import_files
+        p = Path(path)
+        kind = kind or import_files.classify_file(p).get("kind") or ""
+        name = p.name
+        if kind == "modpack":
+            return self.install_modpack(name, source=tr("本地文件"),
+                                        extra={"path": str(p), "instance": instance})
+        if kind == "mod":
+            return self.install_mod(name, instance, extra={"path": str(p)})
+        if kind == "world":
+            return self.install_world(name, instance, extra={"path": str(p)})
+        if kind == "resourcepack":
+            return self.install_resourcepack(name, instance, extra={"path": str(p)})
+        if kind == "shaderpack":
+            return self.install_shader(name, instance, extra={"path": str(p)})
+        if kind == "datapack":
+            return self.install_datapack(name, instance, extra={"path": str(p)})
+        if kind == "version_json":
+            return self.install_version_json(str(p), instance=instance)
+        raise ValueError(tr("无法识别的文件：{name}（支持整合包 / 模组 / 世界 / 资源包 / 光影包 / 数据包 / 版本 JSON）")
+                         .format(name=name))
+
     def list_catalog_files(self, extra: dict | None = None) -> list[dict]:
         from mclauncher.catalog_files import list_project_files
         return list_project_files(DownloadManager(threads=2), extra or {})
+
+    def get_file_changelog(self, extra: dict | None = None) -> str:
+        """拉取目录文件/版本的完整更新日志（Modrinth 原文 / CF HTML 转文本）。"""
+        from mclauncher.catalog_files import fetch_changelog
+        return fetch_changelog(DownloadManager(threads=2), extra or {})
 
     def list_loader_versions(self, mc_version: str, loader: str) -> list[dict]:
         from mclauncher.loader_meta import list_loader_versions
@@ -565,6 +610,24 @@ class BackendAPI(QObject):
         self._emit_ui_changed()
         return out
 
+    def get_version_icon(self, instance: str, version: str) -> str:
+        """版本自定义图标路径（PCL2/HMCL 版本图标同款）；没设置返回空串。"""
+        from mclauncher import version_ops as vops
+        return vops.icon_path(self._instance(instance), version)
+
+    def set_version_icon(self, instance: str, version: str, path: str) -> str:
+        """给版本设置自定义图标（png/jpg/gif/webp/bmp，≤4MB）。"""
+        from mclauncher import version_ops as vops
+        out = vops.set_icon(self._instance(instance), version, path)
+        self._emit_ui_changed()
+        return out
+
+    def clear_version_icon(self, instance: str, version: str):
+        """清除版本自定义图标，恢复默认样式。"""
+        from mclauncher import version_ops as vops
+        vops.clear_icon(self._instance(instance), version)
+        self._emit_ui_changed()
+
     def open_version_folder(self, instance: str, version: str = "", which: str = "root") -> str:
         from mclauncher import version_ops as vops
         return vops.open_folder(self._instance(instance), version, which)
@@ -581,10 +644,58 @@ class BackendAPI(QObject):
         from mclauncher import saves as saves_mod
         return saves_mod.list_saves(self._instance(instance), version)
 
+    def world_seed_map_url(self, instance: str, save_name: str, version: str = "") -> str:
+        """存档的 Chunk Base 种子地图链接（HMCL 世界管理同款快速入口）。"""
+        from mclauncher import saves as saves_mod
+        rows = self.list_saves(instance, version)
+        row = next((r for r in rows if r.get("name") == save_name), None)
+        if row is None:
+            raise saves_mod.SaveError(tr("存档不存在：{0}").format(save_name))
+        return saves_mod.chunkbase_url(row.get("seed") or "", row.get("mc_version") or "")
+
+    def list_schematics(self, instance: str, version: str = "") -> list:
+        """原理图列表（HMCL 同款）：Litematica / WorldEdit / 结构方块文件。"""
+        from mclauncher import schematics as sch
+        return sch.list_schematics(self._instance(instance), version)
+
+    def import_schematics(self, instance: str, paths: list, version: str = "") -> list:
+        from mclauncher import schematics as sch
+        added = sch.import_schematics(self._instance(instance), paths, version)
+        self._emit_ui_changed()
+        return added
+
+    def delete_schematic(self, instance: str, name: str, version: str = "") -> str:
+        from mclauncher import schematics as sch
+        out = sch.delete_schematic(self._instance(instance), name, version)
+        self._emit_ui_changed()
+        return out
+
+    def open_schematics_folder(self, instance: str, version: str = "") -> str:
+        from mclauncher import schematics as sch
+        return sch.open_folder(self._instance(instance), version)
+
     def delete_save(self, instance: str, name: str, version: str = ""):
         from mclauncher import saves as saves_mod
         saves_mod.delete_save(self._instance(instance), name, version)
         self._emit_ui_changed()
+
+    def edit_world(self, instance: str, name: str, changes: dict,
+                   version: str = "") -> dict:
+        """编辑存档 level.dat：世界名/作弊/难度/难度锁/游戏模式（HMCL 同款）。"""
+        from mclauncher import saves as saves_mod
+        out = saves_mod.edit_world(self._instance(instance), name, changes, version)
+        self._emit_ui_changed()
+        return out
+
+    def read_nbt_file(self, path: str) -> dict:
+        """读 NBT 文件为可编辑的 JSON 树（HMCL「NBT 编辑」同款）。"""
+        from mclauncher import nbt_edit
+        return nbt_edit.load_file(path)
+
+    def write_nbt_file(self, path: str, tree: dict) -> str:
+        """校验 JSON 树并写回 NBT 文件，写前刷 .pymcl_bak 备份。返回备份路径。"""
+        from mclauncher import nbt_edit
+        return nbt_edit.save_file(path, tree)
 
     def backup_save(self, instance: str, name: str, version: str = "") -> str:
         return self.start_task(f"备份存档 {name}", self._backup_save_impl, instance, name, version)
@@ -628,12 +739,50 @@ class BackendAPI(QObject):
         from mclauncher import saves as saves_mod
         return saves_mod.install_datapack_into_save(self._instance(instance), filename, save_name, version)
 
+    def list_world_datapacks(self, instance: str, save_name: str, version: str = "") -> list[dict]:
+        """某个世界里已装的数据包（名称/大小/描述/启用状态）。"""
+        from mclauncher import saves as saves_mod
+        return saves_mod.list_world_datapacks(self._instance(instance), save_name, version)
+
+    def delete_world_datapack(self, instance: str, save_name: str, filename: str,
+                              version: str = ""):
+        """从世界里删除一个数据包（尽量移入回收站）。"""
+        from mclauncher import saves as saves_mod
+        saves_mod.delete_world_datapack(self._instance(instance), save_name, filename, version)
+        self._emit_ui_changed()
+
     def list_media(self, instance: str, kind: str, version: str = "") -> list[dict]:
         from mclauncher import saves as saves_mod
         return saves_mod.list_media(self._instance(instance), kind, version)
 
     def open_media(self, path: str) -> bool:
         return bool(open_path(path))
+
+    def list_music_tracks(self) -> list[dict]:
+        """启动器背景音乐曲库（PCL2 音乐播放器同款）：music/ 文件夹。"""
+        from mclauncher import music as music_mod
+        return music_mod.list_tracks()
+
+    def open_music_folder(self) -> str:
+        from mclauncher import music as music_mod
+        folder = music_mod.folder()
+        if not open_path(folder):
+            raise LaunchError(f"无法打开: {folder}")
+        return str(folder)
+
+    def open_launcher_logs(self) -> str:
+        """打开启动器日志文件夹（launcher.log 轮转 + guard 崩溃日志所在处）。"""
+        from mclauncher import utils as utils_mod
+        folder = utils_mod.launcher_log_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        if not open_path(folder):
+            raise LaunchError(f"无法打开: {folder}")
+        return str(folder)
+
+    def launcher_log_tail(self, max_chars: int = 8000) -> str:
+        """当前运行日志末尾片段（反馈 / 诊断附带用）。"""
+        from mclauncher import utils as utils_mod
+        return utils_mod.launcher_log_tail(max_chars)
 
     def delete_modpack(self, instance: str, filename: str = ""):
         inst = self._instance(instance)
@@ -681,11 +830,36 @@ class BackendAPI(QObject):
         return kept
 
     def set_game_dir(self, path: str):
-        p = Path(path).expanduser()
-        CONFIG.set("instances_dir", str(p) if p.is_absolute() else path)
-        CONFIG.save()
+        from mclauncher import game_dirs
+        result = game_dirs.activate(path)
+        self.invalidate_instances()
         self._emit_ui_changed()
-        return str(CONFIG.instances_dir)
+        return result
+
+    def list_game_dirs(self) -> list:
+        """记住的游戏目录列表（HMCL 目录列表 / PCL2 文件夹列表）。"""
+        from mclauncher import game_dirs
+        return game_dirs.entries()
+
+    def add_game_dir(self, path: str, name: str = "") -> list:
+        """把目录加入列表（不切换），返回最新列表。"""
+        from mclauncher import game_dirs
+        game_dirs.register(path, name)
+        self._emit_ui_changed()
+        return game_dirs.entries()
+
+    def remove_game_dir(self, path: str) -> list:
+        """从列表移除（不删磁盘文件），返回最新列表。"""
+        from mclauncher import game_dirs
+        game_dirs.remove(path)
+        self._emit_ui_changed()
+        return game_dirs.entries()
+
+    def rename_game_dir(self, path: str, name: str) -> list:
+        from mclauncher import game_dirs
+        game_dirs.rename(path, name)
+        self._emit_ui_changed()
+        return game_dirs.entries()
 
     def download_java(self, major: str, vendor: str = "adoptium") -> str:
         vendor = (vendor or "adoptium").strip() or "adoptium"
@@ -700,8 +874,8 @@ class BackendAPI(QObject):
         return "Player"
 
     def terracotta_snapshot(self) -> dict:
-        game_on = bool(self._game_proc and getattr(self._game_proc, "poll", lambda: 0)() is None)
-        return terracotta_mod.snapshot(self.terracotta_player(), game_running=game_on)
+        return terracotta_mod.snapshot(self.terracotta_player(),
+                                       game_running=self.is_game_running())
 
     def terracotta_prepare(self) -> str:
         return self.start_task(tr("准备陶瓦联机"), self._terracotta_prepare_impl)
@@ -782,6 +956,37 @@ class BackendAPI(QObject):
         self._launch_task_id = task_id
         return task_id
 
+    def quick_start_game(self, instance: str, account: str, username: str,
+                         memory_mb: int, width: int, height: int,
+                         java: str = tr("自动选择")) -> str:
+        """HMCL「开始游戏」同款：一个版本都没装时，自动下载最新正式版并直接进入游戏。"""
+        task_id = self.start_task(
+            tr("开始游戏（自动下载最新正式版）"), self._quick_start_impl,
+            instance, account, username, memory_mb, width, height, java,
+        )
+        self._launch_task_id = task_id
+        return task_id
+
+    def _quick_start_impl(self, progress, log, instance, account, username,
+                          memory_mb, width, height, java=tr("自动选择")):
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        from mclauncher.manifest import get_version_manifest
+        data = get_version_manifest(dm)
+        latest = str(((data or {}).get("latest") or {}).get("release") or "")
+        if not latest:
+            raise LaunchError(tr("无法获取最新正式版版本号，请检查网络后重试"))
+        installed = set(self.get_installed_versions(inst.name, include_hidden=True) or [])
+        if latest in installed:
+            log(tr("最新正式版 {0} 已安装，直接启动").format(latest))
+        else:
+            log(tr("开始下载最新正式版 {0}").format(latest))
+            self._install_game_impl(progress, log, latest, tr("无"), "", inst.name, None)
+            self._emit_ui_changed()
+            log(tr("下载完成，正在启动 {0}").format(latest))
+        return self._launch_game_impl(progress, log, inst.name, latest, account,
+                                      username, memory_mb, width, height, java, None)
+
     def build_launch_command(self, instance: str, version: str, account: str,
                               username: str, memory_mb: int, width: int, height: int,
                               java: str = tr("自动选择")) -> str:
@@ -805,9 +1010,17 @@ class BackendAPI(QObject):
             props = dict(props)
             props["authlib_api"] = auth_server
         java_exe = tr("自动选择") if java in (tr("自动选择"), "") else java
+        vs_data = _vs.load(inst, version)
         cmd, _natives, _vdir, _gdir = launcher.build_launch_command(
             inst, version, props, java_exe, memory_mb=memory_mb,
-            width=width, height=height, authlib_api=props.get("authlib_api"))
+            width=width, height=height, authlib_api=props.get("authlib_api"),
+            use_system_glfw=bool(vs_data.get("use_system_glfw")),
+            use_system_openal=bool(vs_data.get("use_system_openal")),
+            natives_dir_override=str(vs_data.get("natives_dir") or "").strip() or None)
+        wrapper = str(vs_data.get("wrapper") or "").strip()
+        if wrapper:
+            from mclauncher import launch_flow
+            cmd = launch_flow.apply_wrapper(cmd, wrapper)
         return cmd
 
     def start_microsoft_login(self) -> str:
@@ -833,6 +1046,30 @@ class BackendAPI(QObject):
         Instance(name).rename(new_name)
         self._emit_ui_changed()
 
+    def set_instance_icon(self, name: str, image_path: str):
+        """把一张本地图片设为实例图标（HMCL/PCL2 的版本图标）。"""
+        Instance(name).set_icon(image_path)
+        self._emit_ui_changed()
+
+    def clear_instance_icon(self, name: str):
+        Instance(name).clear_icon()
+        self._emit_ui_changed()
+
+    def duplicate_instance(self, name: str, new_name: str = "") -> str:
+        """复制整个实例（版本、mods、config、存档）为试验副本。"""
+        return self.start_task(f"复制实例 {name}", self._duplicate_instance_impl,
+                               name, new_name)
+
+    def _duplicate_instance_impl(self, progress, log, name, new_name):
+        from mclauncher.instances import duplicate_instance
+        log(f"复制实例 {name} …")
+        out = duplicate_instance(
+            name, new_name,
+            on_progress=lambda done, total: progress(done, total, tr("复制实例文件")))
+        self._emit_ui_changed()
+        log(f"实例已复制: {name} -> {out}")
+        return tr("已复制为实例：{name}").format(name=out)
+
     def open_instance_folder(self, name: str):
         path = self._instance(name).path
         if os.name == "nt":
@@ -848,6 +1085,10 @@ class BackendAPI(QObject):
         if not open_path(folder):
             raise LaunchError(f"无法打开: {folder}")
         return str(folder)
+
+    def get_mods_folder(self, instance: str, version: str = "") -> str:
+        """当前 mods 目录路径（版本隔离时为该版本独立目录），供 UI 显示与目录监视。"""
+        return str(self._mods_folder(self._instance(instance), version))
 
     def delete_mod(self, instance: str, filename: str, version: str = ""):
         inst = self._instance(instance)
@@ -883,6 +1124,22 @@ class BackendAPI(QObject):
             return mods_mod.list_mod_entries_at(self._mods_folder(inst, version))
         return mods_mod.list_instance_mod_entries(inst)
 
+    def get_mod_details(self, instance: str, version: str = "") -> list[dict]:
+        """已装模组 + 展示元数据（模组名/版本/加载器/描述/作者/图标），带缓存。"""
+        from mclauncher import mod_info
+        inst = self._instance(instance)
+        return mod_info.describe_mods_at(self._mods_folder(inst, version))
+
+    def export_mod_list(self, instance: str, version: str = "",
+                        fmt: str = "markdown") -> str:
+        """把已装模组清单导出为 Markdown / 文本，返回文件路径（HMCL 同款）。"""
+        from mclauncher import mod_info
+        inst = self._instance(instance)
+        suffix = "txt" if fmt == "text" else "md"
+        dest = utils.ROOT / "exports" / f"modlist-{inst.name}.{suffix}"
+        return mod_info.export_mod_list(
+            self._mods_folder(inst, version), dest, fmt=fmt, title=inst.name)
+
     def get_mods_targets(self, instance: str) -> list[dict]:
         """Mod 安装目标列表：实例共享 mods + 开了版本隔离的版本各自目录。"""
         from mclauncher import version_settings as vs
@@ -894,11 +1151,23 @@ class BackendAPI(QObject):
                 rows.append({"label": f"{vid} · {tr('独立 mods')}", "value": vid})
         return rows
 
+    def scan_mod_conflicts(self, instance: str, version: str = "") -> dict:
+        """扫描 mods：重复安装、加载器不匹配、缺依赖、互不兼容声明。"""
+        from mclauncher.ai.conflict import scan_conflicts
+        inst = self._instance(instance)
+        mods_dir = self._mods_folder(inst, version) if version else None
+        return scan_conflicts(inst, mods_dir=mods_dir)
+
     def get_installed_shaders(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "shaderpacks")]
 
     def get_installed_resourcepacks(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "resourcepacks")]
+
+    def get_resourcepack_entries(self, instance: str) -> list[dict]:
+        """已装资源包 + 展示元数据（pack.png 图标 / 描述 / 兼容版本，PCL2 同款）。"""
+        from mclauncher.resourcepacks import list_instance_resourcepacks
+        return list_instance_resourcepacks(self._instance(instance))
 
     def get_installed_datapacks(self, instance: str) -> list[str]:
         return [p.name for p in mods_mod.list_content_files(self._instance(instance), "datapacks")]
@@ -946,6 +1215,7 @@ class BackendAPI(QObject):
             "share_assets": bool(CONFIG.get("shared_assets", False)),
             "download_threads": int(CONFIG.get("download_threads", 8)),
             "default_memory_mb": int(CONFIG.get("memory_mb", 4096)),
+            "auto_memory": bool(CONFIG.get("auto_memory", False)),
             "default_resolution": [int(CONFIG.get("width", 854)), int(CONFIG.get("height", 480))],
             "ms_client_id": CONFIG.get("microsoft_client_id") or "",
             "curseforge_api_key": CONFIG.get("curseforge_api_key") or "",
@@ -959,6 +1229,11 @@ class BackendAPI(QObject):
             "download_source": CONFIG.get("download_source") or "auto",
             "community_source": CONFIG.get("community_source") or "auto",
             "use_system_proxy": bool(CONFIG.get("use_system_proxy", True)),
+            "proxy_mode": CONFIG.get("proxy_mode") or "",
+            "proxy_host": CONFIG.get("proxy_host") or "",
+            "proxy_port": int(CONFIG.get("proxy_port") or 0),
+            "proxy_user": CONFIG.get("proxy_user") or "",
+            "proxy_pass": CONFIG.get("proxy_pass") or "",
             "feedback_url": CONFIG.get("feedback_url") or DEFAULT_FEEDBACK_URL or "",
             "feedback_heartbeat": bool(CONFIG.get("feedback_heartbeat", True)),
             "feedback_consent": CONFIG.get("feedback_consent") is True,
@@ -972,9 +1247,15 @@ class BackendAPI(QObject):
             "theme_color": CONFIG.get("theme_color") or "#2E9B6B",
             "ui_dark": bool(CONFIG.get("ui_dark", False)),
             "ui_background": CONFIG.get("ui_background") or "",
+            "ui_font_family": CONFIG.get("ui_font_family") or "",
+            "music_enabled": bool(CONFIG.get("music_enabled", False)),
+            "music_volume": int(CONFIG.get("music_volume", 50) or 0),
             "global_mods_dir": CONFIG.get("global_mods_dir") or "",
             "launcher_visibility": CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": CONFIG.get("gc_preset") or "auto",
+            "gpu_mode": CONFIG.get("gpu_mode") or "auto",
+            "renderer": CONFIG.get("renderer") or "auto",
+            "show_log_window": bool(CONFIG.get("show_log_window", False)),
             "download_limit_kbps": int(CONFIG.get("download_limit_kbps") or 0),
             "auto_check_update": bool(CONFIG.get("auto_check_update", True)),
             "custom_homepage": CONFIG.get("custom_homepage") or "",
@@ -986,6 +1267,7 @@ class BackendAPI(QObject):
             "show_hidden_versions": bool(CONFIG.get("show_hidden_versions", False)),
             "offline_skin": CONFIG.get("offline_skin") or "default",
             "default_java": CONFIG.get("default_java") or "",
+            "game_lang": CONFIG.get("game_lang") or "auto",
             "instances_dir": str(CONFIG.get("instances_dir") or ".minecraft"),
             "game_dir": str(CONFIG.instances_dir),
             "root": str(utils.ROOT),
@@ -1013,6 +1295,7 @@ class BackendAPI(QObject):
             "shared_assets": bool(data.get("share_assets", CONFIG.get("shared_assets", False))),
             "download_threads": int(data.get("download_threads") or CONFIG.get("download_threads") or 8),
             "memory_mb": int(data.get("default_memory_mb") or CONFIG.get("memory_mb") or 4096),
+            "auto_memory": bool(data.get("auto_memory", CONFIG.get("auto_memory", False))),
             "width": int(res[0]),
             "height": int(res[1]),
             "microsoft_client_id": (data.get("ms_client_id") or "").strip()
@@ -1030,6 +1313,14 @@ class BackendAPI(QObject):
             "download_source": (data.get("download_source") or CONFIG.get("download_source") or "auto"),
             "community_source": (data.get("community_source") or CONFIG.get("community_source") or "auto"),
             "use_system_proxy": bool(data.get("use_system_proxy", CONFIG.get("use_system_proxy", True))),
+            "proxy_mode": (data.get("proxy_mode") if str(data.get("proxy_mode") or "")
+                           in ("", "system", "direct", "http", "socks5")
+                           else CONFIG.get("proxy_mode") or "")
+                          if "proxy_mode" in data else CONFIG.get("proxy_mode") or "",
+            "proxy_host": str(_keep("proxy_host") or "").strip(),
+            "proxy_port": max(0, min(65535, int(_keep("proxy_port", default=0) or 0))),
+            "proxy_user": str(_keep("proxy_user") or ""),
+            "proxy_pass": str(_keep("proxy_pass") or ""),
             "ui_fly_animation": bool(data.get("ui_fly_animation", CONFIG.get("ui_fly_animation", True))),
             "ui_motion": bool(data.get("ui_motion", CONFIG.get("ui_motion", True))),
             "ui_fly_duration_ms": int(data.get("ui_fly_duration_ms")
@@ -1044,10 +1335,17 @@ class BackendAPI(QObject):
             "ui_dark": bool(data.get("ui_dark", CONFIG.get("ui_dark", False))),
             "ui_background": (data.get("ui_background") if "ui_background" in data
                               else CONFIG.get("ui_background") or ""),
+            "ui_font_family": str(_keep("ui_font_family") or "").strip(),
+            "music_enabled": bool(data.get("music_enabled", CONFIG.get("music_enabled", False))),
+            "music_volume": max(0, min(100, int(_keep("music_volume", default=50) or 0))),
             "global_mods_dir": (data.get("global_mods_dir") if "global_mods_dir" in data
                                 else CONFIG.get("global_mods_dir") or ""),
             "launcher_visibility": data.get("launcher_visibility") or CONFIG.get("launcher_visibility") or "keep",
             "gc_preset": data.get("gc_preset") or CONFIG.get("gc_preset") or "auto",
+            "gpu_mode": data.get("gpu_mode") or CONFIG.get("gpu_mode") or "auto",
+            "renderer": data.get("renderer") or CONFIG.get("renderer") or "auto",
+            "show_log_window": bool(data.get("show_log_window",
+                                             CONFIG.get("show_log_window", False))),
             "download_limit_kbps": int(_keep("download_limit_kbps", default=0) or 0),
             "auto_check_update": bool(data.get("auto_check_update", CONFIG.get("auto_check_update", True))),
             "custom_homepage": data.get("custom_homepage") if "custom_homepage" in data else CONFIG.get("custom_homepage") or "",
@@ -1059,6 +1357,7 @@ class BackendAPI(QObject):
             "first_run": bool(data["first_run"]) if "first_run" in data else bool(CONFIG.get("first_run", False)),
             "offline_skin": data.get("offline_skin") or CONFIG.get("offline_skin") or "default",
             "default_java": _keep("default_java"),
+            "game_lang": data.get("game_lang") or CONFIG.get("game_lang") or "auto",
         })
         if "show_hidden_versions" in data:
             CONFIG.set("show_hidden_versions", bool(data.get("show_hidden_versions")))
@@ -1089,6 +1388,11 @@ class BackendAPI(QObject):
         """试连 AI。传 settings 就用它，让设置页能测「还没保存的值」而不必先落盘。"""
         from mclauncher.ai.client import test_connection
         return test_connection(settings if settings is not None else self.get_settings())
+
+    def test_proxy(self) -> dict:
+        """按当前代理策略试连（HMCL 代理设置同款）：{ok, latency_ms, message}。"""
+        from mclauncher.net import test_proxy
+        return test_proxy()
 
     def collect_sysinfo(self, force: bool = False, scan_system_java: bool = False) -> dict:
         from mclauncher import sysinfo as sysinfo_mod
@@ -1166,6 +1470,11 @@ class BackendAPI(QObject):
     def get_version_settings(self, instance: str, version: str) -> dict:
         from mclauncher import version_settings as vs
         return vs.load(self._instance(instance), version)
+
+    def global_version_defaults(self) -> dict:
+        """全局设置折算成版本设置值（HMCL「复制全局游戏设置」同款）。"""
+        from mclauncher import version_settings as vs
+        return vs.from_global()
 
     def save_version_settings(self, instance: str, version: str, data: dict) -> dict:
         from mclauncher import version_settings as vs
@@ -1274,12 +1583,35 @@ class BackendAPI(QObject):
 
         return {"ok": False, "message": f"未知动作: {aid}"}
 
-    def export_modpack(self, instance: str, dest: str = "") -> str:
-        return self.start_task(f"导出整合包 {instance}", self._export_pack_impl, instance, dest)
+    def export_modpack(self, instance: str, dest: str = "", fmt: str = "mrpack",
+                       include=None, meta=None) -> str:
+        """导出整合包。fmt: mrpack / curseforge / multimc。
 
-    def check_mod_updates(self, instance: str) -> list:
+        include 为勾选的顶层条目列表（None = 默认集合）；meta 可覆盖
+        名称 / 版本 / 作者（HMCL 导出向导同款）。"""
+        return self.start_task(
+            f"导出整合包 {instance}", self._export_pack_impl, instance, dest, fmt,
+            include, meta)
+
+    def export_pack_info(self, instance: str) -> dict:
+        """导出向导数据：{meta: 预填名称/版本/作者, items: 可勾选文件清单}。"""
+        from mclauncher.export_pack import _pack_meta, list_export_candidates
+        inst = self._instance(instance)
+        return {"meta": _pack_meta(inst), "items": list_export_candidates(inst)}
+
+    def check_modpack_update(self, instance: str) -> dict:
+        """检查实例整合包是否有新版本（Modrinth / CurseForge）。"""
+        dm = DownloadManager(threads=2)
+        return modpack_mod.check_modpack_update(
+            dm, self._instance(instance), api_key=CONFIG.get("curseforge_api_key"))
+
+    def update_modpack(self, instance: str) -> str:
+        """把实例整合包升级到最新版本（重装文件并清理旧版残留 mods）。"""
+        return self.start_task(f"更新整合包 {instance}", self._update_modpack_impl, instance)
+
+    def check_mod_updates(self, instance: str, include_ignored: bool = False) -> list:
         from mclauncher.mod_update import check_updates
-        return check_updates(self._instance(instance))
+        return check_updates(self._instance(instance), include_ignored=include_ignored)
 
     def start_mod_updates(self, instance: str) -> str:
         return self.start_task(f"检查模组更新 {instance}", self._mod_update_impl, instance)
@@ -1289,6 +1621,29 @@ class BackendAPI(QObject):
         name = apply_update(self._instance(instance), row)
         self._emit_ui_changed()
         return name
+
+    def get_mod_update_lock(self, instance: str) -> bool:
+        """实例是否锁定了 Mod 更新（PCL 2.10.7「禁止更新 Mod」同款，整合包保护）。"""
+        from mclauncher import mod_update
+        return mod_update.is_locked(self._instance(instance))
+
+    def set_mod_update_lock(self, instance: str, locked: bool) -> bool:
+        from mclauncher import mod_update
+        return mod_update.set_locked(self._instance(instance), locked)
+
+    def list_mod_update_ignores(self, instance: str) -> dict:
+        """更新忽略表：{project: "*"（不再提醒）或 具体版本串（忽略此版本）}。"""
+        from mclauncher import mod_update
+        return mod_update.ignores(self._instance(instance))
+
+    def ignore_mod_update(self, instance: str, project: str, latest: str = "*") -> dict:
+        """忽略某模组的更新（PCL2 同款：latest='*' 不再提醒，否则只忽略该版本）。"""
+        from mclauncher import mod_update
+        return mod_update.set_ignore(self._instance(instance), project, latest)
+
+    def unignore_mod_update(self, instance: str, project: str) -> dict:
+        from mclauncher import mod_update
+        return mod_update.clear_ignore(self._instance(instance), project)
 
     def cleaner_preview(self) -> dict:
         from mclauncher import cleaner as cleaner_mod
@@ -1313,6 +1668,11 @@ class BackendAPI(QObject):
         from mclauncher import news as news_mod
         return news_mod.load_cached()
 
+    def game_patch_note(self, version: str) -> dict:
+        """某个 MC 版本的官方更新说明（HMCL 版本公告同款），带缓存。"""
+        from mclauncher import news as news_mod
+        return news_mod.patch_note(version)
+
     def skin_urls(self, account_name: str = "") -> dict:
         from mclauncher import skin as skin_mod
         if not account_name or account_name == tr("离线模式"):
@@ -1321,6 +1681,196 @@ class BackendAPI(QObject):
             acc = self.accounts.get_account(account_name) or {"type": "offline", "name": account_name}
         return {"avatar": skin_mod.avatar_url(acc), "body": skin_mod.body_url(acc)}
 
+    # ---- 皮肤管理（微软账号走官方接口；皮肤站账号引导去站点改）
+
+    def _ms_account(self, account_name: str) -> dict:
+        from mclauncher.auth import AuthError
+        acc = self.accounts.get_account(account_name)
+        if not acc:
+            raise AuthError(f"账号不存在: {account_name}")
+        if acc.get("type") != "microsoft":
+            raise AuthError(tr("只有微软正版账号支持在启动器内更换皮肤。"))
+        return self.accounts.ensure_valid(acc)
+
+    def get_skin_profile(self, account_name: str) -> dict:
+        """当前皮肤 / 披风信息（微软账号）。同步网络调用，UI 请走 call_async。"""
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(skin_mod.fetch_profile(acc["access_token"]))
+
+    def upload_skin(self, account_name: str, file_path: str, variant: str = "classic") -> dict:
+        """上传 64x64 / 64x32 PNG 皮肤并设为当前皮肤。"""
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(
+            skin_mod.upload_skin(acc["access_token"], file_path, variant))
+
+    def reset_skin(self, account_name: str) -> dict:
+        """恢复默认皮肤。"""
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(skin_mod.reset_skin(acc["access_token"]))
+
+    def set_cape(self, account_name: str, cape_id: str = "") -> dict:
+        """启用披风；cape_id 为空则隐藏披风。"""
+        from mclauncher import skin as skin_mod
+        acc = self._ms_account(account_name)
+        return skin_mod.summarize_profile(
+            skin_mod.set_cape(acc["access_token"], cape_id))
+
+    def skin_site_url(self, account_name: str) -> str:
+        """皮肤站账号对应站点首页；非皮肤站账号返回空字符串。"""
+        from mclauncher import skin as skin_mod
+        return skin_mod.skin_site_url(self.accounts.get_account(account_name))
+
+    def lookup_player(self, query: str) -> dict:
+        """按正版玩家名或 UUID 查询档案（PCL2 百宝箱 IGN 查询同款）。"""
+        from mclauncher import skin as skin_mod
+        return skin_mod.lookup_player(query)
+
+    def render_skin_preview(self, path: str, model: str = "default",
+                            scale: int = 8, kind: str = "front") -> str:
+        """本地渲染皮肤 2D 立绘/头像（PCL2/HMCL 同款，离线可用），返回缓存 PNG 路径。"""
+        from mclauncher import skin_render
+        return skin_render.ensure_preview(path, model=model, scale=scale, kind=kind)
+
+    # ---- 离线账户皮肤（本地皮肤服务 + authlib-injector，进游戏可见）
+
+    def _offline_account(self, account_name: str) -> dict:
+        from mclauncher.auth import AuthError
+        acc = self.accounts.get_account(account_name)
+        if not acc:
+            raise AuthError(f"账号不存在: {account_name}")
+        if (acc.get("type") or "offline") != "offline":
+            raise AuthError(tr("只有离线账号支持本地皮肤。"))
+        return acc
+
+    def get_offline_skin(self, account_name: str) -> dict:
+        """离线账户当前皮肤配置。"""
+        acc = self._offline_account(account_name)
+        return {
+            "model": acc.get("skin_model") or "default",
+            "skin_file": acc.get("skin_file") or "",
+            "cape_file": acc.get("cape_file") or "",
+            "has_skin": bool(acc.get("skin_file") or acc.get("cape_file")),
+            "uuid": acc.get("uuid") or "",
+            "default_uuid": utils.offline_uuid(acc.get("name") or account_name),
+        }
+
+    def set_offline_uuid(self, account_name: str, uuid: str = "") -> str:
+        """离线账号自定义 UUID（HMCL 同款）；传空重置为按用户名推导的默认值。"""
+        result = self.accounts.set_offline_uuid(account_name, uuid)
+        self._emit_ui_changed()
+        return result
+
+    def set_offline_skin(self, account_name: str, skin_path: str = "",
+                         model: str = "", cape_path: str = "") -> dict:
+        """设置离线账户皮肤 / 披风 / 模型。传空的参数保持不变。"""
+        from mclauncher import offline_skin
+        acc = self._offline_account(account_name)
+        uid = (acc.get("uuid") or "").replace("-", "") or acc.get("name") or "player"
+        if skin_path:
+            acc["skin_file"] = offline_skin.store_skin_file(skin_path, uid, "skin")
+        if cape_path:
+            acc["cape_file"] = offline_skin.store_skin_file(cape_path, uid, "cape")
+        if model:
+            acc["skin_model"] = "slim" if str(model).lower() in ("slim", "alex") else "default"
+        self.accounts.save()
+        return self.get_offline_skin(account_name)
+
+    def clear_offline_skin(self, account_name: str) -> dict:
+        """清除离线账户皮肤配置并删除已复制的材质文件。"""
+        acc = self._offline_account(account_name)
+        for key in ("skin_file", "cape_file"):
+            path = acc.pop(key, "") or ""
+            if path:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
+        acc.pop("skin_model", None)
+        self.accounts.save()
+        return self.get_offline_skin(account_name)
+
+    def fetch_offline_skin_premium(self, account_name: str, player_name: str) -> dict:
+        """按正版玩家名抓取皮肤设置给离线账户。同步网络调用，UI 请走 call_async。"""
+        from mclauncher import offline_skin
+        acc = self._offline_account(account_name)
+        uid = (acc.get("uuid") or "").replace("-", "") or acc.get("name") or "player"
+        data = offline_skin.fetch_premium_skin(player_name, uid)
+        acc["skin_file"] = data["skin_file"]
+        acc["skin_model"] = data["skin_model"]
+        if data.get("cape_file"):
+            acc["cape_file"] = data["cape_file"]
+        else:
+            acc.pop("cape_file", None)
+        self.accounts.save()
+        return self.get_offline_skin(account_name)
+
+    def ping_server(self, address: str, port: int = 0) -> dict:
+        """查询服务器状态（Server List Ping）。同步网络调用，UI 请走 call_async。"""
+        from mclauncher import server_ping
+        return server_ping.ping_address(address, port=port)
+
+    def join_server(self, instance: str, ip: str, port: int = 25565) -> str:
+        """一键启动并直连服务器（1.20+ 走 Quick Play，老版本回退 --server）。
+
+        版本取该实例最近启动过的版本，没启动记录则取已装列表第一个；
+        账号用当前活动账号。返回启动任务 id。
+        """
+        ip = (ip or "").strip()
+        if not ip:
+            raise LaunchError(tr("服务器地址为空"))
+        inst = self._instance(instance)
+        installed = list(self.get_installed_versions(inst.name) or [])
+        if not installed:
+            raise LaunchError(tr("该实例还没有安装版本，请先到「版本」页安装"))
+        from mclauncher import playtime as playtime_mod
+        version = ""
+        for sess in reversed(playtime_mod.get_playtime(inst.name).get("sessions") or []):
+            if sess.get("version") in installed:
+                version = sess["version"]
+                break
+        version = version or installed[0]
+        account = self.accounts.active or tr("离线模式")
+        return self.launch_game(
+            instance=inst.name, version=version, account=account,
+            username="", memory_mb=int(CONFIG.get("memory_mb") or 4096),
+            width=int(CONFIG.get("width") or 854),
+            height=int(CONFIG.get("height") or 480),
+            extra_game_args=["--server", ip, "--port", str(int(port or 25565))],
+        )
+
+    def join_world(self, instance: str, world: str, version: str = "") -> str:
+        """一键启动并直接进入某个单人存档（HMCL 同款，1.20+ Quick Play）。
+
+        version 不传时取该实例最近启动过的版本（没有则第一个已装版本）；
+        账号用当前活动账号。返回启动任务 id。
+        """
+        world = (world or "").strip()
+        if not world:
+            raise LaunchError(tr("请先选择存档"))
+        inst = self._instance(instance)
+        installed = list(self.get_installed_versions(inst.name) or [])
+        if not installed:
+            raise LaunchError(tr("该实例还没有安装版本，请先到「版本」页安装"))
+        version = (version or "").strip()
+        if not version:
+            from mclauncher import playtime as playtime_mod
+            for sess in reversed(playtime_mod.get_playtime(inst.name).get("sessions") or []):
+                if sess.get("version") in installed:
+                    version = sess["version"]
+                    break
+        version = version or installed[0]
+        account = self.accounts.active or tr("离线模式")
+        return self.launch_game(
+            instance=inst.name, version=version, account=account,
+            username="", memory_mb=int(CONFIG.get("memory_mb") or 4096),
+            width=int(CONFIG.get("width") or 854),
+            height=int(CONFIG.get("height") or 480),
+            extra_game_args=["--quickPlaySingleplayer", world],
+        )
+
     def lan_hint(self, port: int = 25565) -> str:
         from mclauncher import lan as lan_mod
         return lan_mod.lan_hint(port)
@@ -1328,6 +1878,11 @@ class BackendAPI(QObject):
     def local_ips(self) -> list:
         from mclauncher import lan as lan_mod
         return lan_mod.local_ips()
+
+    def network_diagnose(self) -> dict:
+        """联机网络检测（PCL CE 同款）：STUN 测 NAT 类型 + IPv6 可用性。"""
+        from mclauncher import net_diag
+        return net_diag.diagnose()
 
     def authlib_presets(self) -> list:
         from mclauncher.authlib import PRESETS
@@ -1410,6 +1965,7 @@ class BackendAPI(QObject):
             pack = meta.get("modpack") if isinstance(meta.get("modpack"), dict) else {}
             pack_name = pack.get("name") if pack else None
             mc = pack_name or meta.get("mc_version") or (ids[0] if ids else tr("未安装版本"))
+            icon = inst.icon_path()
             rows.append({
                 "name": name,
                 "versions": len(ids),
@@ -1419,6 +1975,7 @@ class BackendAPI(QObject):
                 "mc_version": (pack.get("mc_version") if pack else None) or meta.get("mc_version") or "",
                 "java": inst.java_pref(),
                 "java_label": self.instance_java_label(name),
+                "icon": str(icon) if icon else "",
             })
         self._inst_cache = rows
         self._inst_cache_at = now
@@ -1443,6 +2000,9 @@ class BackendAPI(QObject):
             "slug": hit.get("slug"),
             "source": src or default_source,
             "description": hit.get("description") or "",
+            "cn_name": hit.get("cn_name") or "",
+            "cn_label": hit.get("cn_label") or "",
+            "mcmod_url": hit.get("mcmod_url") or "",
         }
 
     def search_modpacks(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
@@ -1455,7 +2015,10 @@ class BackendAPI(QObject):
         gv = extra.get("game_version") or extra.get("version") or ""
         if isinstance(gv, str) and gv.startswith(tr("全部")):
             gv = ""
-        if not q:
+        sort = str(extra.get("sort") or "")
+        offset = int(extra.get("offset") or 0)
+        browse = bool(extra.get("browse") or sort or gv or cats or offset)
+        if not q and not browse:
             rows = []
             seen = set()
             for title, pack_src, key, slug in POPULAR_MODPACKS:
@@ -1491,12 +2054,14 @@ class BackendAPI(QObject):
         dm = DownloadManager(threads=2)
         key = CONFIG.get("curseforge_api_key")
         hits = []
-        try:
-            hits = modpack_mod.search_modpacks_chinese(
-                dm, q, limit=25, api_key=key, game_version=gv or None,
-                categories=cats or None)
-        except Exception:
-            hits = []
+        # 中文别名目录只有一页结果，翻页/无词浏览时直接走源站搜索
+        if q and not offset:
+            try:
+                hits = modpack_mod.search_modpacks_chinese(
+                    dm, q, limit=25, api_key=key, game_version=gv or None,
+                    categories=cats or None)
+            except Exception:
+                hits = []
         if hits and any(h.get("matched_alias") for h in hits):
             rows = [self._modpack_row(h, src) for h in hits]
             self._pack_cache = rows
@@ -1506,11 +2071,11 @@ class BackendAPI(QObject):
                 if src == "curseforge":
                     hits = modpack_mod.search_cf_modpacks(
                         dm, q, limit=25, api_key=key, game_version=gv or None,
-                        categories=cats or None)
+                        categories=cats or None, sort=sort, offset=offset)
                 else:
                     hits = modpack_mod.modrinth_search(
                         dm, q, limit=25, game_version=gv or None,
-                        categories=cats or None)
+                        categories=cats or None, sort=sort, offset=offset)
             except Exception:
                 hits = []
         else:
@@ -1526,7 +2091,18 @@ class BackendAPI(QObject):
     def search_mods(self, query: str, source: str, extra: dict | None = None) -> list[dict]:
         src = self._catalog_source(source)
         q = (query or "").strip()
-        if not q:
+        extra = extra or {}
+        gv = extra.get("game_version") or extra.get("version") or ""
+        if isinstance(gv, str) and gv.startswith(tr("全部")):
+            gv = ""
+        from mclauncher.catalog_files import category_facets
+        cats = category_facets(extra.get("category") or extra.get("type") or "")
+        sort = str(extra.get("sort") or "")
+        offset = int(extra.get("offset") or 0)
+        # 无关键词且没带任何筛选/排序/翻页：本地热门推荐（不发网络请求）；
+        # 带了就是浏览模式，走源站真实榜单（PCL2/HMCL 下载页同款）
+        browse = bool(extra.get("browse") or sort or gv or cats or offset)
+        if not q and not browse:
             rows = []
             for title, mod_src, key, *_rest in POPULAR_MODS:
                 if src != "all" and mod_src != src:
@@ -1546,19 +2122,15 @@ class BackendAPI(QObject):
             self._mod_cache = rows
             return rows
         dm = DownloadManager(threads=2)
-        extra = extra or {}
-        gv = extra.get("game_version") or extra.get("version") or ""
-        if isinstance(gv, str) and gv.startswith(tr("全部")):
-            gv = ""
-        from mclauncher.catalog_files import category_facets
-        cats = category_facets(extra.get("category") or extra.get("type") or "")
         try:
             if src == "curseforge":
                 hits = mods_mod.search_curseforge(
                     dm, q, limit=30, api_key=CONFIG.get("curseforge_api_key"),
-                    class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None)
+                    class_id=mods_mod.CF_CLASS_MOD, game_version=gv or None,
+                    sort=sort, offset=offset)
             else:
-                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None, categories=cats)
+                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv or None,
+                                            categories=cats, sort=sort, offset=offset)
         except Exception:
             hits = []
         rows = []
@@ -1574,6 +2146,9 @@ class BackendAPI(QObject):
                 "tags": h.get("tags") or [],
                 "updated": h.get("updated") or "",
                 "icon_url": h.get("icon_url") or "",
+                "cn_name": h.get("cn_name") or "",
+                "cn_label": h.get("cn_label") or "",
+                "mcmod_url": h.get("mcmod_url") or "",
             })
         self._mod_cache = rows
         return rows
@@ -1591,6 +2166,9 @@ class BackendAPI(QObject):
             "tags": hit.get("tags") or [],
             "updated": hit.get("updated") or "",
             "icon_url": hit.get("icon_url") or "",
+            "cn_name": hit.get("cn_name") or "",
+            "cn_label": hit.get("cn_label") or "",
+            "mcmod_url": hit.get("mcmod_url") or "",
         }
 
     def _search_content(self, kind: str, query: str, source: str, extra: dict | None = None) -> list[dict]:
@@ -1611,10 +2189,13 @@ class BackendAPI(QObject):
             gv = ""
         from mclauncher.catalog_files import category_facets
         cats = category_facets(extra.get("category") or extra.get("type") or "")
+        sort = str(extra.get("sort") or "")
+        offset = int(extra.get("offset") or 0)
         if want_mr:
             try:
                 hits = mods_mod.search_modrinth_projects(
-                    dm, q, spec["mr"], limit=30, game_version=gv or None, categories=cats)
+                    dm, q, spec["mr"], limit=30, game_version=gv or None, categories=cats,
+                    sort=sort, offset=offset)
                 rows.extend(self._content_row(h, "modrinth") for h in hits)
             except Exception:
                 pass
@@ -1625,6 +2206,7 @@ class BackendAPI(QObject):
                     api_key=CONFIG.get("curseforge_api_key"),
                     class_id=spec["cf"],
                     game_version=gv or None,
+                    sort=sort, offset=offset,
                 )
                 for h in hits:
                     row = self._content_row(h, "curseforge")
@@ -1644,15 +2226,30 @@ class BackendAPI(QObject):
         return self._search_content("datapack", query, source, extra)
 
     def get_java_list(self, scan_system: bool = False) -> list[dict]:
-        javas = java_mod.all_javas() if scan_system else java_mod.list_installed_javas()
+        javas = java_mod.all_javas() if scan_system else (
+            java_mod.list_installed_javas() + java_mod.custom_javas())
         rows = []
         for j in javas:
             rows.append({
                 "name": j.get("name") or f"Java {j.get('major')}",
                 "major": str(j.get("major") or "?"),
                 "path": j.get("exe") or j.get("path") or "",
+                "custom": bool(j.get("custom")),
             })
         return rows
+
+    def add_java_path(self, path: str) -> dict:
+        """手动添加 Java 可执行文件（探测版本后写入配置）。"""
+        entry = java_mod.add_custom_java(path)
+        self._emit_ui_changed()
+        return entry
+
+    def remove_java_path(self, path: str) -> bool:
+        """移除手动添加的 Java。"""
+        out = java_mod.remove_custom_java(path)
+        if out:
+            self._emit_ui_changed()
+        return out
 
     def normalize_java_pref(self, java: str) -> str:
         if not java or java in (JAVA_AUTO, "auto", "default"):
@@ -1738,7 +2335,22 @@ class BackendAPI(QObject):
         src_l = (source or "").lower()
         log(tr("整合包安装引擎：按声明的 Forge/Fabric 版本直装（不依赖残缺的 Maven 列表）"))
 
-        if src_l.startswith(tr("本地")) or Path(str(path)).is_file():
+        url = str(extra.get("url") or "").strip()
+        if not url and str(path).strip().lower().startswith(("http://", "https://")):
+            url = str(path).strip()
+        if url:
+            base = url.split("?", 1)[0].lower()
+            log(f"从链接安装整合包: {url}")
+            log(f"实例: {inst.name}  路径: {inst.path}")
+            if base.endswith("server-manifest.json"):
+                log(tr("识别为 HMCL 服务器整合包更新源（server-manifest.json）"))
+                meta = modpack_mod.install_server_pack_url(
+                    dm, url, inst, on_progress=on_progress, cancel=dm.cancel)
+            elif base.endswith(".mrpack"):
+                meta = modpack_mod.install_mrpack(dm, url, inst, on_progress=on_progress, cancel=dm.cancel)
+            else:
+                meta = modpack_mod.install_cf_zip(dm, url, inst, on_progress=on_progress, cancel=dm.cancel)
+        elif src_l.startswith(tr("本地")) or Path(str(path)).is_file():
             p = Path(path)
             log(f"从本地文件安装: {p}")
             log(f"实例: {inst.name}  路径: {inst.path}")
@@ -1781,6 +2393,10 @@ class BackendAPI(QObject):
             CONFIG.set("default_instance", meta["instance"])
             CONFIG.save()
         log(f"整合包安装完成: {(meta or {}).get('name') or name}")
+        manual = (meta or {}).get("manual_mods") or []
+        if manual:
+            return tr("整合包已安装，但 {n} 个 Mod 因作者限制需手动下载，链接见任务日志").format(
+                n=len(manual))
 
     def _install_mod_impl(self, progress, log, name, instance, extra=None):
         extra = extra or {}
@@ -1869,6 +2485,14 @@ class BackendAPI(QObject):
             return tr("统一通行证")
         return tr("离线")
 
+    @staticmethod
+    def _account_label(account, username) -> str:
+        """运行中游戏列表里显示的账号名。"""
+        a = str(account or "").strip()
+        if a and a != tr("离线模式"):
+            return a
+        return str(username or "").strip() or "Player"
+
     def _launch_game_impl(self, progress, log, instance, version, account,
                           username, memory_mb, width, height, java=tr("自动选择"),
                           extra_game_args=None):
@@ -1914,11 +2538,21 @@ class BackendAPI(QObject):
         if account == tr("离线模式") or not account:
             acc = self.accounts.offline_account(
                 username or "Player", skin=CONFIG.get("offline_skin") or "default")
+            # 同名离线账号配过本地皮肤 / 自定义 UUID 时，快速启动路径也带上
+            stored = self.accounts.get_account(acc.get("name"))
+            if stored and (stored.get("type") or "offline") == "offline":
+                for key in ("skin_file", "skin_model", "cape_file", "uuid"):
+                    if stored.get(key):
+                        acc[key] = stored[key]
         else:
             acc = self.accounts.get_account(account)
             if not acc:
                 raise LaunchError(f"账号不存在: {account}")
-            acc = self.accounts.ensure_valid(acc)
+            acc, auth_fallback = self.accounts.ensure_valid_or_fallback(acc)
+            if auth_fallback:
+                log(tr("账号令牌刷新失败：{err}").format(err=auth_fallback))
+                log(tr("已改用离线身份启动（保留原用户名与 UUID，单机可正常游玩；"
+                       "进正版验证服务器会被拒绝，网络恢复后重新启动即可恢复正版登录）。"))
         props = self.accounts.launch_props(acc)
         log(f"账号: {props.get('name')} ({self._account_kind(props, acc)})")
         log(f"内存: {memory_mb} MB | 分辨率: {width}x{height}")
@@ -1928,19 +2562,27 @@ class BackendAPI(QObject):
         if mods_dir.is_dir():
             jar_count = sum(1 for p in mods_dir.iterdir() if p.suffix.lower() == ".jar")
         looks_loader = any(tok in version.lower() for tok in (
-            "forge", "fabric", "quilt", "neoforge", "optifine", "liteloader"))
+            "forge", "fabric", "quilt", "neoforge", "optifine", "liteloader",
+            "cleanroom"))
         if jar_count and not looks_loader:
             log(f"警告: mods 里有 {jar_count} 个 jar，但当前版本是原版，不会加载模组")
 
         from mclauncher import launch_flow
         prep = launch_flow.prepare(inst, version, extra_game_args=extra_game_args, memory_mb=memory_mb)
         memory_mb = prep["memory_mb"] or memory_mb
+        if prep.get("memory_source") == "auto":
+            log(tr("自动分配内存: {mem} MB（按当前可用物理内存计算）").format(mem=memory_mb))
+        elif prep.get("memory_source") == "version":
+            log(tr("版本设置内存: {mem} MB").format(mem=memory_mb))
         extra_game_args = prep["extra_game_args"]
         game_dir = prep["game_dir"]
         if prep["settings"].get("isolation") != "none":
             log(f"版本隔离: {prep['settings']['isolation']} → {game_dir}")
         if prep["global_mods"]:
             log(f"已应用 {prep['global_mods']} 个全局模组")
+        if prep.get("game_lang"):
+            log(tr("首次启动：游戏语言已自动设为 {lang}（可在设置或游戏内修改）").format(
+                lang=prep["game_lang"]))
         launch_flow.run_hook(
             prep["settings"].get("pre_launch") or "", game_dir, log=log,
             wait=bool(prep.get("pre_launch_wait", True)))
@@ -1986,6 +2628,13 @@ class BackendAPI(QObject):
             props = dict(props)
             props["authlib_api"] = auth_server
             log(f"认证服: {auth_server}")
+        if not props.get("authlib_api") and (acc.get("type") or "offline") == "offline":
+            from mclauncher import offline_skin
+            skin_api = offline_skin.prepare_injection(acc)
+            if skin_api:
+                props = dict(props)
+                props["authlib_api"] = skin_api
+                log(tr("离线皮肤：本地皮肤服务已就绪") + f" {skin_api}")
         if props.get("authlib_api"):
             from mclauncher import authlib as authlib_mod
             authlib_mod.ensure_injector(self._dm(progress, log), on_note=log)
@@ -1998,6 +2647,12 @@ class BackendAPI(QObject):
                 props["nide8_id"] = prep["nide8_id"]
             log(f"统一通行证: {props.get('nide8_id')}")
         width, height = launch_flow.resolve_resolution(prep, width, height)
+        if prep.get("use_system_glfw"):
+            log(tr("使用系统 GLFW：跳过捆绑库，回落系统安装的 libglfw"))
+        if prep.get("use_system_openal"):
+            log(tr("使用系统 OpenAL：跳过捆绑库，回落系统安装的 libopenal"))
+        if prep.get("natives_dir"):
+            log(tr("自定义本地库目录: ") + prep["natives_dir"])
         cmd, _natives, _vdir, game_dir = build_launch_command(
             inst, version, props, java_exe,
             memory_mb=memory_mb, width=width, height=height,
@@ -2005,16 +2660,42 @@ class BackendAPI(QObject):
             extra_jvm_args=prep["jvm_args"],
             game_directory=game_dir,
             authlib_api=props.get("authlib_api"),
+            use_system_glfw=prep.get("use_system_glfw", False),
+            use_system_openal=prep.get("use_system_openal", False),
+            natives_dir_override=prep.get("natives_dir") or None,
         )
+        if prep.get("wrapper"):
+            cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
+            log(f"包装器命令: {prep['wrapper']}")
+        from mclauncher import gpu as gpu_mod
+        gpu_env, gpu_note = gpu_mod.launch_env(
+            prep.get("gpu_mode"), java_exe, prep.get("renderer"))
+        for line in (gpu_note or "").splitlines():
+            log(line)
+        env = launch_flow.game_env(
+            prep, gpu_env, instance=inst, version_id=version,
+            java_exe=java_exe, game_dir=game_dir, resolved=resolved)
+        if prep.get("env_vars"):
+            log(tr("环境变量: ") + " ".join(sorted(prep["env_vars"])))
         log(f"实际启动: {cmd[0]}")
         log(tr("正在启动游戏进程…"))
         progress(3, 4, tr("游戏启动中"))
         worker = QThread.currentThread()
         proc = GameProcess(cmd, cwd=game_dir, on_line=log, priority=prep["priority"],
-                           window_title=prep.get("window_title") or "")
+                           window_title=prep.get("window_title") or "", env=env)
+        game_key = getattr(worker, "task_id", "") or f"pid-{proc.proc.pid}"
         with self._game_lock:
             self._game_proc = proc
+            self._game_procs[game_key] = {
+                "proc": proc, "instance": inst.name, "version": version,
+                "account": self._account_label(account, username),
+                "started_at": proc.started_at,
+                # 导出运行栈时优先用同一个 Java 的诊断工具
+                "java": str(java_exe or ""),
+            }
         self.game_started.emit()
+        if prep.get("show_log"):
+            self.game_log_requested.emit(game_key, version)
         code = None
         # 游戏时长统计
         try:
@@ -2037,6 +2718,7 @@ class BackendAPI(QObject):
             with self._game_lock:
                 if self._game_proc is proc:
                     self._game_proc = None
+                self._game_procs.pop(game_key, None)
             self.game_exited.emit(code)
         if getattr(worker, "_cancelled", False):
             log(tr("已停止游戏"))
@@ -2091,13 +2773,39 @@ class BackendAPI(QObject):
         installer = Installer(inst, dm, on_progress=dm.on_progress, cancel=dm.cancel)
         return repair(installer, version)
 
-    def _export_pack_impl(self, progress, log, instance, dest):
-        from mclauncher.export_pack import export_mrpack
+    def _install_version_json_impl(self, progress, log, path, name, instance):
+        from mclauncher.version_json_install import install_from_json
         inst = self._instance(instance)
-        if not dest:
-            dest = str(utils.ROOT / "exports" / f"{inst.name}.mrpack")
         dm = self._dm(progress, log)
-        path = export_mrpack(inst, dest, dm=dm, on_note=lambda m, a, b: progress(a, b, m))
+        installer = Installer(inst, dm, on_progress=dm.on_progress, cancel=dm.cancel)
+        installer.skip_assets = bool(CONFIG.get("skip_assets"))
+        log(tr("读取版本 JSON：{path}").format(path=path))
+        target = install_from_json(installer, path, name=name)
+        self._emit_ui_changed()
+        return tr("已通过版本 JSON 安装 {id}").format(id=target)
+
+    def _export_pack_impl(self, progress, log, instance, dest, fmt="mrpack",
+                          include=None, meta=None):
+        from mclauncher.export_pack import export_cf_zip, export_mmc_zip, export_mrpack
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        kind = str(fmt or "mrpack").lower()
+        note = lambda m, a, b: progress(a, b, m)
+        if kind in ("curseforge", "cf", "zip"):
+            if not dest:
+                dest = str(utils.ROOT / "exports" / f"{inst.name}-curseforge.zip")
+            path = export_cf_zip(inst, dest, dm=dm, on_note=note,
+                                 include=include, meta_override=meta)
+        elif kind in ("multimc", "mmc", "prism"):
+            if not dest:
+                dest = str(utils.ROOT / "exports" / f"{inst.name}-multimc.zip")
+            path = export_mmc_zip(inst, dest, on_note=note,
+                                  include=include, meta_override=meta)
+        else:
+            if not dest:
+                dest = str(utils.ROOT / "exports" / f"{inst.name}.mrpack")
+            path = export_mrpack(inst, dest, dm=dm, on_note=note,
+                                 include=include, meta_override=meta)
         log(f"已导出: {path}")
         return path
 
@@ -2114,6 +2822,25 @@ class BackendAPI(QObject):
             apply_update(inst, row, dm=dm)
             progress(i + 1, len(rows), row.get("name") or "")
         return f"已更新 {len(rows)} 个模组"
+
+    def _update_modpack_impl(self, progress, log, instance):
+        inst = self._instance(instance)
+        dm = self._dm(progress, log)
+        result = modpack_mod.update_modpack(
+            dm, inst, on_progress=dm.on_progress, cancel=dm.cancel,
+            api_key=CONFIG.get("curseforge_api_key"))
+        if not result.get("updated"):
+            return tr("已是最新版本：{v}").format(v=result.get("current") or "?")
+        removed = result.get("removed") or []
+        if removed:
+            log(tr("已清理旧版本残留 {n} 个文件").format(n=len(removed)))
+            for r in removed[:20]:
+                log(f"  - {r}")
+            if len(removed) > 20:
+                log(f"  … 共 {len(removed)} 个")
+        self._emit_ui_changed()
+        return tr("整合包已更新：{a} → {b}").format(
+            a=result.get("from") or "?", b=result.get("to") or "?")
 
     def _self_update_impl(self, progress, log):
         from mclauncher import updater as updater_mod
@@ -2174,10 +2901,15 @@ class BackendAPI(QObject):
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
             authlib_api=props.get("authlib_api"),
+            use_system_glfw=prep.get("use_system_glfw", False),
+            use_system_openal=prep.get("use_system_openal", False),
+            natives_dir_override=prep.get("natives_dir") or None,
         )
+        if prep.get("wrapper"):
+            cmd = launch_flow.apply_wrapper(cmd, prep["wrapper"])
         if not dest:
             dest = str(utils.ROOT / "exports" / f"launch-{inst.name}-{version}.bat")
-        path = vops.export_launch_bat(Path(dest), cmd, gdir)
+        path = vops.export_launch_bat(Path(dest), cmd, gdir, env=prep.get("env_vars"))
         log(f"已写出 {path}")
         return path
 
@@ -2234,6 +2966,20 @@ class BackendAPI(QObject):
         from mclauncher import playtime as playtime_mod
         inst_name = instance or CONFIG.get("default_instance", "default")
         return playtime_mod.get_playtime(inst_name)
+
+    def get_version_stats(self, instance: str = "") -> dict:
+        """每版本游玩统计（HMCL 游戏列表同款）：秒数/上次游玩 + 可读文案。"""
+        from mclauncher import playtime as playtime_mod
+        inst_name = instance or CONFIG.get("default_instance", "default")
+        out = {}
+        for vid, row in playtime_mod.version_stats(inst_name).items():
+            out[vid] = {
+                "seconds": row["seconds"],
+                "last": row["last"],
+                "seconds_text": playtime_mod.format_duration(row["seconds"]),
+                "last_text": playtime_mod.format_last_played(row["last"]),
+            }
+        return out
 
     def get_all_playtime(self) -> dict:
         from mclauncher import playtime as playtime_mod
@@ -2361,17 +3107,32 @@ class BackendAPI(QObject):
             return []
         return om.scan_versions(d)
 
-    def migrate_official_launcher(self, instance: str = "default") -> str:
+    def scan_game_dir(self, path: str) -> dict:
+        """校验任意目录是不是可导入的游戏目录（PCL / HMCL / 官方均可），
+        返回 {dir, versions}；不是则抛错。"""
+        from mclauncher import official_migrate as om
+        resolved = om.resolve_game_dir(path)
+        if resolved is None:
+            raise ValueError(tr("该目录里没有 versions 文件夹，不是 Minecraft 游戏目录"))
+        return {"dir": str(resolved), "versions": om.scan_versions(resolved)}
+
+    def migrate_official_launcher(self, instance: str = "default", src_dir: str = "") -> str:
         return self.start_task(
-            tr("导入官方启动器"),
-            self._migrate_official_impl, instance,
+            tr("导入游戏目录") if src_dir else tr("导入官方启动器"),
+            self._migrate_official_impl, instance, src_dir,
         )
 
-    def _migrate_official_impl(self, progress, log, instance):
+    def _migrate_official_impl(self, progress, log, instance, src_dir=""):
         from mclauncher import official_migrate as om
-        src = om.official_dir()
-        if not src:
-            raise FileNotFoundError(tr("未找到官方启动器目录"))
+        if src_dir:
+            src = om.resolve_game_dir(src_dir)
+            if src is None:
+                raise FileNotFoundError(
+                    tr("该目录里没有 versions 文件夹，不是 Minecraft 游戏目录") + f": {src_dir}")
+        else:
+            src = om.official_dir()
+            if not src:
+                raise FileNotFoundError(tr("未找到官方启动器目录"))
         log(f"正在从 {src} 迁移…")
         progress(1, 3, tr("扫描版本"))
         versions = om.scan_versions(src)
@@ -2390,8 +3151,95 @@ class BackendAPI(QObject):
 
     def is_game_running(self) -> bool:
         with self._game_lock:
-            proc = self._game_proc
-        return proc is not None and getattr(proc, "poll", lambda: 0)() is None
+            procs = [e.get("proc") for e in self._game_procs.values()]
+            if self._game_proc is not None:
+                procs.append(self._game_proc)
+        return any(p is not None and getattr(p, "poll", lambda: 0)() is None
+                   for p in procs)
+
+    def list_running_games(self) -> list[dict]:
+        """运行中的游戏进程列表（对标 HMCL 游戏管理：多开时逐个可见可控）。"""
+        import time as _time
+        with self._game_lock:
+            items = [(tid, dict(e)) for tid, e in self._game_procs.items()]
+        rows = []
+        now = _time.time()
+        for tid, e in items:
+            proc = e.get("proc")
+            if proc is None or proc.poll() is not None:
+                continue
+            started = float(e.get("started_at") or 0)
+            rows.append({
+                "task_id": tid,
+                "instance": str(e.get("instance") or ""),
+                "version": str(e.get("version") or ""),
+                "account": str(e.get("account") or ""),
+                "pid": int(getattr(getattr(proc, "proc", None), "pid", 0) or 0),
+                "started_at": started,
+                "uptime": max(0, int(now - started)) if started else 0,
+            })
+        rows.sort(key=lambda r: r["started_at"])
+        return rows
+
+    def game_log(self, task_id: str = "", since: int = 0) -> dict:
+        """运行中游戏的增量日志（HMCL 日志窗口同款）。
+
+        task_id 留空取最近启动的游戏。返回 {start, total, lines, running}；
+        since 传上次的 total 即可只拿新行。"""
+        with self._game_lock:
+            if task_id:
+                entry = self._game_procs.get(task_id) or {}
+                proc = entry.get("proc")
+            else:
+                proc = self._game_proc
+        if proc is None:
+            return {"start": 0, "total": 0, "lines": [], "running": False}
+        out = proc.tail(since)
+        out["running"] = proc.poll() is None
+        return out
+
+    def kill_game(self, task_id: str = "") -> int:
+        """结束运行中的游戏；task_id 留空结束全部。返回结束的个数。
+
+        走 cancel_task：worker 会被标记取消，游戏被杀不会误判成崩溃。
+        """
+        with self._game_lock:
+            ids = [task_id] if task_id else list(self._game_procs.keys())
+        n = 0
+        for tid in ids:
+            with self._game_lock:
+                entry = self._game_procs.get(tid)
+            proc = entry.get("proc") if entry else None
+            if proc is None or proc.poll() is not None:
+                continue
+            self.cancel_task(tid)
+            n += 1
+        return n
+
+    def dump_game_stack(self, task_id: str = "", dest: str = "") -> str:
+        """导出运行中游戏的线程转储（HMCL「导出游戏运行栈」同款）。
+
+        游戏卡死时用：不打断游戏进程，把 jstack 转储写成文件并返回路径。
+        task_id 留空取最近启动的游戏；dest 留空写到启动器数据目录。
+        """
+        with self._game_lock:
+            if task_id:
+                entries = [self._game_procs.get(task_id) or {}]
+            else:
+                # dict 按插入序：最近启动的排最后
+                entries = [dict(e) for e in self._game_procs.values()][::-1]
+        entry = next((e for e in entries
+                      if e.get("proc") is not None
+                      and e["proc"].poll() is None), None)
+        if entry is None:
+            raise LaunchError(tr("游戏未在运行，无法导出运行栈"))
+        pid = int(getattr(entry["proc"].proc, "pid", 0) or 0)
+        from mclauncher import stack_dump
+        try:
+            return stack_dump.export_dump(
+                pid, java_exe=entry.get("java") or None, dest=dest or None)
+        except stack_dump.StackDumpError as e:
+            raise LaunchError(str(e)) from e
 
     def allow_multi_instance(self) -> bool:
         return bool(CONFIG.get("allow_multi_instance", False))
@@ -2451,6 +3299,9 @@ class BackendAPI(QObject):
             extra_game_args=prep["extra_game_args"],
             extra_jvm_args=prep["jvm_args"],
             game_directory=prep["game_dir"],
+            use_system_glfw=prep.get("use_system_glfw", False),
+            use_system_openal=prep.get("use_system_openal", False),
+            natives_dir_override=prep.get("natives_dir") or None,
         )
         return " ".join(cmd)
 

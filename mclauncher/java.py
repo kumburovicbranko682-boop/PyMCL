@@ -134,7 +134,7 @@ def resolve_launch_java(version_json, prefer=None, dm=None, on_progress=None, on
     if exe and java_usable_for(version_json, exe):
         return str(Path(exe))
     # 最后兜底：任何已安装的足够新的 Java
-    for j in list_installed_javas() + find_system_javas():
+    for j in list_installed_javas() + custom_javas() + find_system_javas():
         cand = j.get("exe")
         if java_usable_for(version_json, cand):
             return str(Path(cand))
@@ -274,8 +274,8 @@ def cached_system_javas():
 
 
 def cached_all_javas():
-    """自带 Java + 已缓存的系统 Java（不触发扫描）。"""
-    result = list_installed_javas() + cached_system_javas()
+    """自带 Java + 手动添加 + 已缓存的系统 Java（不触发扫描）。"""
+    result = list_installed_javas() + custom_javas() + cached_system_javas()
     seen = set()
     unique = []
     for j in result:
@@ -296,9 +296,64 @@ def warm_system_javas_async():
     return threading.Thread(target=_run, name="pymcl-java-warmup", daemon=True).start()
 
 
+def custom_javas():
+    """用户手动添加的 Java。major 在添加时探测并存进配置，这里零子进程。"""
+    rows = []
+    for entry in CONFIG.get("custom_javas") or []:
+        if not isinstance(entry, dict):
+            continue
+        exe = str(entry.get("exe") or "")
+        if not exe or not Path(exe).is_file():
+            continue
+        major = entry.get("major")
+        try:
+            major = int(major)
+        except (TypeError, ValueError):
+            major = 0
+        rows.append({
+            "name": entry.get("name") or f"Java {major or '?'}（手动添加）",
+            "exe": exe,
+            "major": major,
+            "custom": True,
+        })
+    return rows
+
+
+def add_custom_java(path) -> dict:
+    """手动添加一个 Java 可执行文件：校验、探测版本、写入配置。"""
+    p = Path(str(path or "").strip())
+    if not p.is_file():
+        raise ValueError(f"文件不存在: {p}")
+    if p.stem.lower() not in ("java", "javaw"):
+        raise ValueError("请选择 java / javaw 可执行文件")
+    exe = str(p.resolve())
+    major = get_java_major(exe)
+    if not major:
+        raise ValueError("无法识别该 Java（运行 java -version 失败）")
+    entry = {"exe": exe, "major": int(major), "name": f"Java {major}（手动添加）"}
+    entries = [e for e in (CONFIG.get("custom_javas") or [])
+               if isinstance(e, dict) and e.get("exe") != exe]
+    entries.append(entry)
+    CONFIG.set("custom_javas", entries)
+    CONFIG.save()
+    return entry
+
+
+def remove_custom_java(path) -> bool:
+    """从配置里移除手动添加的 Java。返回是否真的删了。"""
+    target = str(path or "")
+    entries = [e for e in (CONFIG.get("custom_javas") or []) if isinstance(e, dict)]
+    kept = [e for e in entries if e.get("exe") != target]
+    if len(kept) == len(entries):
+        return False
+    CONFIG.set("custom_javas", kept)
+    CONFIG.save()
+    return True
+
+
 def all_javas():
-    """系统 Java + 启动器自带 Java。"""
-    result = list_installed_javas() + find_system_javas()
+    """系统 Java + 启动器自带 Java + 手动添加的 Java。"""
+    result = list_installed_javas() + custom_javas() + find_system_javas()
     seen = set()
     unique = []
     for j in result:
@@ -391,6 +446,9 @@ def pick_java_for_version(version_json, prefer=None):
     own = _match(list_installed_javas())
     if own:
         return own
+    manual = _match(custom_javas())
+    if manual:
+        return manual
     return _match(find_system_javas())
 
 

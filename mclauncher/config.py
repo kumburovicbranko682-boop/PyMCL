@@ -9,14 +9,22 @@ CONFIG_FILE = utils.ROOT / "config.json"
 DEFAULT_CONFIG = {
     # 实例目录名（相对于启动器主目录）。与 PCL/HMCL 一样用 .minecraft
     "instances_dir": ".minecraft",
+    # 记住的游戏目录列表（HMCL 目录列表 / PCL2 文件夹列表）：[{"name", "path"}]
+    # 当前生效目录仍以 instances_dir 为准；默认目录 .minecraft 不入表
+    "game_dirs": [],
     "default_instance": "default",
     # Java 运行时目录名（所有实例共享）
     "java_dir": "java",
+    # 用户手动添加的 Java：[{"exe", "major", "name"}]，添加时探测一次 major
+    "custom_javas": [],
     # 版本隔离选项：False 时每个实例拥有独立的 libraries/assets；True 时共享以节省空间
     "shared_libraries": False,
     "shared_assets": False,
     # 默认分配内存 (MB)
     "memory_mb": 4096,
+    # 自动分配内存（PCL 同款）：启动时按物理内存实时计算 Xmx。
+    # 版本设置里的内存仍然优先；开着时启动页滑条不生效。
+    "auto_memory": False,
     # 下载并发线程数
     "download_threads": 8,
     # 默认窗口分辨率
@@ -70,6 +78,18 @@ DEFAULT_CONFIG = {
     "theme_color": "#2E9B6B",
     "ui_dark": False,
     "ui_background": "",
+    # 启动器界面字体（HMCL 设置「字体」同款）：空 = 默认 Fluent 字族
+    "ui_font_family": "",
+    # 启动器背景音乐（PCL2 音乐播放器同款）：music/ 文件夹随机循环
+    "music_enabled": False,
+    "music_volume": 50,
+    # 代理（HMCL 设置同款）：mode 空 = 沿用 use_system_proxy 旧开关
+    # （system 跟随系统 / direct 直连 / http / socks5）
+    "proxy_mode": "",
+    "proxy_host": "",
+    "proxy_port": 0,
+    "proxy_user": "",
+    "proxy_pass": "",
     # 这三个键以前只在 save_settings 里写、没在这儿声明。
     # `save()` 落的是整份 data，`load()` 却只按本表的键名回读 ——
     # 结果就是「关掉飞入动画、重开启动器它又自己回来了」。
@@ -80,6 +100,12 @@ DEFAULT_CONFIG = {
     "global_mods_dir": "",
     "launcher_visibility": "keep",
     "gc_preset": "auto",
+    # 显卡偏好（PCL2「尝试使用独立显卡」同款）：auto / discrete / integrated
+    "gpu_mode": "auto",
+    # 渲染器（HMCL 同款，仅 Linux/Mesa 生效）：auto / llvmpipe / zink
+    "renderer": "auto",
+    # 启动游戏时自动弹出日志窗口（HMCL「显示日志」同款）
+    "show_log_window": False,
     "download_limit_kbps": 0,
     "auto_check_update": True,
     "custom_homepage": "",
@@ -92,6 +118,8 @@ DEFAULT_CONFIG = {
     "offline_skin": "default",
     "allow_multi_instance": False,
     "language": "zh_CN",
+    # 首次启动自动写入 options.txt 的游戏语言：auto=跟随启动器 / off=不写 / zh_cn 等具体代码
+    "game_lang": "auto",
 }
 
 

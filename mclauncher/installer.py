@@ -288,13 +288,34 @@ def natives_present(natives_dir) -> bool:
     return False
 
 
-def extract_natives(instance, resolved, version_id):
+def _purge_natives(natives_dir, skip_names):
+    """删掉 natives 目录里名字含指定子串的库文件。
+
+    「使用系统 GLFW/OpenAL」切换后，上次启动解压出的捆绑库还留在
+    java.library.path 里、仍会被优先加载，必须清掉才能回落系统库。"""
+    natives_dir = Path(natives_dir)
+    if not skip_names or not natives_dir.is_dir():
+        return
+    subs = [s.lower() for s in skip_names]
+    for p in natives_dir.iterdir():
+        if p.is_file() and any(s in p.name.lower() for s in subs):
+            try:
+                p.unlink()
+            except OSError as e:
+                utils.log.warning("删除捆绑 natives 失败 %s: %s", p, e)
+
+
+def extract_natives(instance, resolved, version_id, skip_glfw=False, skip_openal=False):
     """把 resolved libraries 里的 natives 解压到版本 natives 目录。
 
     旧版 Forge inheritsFrom 1.7.10 时，安装器只处理了 Forge 自己的库列表，
     启动却把 java.library.path 指到空的 Forge natives 目录，LWJGL 会
     UnsatisfiedLinkError: no lwjgl in java.library.path。
+
+    skip_glfw / skip_openal：不解压捆绑的 GLFW/OpenAL（HMCL「使用系统
+    GLFW/OpenAL」同款），JVM 找不到捆绑库时回落加载系统安装的版本。
     """
+    skip_names = (["glfw"] if skip_glfw else []) + (["openal"] if skip_openal else [])
     natives_dir = instance.natives_dir(version_id, resolved)
     utils.ensure_dir(natives_dir)
     libs_dir = instance.libraries_dir()
@@ -313,12 +334,14 @@ def extract_natives(instance, resolved, version_id):
             continue
         exclude = (lib.get("extract") or {}).get("exclude") or []
         try:
-            DownloadManager.extract_jar_natives(jarpath, natives_dir, exclude=exclude)
+            DownloadManager.extract_jar_natives(jarpath, natives_dir, exclude=exclude,
+                                                skip_names=skip_names)
             extracted += 1
         except Exception as e:
             utils.log.warning("解压 natives 失败 %s: %s", jarpath, e)
 
     if extracted and natives_present(natives_dir):
+        _purge_natives(natives_dir, skip_names)
         return natives_dir
 
     parent_id = resolved.get("inheritsFrom") or resolved.get("jar")
@@ -331,6 +354,7 @@ def extract_natives(instance, resolved, version_id):
                     if f.is_file():
                         shutil.copy2(f, natives_dir / f.name)
                 utils.log.info("已从父版本 %s 复制 natives 到 %s", parent_id, natives_dir)
+    _purge_natives(natives_dir, skip_names)
     return natives_dir
 
 class Installer:
@@ -367,6 +391,8 @@ class Installer:
         """安装任意版本（原版 / Fabric / Quilt / 带处理器的 Forge JSON）。"""
         inst = self.instance
         inst.ensure_standard_dirs()
+        from . import diskspace
+        diskspace.ensure_free(inst.path, what=f"安装版本 {version_id}")
         try:
             vjson = manifest.get_version_json(self.dm, version_id, force=force)
         except manifest.VersionNotFound:
@@ -996,11 +1022,15 @@ class Installer:
         try:
             data = self._forge_processor_data(installer_jar, profile, vanilla_jar, tmp_data)
             self._prefetch_mojmaps(data, vanilla)
-            java_exe = java_mod.java_for_installer("forge", self.dm, on_progress=self.on_progress)
             procs = [p for p in (profile.get("processors") or [])
                      if "client" in (p.get("sides") or ["client"])]
-            self._note(f"开始运行 {len(procs)} 个 Forge 客户端处理器")
-            self._run_install_profile_processors(profile, data, java_exe, force=force)
+            if procs:
+                # 没有处理器（如 Cleanroom）就不要为了跑处理器去找/下 Java
+                java_exe = java_mod.java_for_installer("forge", self.dm, on_progress=self.on_progress)
+                self._note(f"开始运行 {len(procs)} 个 Forge 客户端处理器")
+                self._run_install_profile_processors(profile, data, java_exe, force=force)
+            else:
+                self._note("安装器没有处理器步骤，跳过")
         finally:
             shutil.rmtree(tmp_data, ignore_errors=True)
 
@@ -1323,11 +1353,17 @@ class Installer:
         from . import liteloader as liteloader_mod
         return liteloader_mod.install(self, mc_version, force=force)
 
+    def install_cleanroom(self, mc_version, version=None, force=False):
+        from . import cleanroom as cleanroom_mod
+        return cleanroom_mod.install(self, mc_version, version=version, force=force)
+
     # ================================================================ 卸载
 
     def uninstall_version(self, version_id):
         vdir = self.instance.versions_dir() / version_id
         if not vdir.is_dir():
             raise InstallError(f"版本 {version_id} 未安装")
-        utils.remove_tree(vdir)
-        utils.log.info("已卸载版本 %s", version_id)
+        from . import trash
+        disposition = trash.trash_or_delete(vdir)
+        utils.log.info("已卸载版本 %s%s", version_id,
+                       "（已移入回收站）" if disposition == "trash" else "")

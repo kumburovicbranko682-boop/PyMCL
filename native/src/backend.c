@@ -949,6 +949,20 @@ static cJSON *rpc_get_instances(void) {
         cJSON_AddStringToObject(row, "pack_version", packver ? packver : "");
         cJSON_AddStringToObject(row, "java", jp);
         cJSON_AddStringToObject(row, "java_label", pymcl_ieq(jp, PYMCL_JAVA_AUTO) ? PYMCL_JAVA_AUTO : pymcl_basename(jp));
+        {
+            /* 自定义实例图标（与 mclauncher/instances.py 的 .instance_icon.* 约定一致） */
+            static const char *exts[] = {".png", ".jpg", ".gif", ".webp", ".bmp"};
+            char ipdir[PYMCL_PATH], icon[PYMCL_PATH];
+            icon[0] = 0;
+            instance_path(nm, ipdir, sizeof(ipdir));
+            for (size_t e = 0; e < sizeof(exts) / sizeof(exts[0]); e++) {
+                char fname[64], cand[PYMCL_PATH];
+                snprintf(fname, sizeof(fname), ".instance_icon%s", exts[e]);
+                pymcl_path_join(cand, sizeof(cand), ipdir, fname);
+                if (pymcl_file_exists(cand)) { snprintf(icon, sizeof(icon), "%s", cand); break; }
+            }
+            cJSON_AddStringToObject(row, "icon", icon);
+        }
         cJSON_AddItemToArray(out, row);
         cJSON_Delete(ids);
         cJSON_Delete(meta);

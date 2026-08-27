@@ -243,6 +243,80 @@ def _list_cf(dm, extra):
     return rows
 
 
+# ================================================================ 更新日志
+
+_TAG_SCRIPT = re.compile(r"(?is)<\s*(script|style)[^>]*>.*?<\s*/\s*\1\s*>")
+_TAG_LI = re.compile(r"(?i)<\s*li[^>]*>")
+# </li> 不换行：<li> 已产生 "\n• "，两个都换会在列表项之间多出空行
+_TAG_BREAK = re.compile(r"(?i)<\s*(?:br|/p|/div|/h[1-6]|/tr|/ul|/ol)\s*/?\s*>")
+_TAG_ANY = re.compile(r"<[^>]+>")
+
+
+def html_to_text(raw) -> str:
+    """CurseForge 的更新日志是 HTML，转成可读纯文本（保留换行和列表符）。"""
+    import html as html_lib
+    s = str(raw or "")
+    if not s:
+        return ""
+    s = _TAG_SCRIPT.sub("", s)
+    s = _TAG_LI.sub("\n• ", s)
+    s = _TAG_BREAK.sub("\n", s)
+    s = _TAG_ANY.sub("", s)
+    s = html_lib.unescape(s)
+    out = []
+    empty = 0
+    for ln in (x.rstrip() for x in s.splitlines()):
+        if not ln.strip():
+            empty += 1
+            if empty > 1:
+                continue
+        else:
+            empty = 0
+        out.append(ln.strip())
+    return "\n".join(out).strip()
+
+
+def fetch_changelog(dm: DownloadManager | None, extra: dict | None) -> str:
+    """按需拉取某个文件/版本的完整更新日志。
+
+    extra: {source, file_id | version_id, id / slug（CurseForge 需项目 id）,
+    kind, api_key}。Modrinth 返回 changelog 原文（markdown），CurseForge
+    的 HTML 转成纯文本。缺参数返回空串；网络失败抛异常由 UI 呈现。
+    """
+    extra = dict(extra or {})
+    dm = dm or DownloadManager(threads=2)
+    src = _source_of(extra)
+    if src == "curseforge":
+        addon_id = extra.get("id") or extra.get("addon_id")
+        file_id = extra.get("file_id") or extra.get("version_id")
+        if not addon_id and extra.get("slug"):
+            hit = mods_mod.cf_by_slug(
+                dm, extra["slug"], class_id=KIND_CF.get(_kind_of(extra)),
+                api_key=extra.get("api_key"))
+            addon_id = (hit or {}).get("id")
+        if not addon_id or not file_id:
+            return ""
+        data = mods_mod._cf_fetch(
+            dm, f"/mods/{addon_id}/files/{file_id}/changelog",
+            api_key=extra.get("api_key"))
+        raw = data.get("data") if isinstance(data, dict) else data
+        return html_to_text(raw)
+
+    vid = extra.get("version_id") or extra.get("file_id")
+    if not vid:
+        return ""
+    from . import source
+    last_err = None
+    for base in source.modrinth_api_bases():
+        try:
+            data = dm.fetch_json(f"{base}/version/{vid}",
+                                 timeout=mods_mod.API_TIMEOUT, expand=False)
+            return str((data or {}).get("changelog") or "").strip()
+        except Exception as e:
+            last_err = e
+    raise mods_mod.ModError(f"获取更新日志失败: {last_err}")
+
+
 def type_key(label) -> str:
     """把 UI 传来的类型标签（canonical key / 中文 / 翻译文本）归一成 canonical key。"""
     s = str(label or "").strip().lower()
@@ -285,15 +359,19 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
         want_cf = True
     rows = []
     q = (query or "").strip()
+    sort = str(extra.get("sort") or "")
+    offset = int(extra.get("offset") or 0)
     from .config import CONFIG
     api_key = CONFIG.get("curseforge_api_key")
     if want_mr:
         try:
             if kind == "mod":
-                hits = mods_mod.search_mods(dm, q or " ", limit=30, game_version=gv, categories=cats)
+                hits = mods_mod.search_mods(dm, q, limit=30, game_version=gv,
+                                            categories=cats, sort=sort, offset=offset)
             else:
                 hits = mods_mod.search_modrinth_projects(
-                    dm, q, KIND_MR[kind], limit=30, game_version=gv, categories=cats)
+                    dm, q, KIND_MR[kind], limit=30, game_version=gv, categories=cats,
+                    sort=sort, offset=offset)
             for h in hits:
                 rows.append(_hit_row(h, "modrinth"))
         except Exception:
@@ -305,6 +383,7 @@ def search_projects(dm: DownloadManager | None, kind: str, query: str, source: s
                 class_id=KIND_CF.get(kind, mods_mod.CF_CLASS_MOD),
                 game_version=gv,
                 categories=cf_category_tokens(extra.get("category") or extra.get("type") or ""),
+                sort=sort, offset=offset,
             )
             for h in hits:
                 row = _hit_row(h, "curseforge")
