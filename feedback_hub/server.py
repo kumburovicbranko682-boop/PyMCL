@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import secrets
 import sys
 import threading
 import time
@@ -39,18 +40,53 @@ def _load_env():
 
 _load_env()
 
+
+def _ensure_admin_token() -> str:
+    """看板必须有令牌。环境变量没配就自动生成并持久化到 data/admin_token.txt。
+
+    只影响开发者看板端口；启动器上报口（ingest）从不需要令牌，
+    旧客户端协议不受影响。显式设 NO_ADMIN_TOKEN=1 才允许无鉴权看板。
+    """
+    if (os.environ.get("NO_ADMIN_TOKEN") or "").strip() in ("1", "true", "yes"):
+        return ""
+    tok = (os.environ.get("ADMIN_TOKEN") or "").strip()
+    if tok:
+        return tok
+    path = DATA_DIR / "admin_token.txt"
+    try:
+        if path.is_file():
+            tok = path.read_text(encoding="utf-8").strip()
+            if tok:
+                return tok
+        tok = secrets.token_urlsafe(24)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text(tok + "\n", encoding="utf-8")
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return tok
+    except OSError:
+        # 磁盘只读等极端情况：本次进程用临时令牌，仍然强制鉴权
+        return secrets.token_urlsafe(24)
+
+
 BIND = os.environ.get("BIND", "0.0.0.0")
 INGEST_BIND = os.environ.get("INGEST_BIND") or BIND
 UI_BIND = os.environ.get("UI_BIND") or BIND
 INGEST_PORT = int(os.environ.get("INGEST_PORT") or os.environ.get("PORT") or "18788")
 UI_PORT = int(os.environ.get("UI_PORT") or "18789")
 PORT = INGEST_PORT
-ADMIN_TOKEN = (os.environ.get("ADMIN_TOKEN") or "").strip()
+ADMIN_TOKEN = _ensure_admin_token()
 RATE_PER_MIN = int(os.environ.get("RATE_PER_MIN", "20") or 20)
 RATE_PER_DAY = int(os.environ.get("RATE_PER_DAY", "200") or 200)
 MAX_BODY = int(os.environ.get("MAX_BODY", str(512 * 1024)) or 512 * 1024)
 MACHINE_TTL = int(os.environ.get("MACHINE_TTL", "90") or 90)
 KEEP_FEEDBACK = int(os.environ.get("KEEP_FEEDBACK", "5000") or 5000)
+MACHINE_KEEP_DAYS = int(os.environ.get("MACHINE_KEEP_DAYS", "30") or 30)
+LOG_MAX_MB = int(os.environ.get("LOG_MAX_MB", "20") or 20)
+VERBOSE = (os.environ.get("VERBOSE") or "").strip() in ("1", "true", "yes")
+HOUSEKEEP_SEC = int(os.environ.get("HOUSEKEEP_SEC", "3600") or 3600)
 CATEGORIES = {
     "bug", "crash", "download", "multiplayer", "ai", "ui", "suggest", "other",
 }
@@ -74,6 +110,21 @@ class _Limiter:
             self.minu[ip].append(now)
             self.day[ip].append(now)
             return True
+
+    def prune(self):
+        """丢掉超过 24h 没动静的 IP，键集合才不会只增不减。"""
+        now = time.time()
+        with self._lock:
+            for table, ttl in ((self.minu, 60), (self.day, 86400)):
+                dead = []
+                for ip, stamps in table.items():
+                    alive = [t for t in stamps if now - t < ttl]
+                    if alive:
+                        table[ip] = alive
+                    else:
+                        dead.append(ip)
+                for ip in dead:
+                    del table[ip]
 
 
 class Hub:
@@ -219,6 +270,46 @@ class Store:
             "server_time": time.time(),
         }
 
+    def compact_feedback(self):
+        """feedback.jsonl 只追加不清理会无限膨胀；超过 2 倍保留量时
+        用内存里的 deque（恰好是最近 KEEP_FEEDBACK 条）重写文件。"""
+        with self._lock:
+            try:
+                if not self.fb_file.is_file():
+                    return False
+                with self.fb_file.open("r", encoding="utf-8") as fh:
+                    lines = sum(1 for _ in fh)
+                if lines <= max(200, 2 * self.feedback.maxlen):
+                    return False
+                tmp = self.fb_file.with_suffix(".jsonl.tmp")
+                with tmp.open("w", encoding="utf-8") as fh:
+                    for row in self.feedback:
+                        fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                os.replace(tmp, self.fb_file)
+                return True
+            except OSError:
+                return False
+
+    def cleanup_machines(self, keep_days: int):
+        """删掉太久没心跳的机器（内存 + 磁盘 json），离线设备不会永久堆积。"""
+        if keep_days <= 0:
+            return 0
+        cutoff = time.time() - keep_days * 86400
+        removed = 0
+        with self._lock:
+            for did in list(self.machines):
+                row = self.machines[did] or {}
+                last = float(row.get("last_seen") or 0)
+                if last and last >= cutoff:
+                    continue
+                del self.machines[did]
+                removed += 1
+                try:
+                    (self.mach_dir / f"{did}.json").unlink(missing_ok=True)
+                except OSError:
+                    pass
+        return removed
+
 
 def _public_feedback(row: dict, brief=False) -> dict:
     info = row.get("sysinfo") or {}
@@ -274,6 +365,19 @@ def _clip_sysinfo(info):
     return keep
 
 
+def _clip_crash(crash):
+    """新版客户端的 crash 会附带日志尾部；逐字段截断，防止恶意超大字段。"""
+    if not isinstance(crash, dict):
+        return None
+    out = {}
+    for key, value in crash.items():
+        if isinstance(value, str) and len(value) > 20_000:
+            out[str(key)[:64]] = value[-20_000:]
+        else:
+            out[str(key)[:64]] = value
+    return out
+
+
 STORE = Store(DATA_DIR)
 HUB = Hub()
 LIMITER = _Limiter()
@@ -296,11 +400,24 @@ class _BaseHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
+    def log_request(self, code="-", size="-"):
+        # 心跳 30 秒一拍，全量请求日志会把 hub.log 灌爆；
+        # 默认只记错误响应，VERBOSE=1 恢复全量。
+        try:
+            numeric = int(str(code).split(" ")[0])
+        except ValueError:
+            numeric = 0
+        if VERBOSE or numeric >= 400:
+            super().log_request(code, size)
+
     def _cors(self):
-        origin = self.headers.get("Origin") or "*"
-        self.send_header("Access-Control-Allow-Origin", origin)
-        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-PyMCL-Client")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        # 上报口的客户端是启动器（requests），不是浏览器，给通配 CORS 无害；
+        # 看板口承载全部反馈数据，绝不反射任意 Origin —— 否则任何网页都能
+        # 从开发者浏览器里跨域读走整个看板。看板是同源页面，不需要 CORS。
+        if self.role == "ingest":
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-PyMCL-Client")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 
     def _send(self, code, body: bytes, content_type="application/json; charset=utf-8"):
         self.send_response(code)
@@ -401,8 +518,11 @@ class UIHandler(_BaseHandler):
             n = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             n = 0
-        if n <= 0 or n > MAX_BODY:
+        if n > MAX_BODY:
             self._err(413, "请求太大")
+            return None
+        if n <= 0:
+            self._err(400, "请求格式不对")
             return None
         raw = self.rfile.read(n)
         try:
@@ -451,7 +571,7 @@ class UIHandler(_BaseHandler):
             "client_ip": ip,
             "app_version": str(body.get("app_version") or "")[:32],
             "sysinfo": info,
-            "crash": body.get("crash") if isinstance(body.get("crash"), dict) else None,
+            "crash": _clip_crash(body.get("crash")),
             "summary": info.get("summary") or "",
         }
         STORE.add_feedback(row)
@@ -582,19 +702,66 @@ def make_httpd(bind=None, port=None):
     return make_ingest_httpd(bind, port)
 
 
+def _rotate_hub_log():
+    """start.sh 用 nohup >> 追加写 hub.log；超限时留尾部到 .1 再截断。
+    O_APPEND 写入在 truncate 后自动回到文件头，进程不用重启。"""
+    log_path = DATA_DIR / "hub.log"
+    try:
+        if not log_path.is_file() or log_path.stat().st_size <= LOG_MAX_MB * 1024 * 1024:
+            return False
+        with log_path.open("rb") as fh:
+            fh.seek(-min(512 * 1024, log_path.stat().st_size), 2)
+            tail = fh.read()
+        (DATA_DIR / "hub.log.1").write_bytes(tail)
+        with log_path.open("r+b") as fh:
+            fh.truncate(0)
+        return True
+    except OSError:
+        return False
+
+
+def _housekeeping_loop(stop: threading.Event):
+    while not stop.wait(HOUSEKEEP_SEC):
+        try:
+            compacted = STORE.compact_feedback()
+            removed = STORE.cleanup_machines(MACHINE_KEEP_DAYS)
+            LIMITER.prune()
+            rotated = _rotate_hub_log()
+            if compacted or removed or rotated:
+                sys.stderr.write(
+                    "[housekeeping] compact=%s machines_removed=%s log_rotated=%s\n"
+                    % (compacted, removed, rotated))
+        except Exception as exc:  # noqa: BLE001 清理失败不能拖垮服务
+            sys.stderr.write("[housekeeping] error: %s\n" % exc)
+
+
+def start_housekeeping() -> threading.Event:
+    stop = threading.Event()
+    threading.Thread(
+        target=_housekeeping_loop, args=(stop,),
+        name="pymcl-housekeeping", daemon=True,
+    ).start()
+    return stop
+
+
 def main():
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     ingest = make_ingest_httpd()
     ui = make_ui_httpd()
     worker = threading.Thread(target=ingest.serve_forever, name="pymcl-ingest", daemon=True)
     worker.start()
+    start_housekeeping()
     ingest_host = INGEST_BIND if INGEST_BIND != "0.0.0.0" else "127.0.0.1"
     ui_host = UI_BIND if UI_BIND != "0.0.0.0" else "127.0.0.1"
+    token_hint = "off (NO_ADMIN_TOKEN=1)"
+    if ADMIN_TOKEN:
+        token_hint = "on"
+        if not (os.environ.get("ADMIN_TOKEN") or "").strip():
+            token_hint = "on (auto, see data/admin_token.txt)"
     sys.stderr.write(
         "PyMCL 上报口 http://%s:%s  (POST /api/v1/feedback|/heartbeat)\n"
         "PyMCL 看板   http://%s:%s  (WebUI, TTL=%ss, admin=%s)\n"
-        % (ingest_host, INGEST_PORT, ui_host, UI_PORT, MACHINE_TTL,
-           "on" if ADMIN_TOKEN else "off")
+        % (ingest_host, INGEST_PORT, ui_host, UI_PORT, MACHINE_TTL, token_hint)
     )
     try:
         ui.serve_forever()
