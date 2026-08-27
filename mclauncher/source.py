@@ -111,6 +111,8 @@ def community_mirror_first() -> bool:
 
 def warmup_async():
     threading.Thread(target=official_is_fast, name="pymcl-source-probe", daemon=True).start()
+    from .mirrors import warmup_async as warmup_mirrors_async
+    warmup_mirrors_async()
 
 
 def _order(primary: list[str], secondary: list[str], secondary_first: bool, exclusive: str | None):

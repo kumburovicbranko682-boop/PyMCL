@@ -170,6 +170,25 @@ class GithubProxyTests(unittest.TestCase):
         self.assertIn("https://ghfast.top/", mirrors.GITHUB_PROXY_PREFIXES)
         self.assertIn("https://gh.llkk.cc/", mirrors.GITHUB_PROXY_PREFIXES)
 
+    def test_remote_source_fetch_uses_built_in_raw_mirrors(self):
+        expected_prefixes = (
+            "https://gitproxy.mrhjx.cn/",
+            "https://ghproxy.vip/",
+            "https://gh-proxy.com/",
+            "https://v6.gh-proxy.org/",
+            "https://cdn.gh-proxy.com/",
+        )
+        self.assertEqual(mirrors.RAW_GITHUB_MIRROR_PREFIXES, expected_prefixes)
+        self.assertEqual(
+            mirrors.REMOTE_SOURCE_URLS[:len(expected_prefixes)],
+            tuple(prefix + mirrors.REMOTE_SOURCE_RAW_URL for prefix in expected_prefixes),
+        )
+        self.assertEqual(
+            mirrors.REMOTE_SOURCE_URLS[len(expected_prefixes)],
+            mirrors.REMOTE_SOURCE_RAW_URL,
+        )
+        self.assertNotIn("https://gitproxy.mrhjx.cn/", mirrors.GITHUB_PROXY_PREFIXES)
+
     def test_old_config_with_dead_proxy_is_migrated(self):
         old = ["https://gitproxy.mrhjx.cn/", "https://my.custom.proxy/", "https://gh-proxy.com/"]
         got = self._prefixes_with(old)
@@ -181,6 +200,54 @@ class GithubProxyTests(unittest.TestCase):
     def test_custom_config_without_dead_proxy_untouched(self):
         custom = ["https://my.custom.proxy/"]
         self.assertEqual(self._prefixes_with(custom), ("https://my.custom.proxy/",))
+
+    def test_parse_remote_sources_ignores_comments_blanks_and_non_https(self):
+        text = """
+        # one URL per line
+
+        https://ghfast.top/
+        http://insecure.example/
+        not-a-url
+        https://bmclapi2.bangbang93.com
+        """
+        self.assertEqual(
+            mirrors.parse_source_urls(text),
+            (
+                "https://ghfast.top/",
+                "https://bmclapi2.bangbang93.com",
+            ),
+        )
+
+    def test_remote_fetch_failure_falls_back_to_builtins(self):
+        with (
+            mock.patch.object(mirrors, "_remote_prefixes", None),
+            mock.patch.object(mirrors, "_remote_fetched_at", 0.0),
+            mock.patch.object(mirrors, "_remote_fetch_succeeded", False),
+            mock.patch.object(mirrors, "_fetch_source_text", side_effect=OSError("offline")),
+        ):
+            got = mirrors.refresh_remote_sources(force=True)
+        self.assertEqual(got, mirrors.GITHUB_PROXY_PREFIXES)
+
+    def test_remote_refresh_merges_duplicates_and_filters_dead_prefixes(self):
+        text = """
+        https://new.gh-proxy.example/
+        https://gitproxy.mrhjx.cn/
+        https://new.gh-proxy.example
+        https://ghfast.top/
+        https://bmclapi2.bangbang93.com
+        """
+        with (
+            mock.patch.object(mirrors, "_remote_prefixes", None),
+            mock.patch.object(mirrors, "_remote_fetched_at", 0.0),
+            mock.patch.object(mirrors, "_remote_fetch_succeeded", False),
+            mock.patch.object(mirrors, "_fetch_source_text", return_value=text),
+        ):
+            got = mirrors.refresh_remote_sources(force=True)
+        self.assertEqual(
+            got,
+            ("https://new.gh-proxy.example/", "https://ghfast.top/"),
+        )
+        self.assertNotIn("https://gitproxy.mrhjx.cn/", got)
 
 
 class UpdaterTests(unittest.TestCase):
