@@ -557,6 +557,13 @@ class AccountPage(QWidget):
         self.skin.setAlignment(Qt.AlignCenter)
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
         sl.addWidget(self.skin, 0, Qt.AlignHCenter)
+        # 3D 预览：本地拿得到纹理原图时替代平面图（PCL2/HMCL 同款可旋转模型）
+        from ..skin3d import SkinView3D
+        self.skin3d = SkinView3D(self)
+        self.skin3d.setFixedSize(140, 260)
+        self.skin3d.set_background(Theme.hover)
+        self.skin3d.hide()
+        sl.addWidget(self.skin3d, 0, Qt.AlignHCenter)
         self.skin_name = StrongBodyLabel(tr("未登录"))
         self.skin_name.setAlignment(Qt.AlignCenter)
         sl.addWidget(self.skin_name)
@@ -759,7 +766,7 @@ class AccountPage(QWidget):
             self.list_box.addWidget(card)
         active = next((r for r in rows if r.get("active")), None) or (rows[0] if rows else None)
         self.skin_name.setText(active["name"] if active else "Steve")
-        self._load_skin(active["body"] if active else "")
+        self._load_skin_3d(active)
         self._active_account = active
         kind = active.get("type") if active else ""
         if kind == "microsoft":
@@ -776,13 +783,49 @@ class AccountPage(QWidget):
 
     def restyle(self):
         self.skin.setStyleSheet(f"background: {Theme.hover}; border-radius: 8px;")
+        self.skin3d.set_background(Theme.hover)
         self.reload()
 
-    def _load_skin(self, url: str):
-        if not url:
-            return
+    def _show_3d(self, on: bool):
+        self.skin3d.setVisible(on)
+        self.skin.setVisible(not on)
+
+    def _load_skin_3d(self, active):
+        """优先本地 3D 渲染：拉皮肤纹理原图（含披风），失败退平面预览。"""
         self._pix_token += 1
         token = self._pix_token
+        name = (active or {}).get("name") or ""
+        flat_url = (active or {}).get("body") or ""
+        fetch_tex = getattr(self.backend, "fetch_skin_texture", None)
+        if not name or not callable(fetch_tex):
+            self._load_skin(flat_url, token)
+            return
+
+        def ok(tex):
+            if token != self._pix_token:
+                return
+            from PySide6.QtGui import QImage
+            tex = tex or {}
+            img = QImage.fromData(tex.get("png") or b"")
+            cape = QImage.fromData(tex.get("cape_png") or b"") if tex.get("cape_png") else None
+            if self.skin3d.set_texture(img, tex.get("variant") or "classic", cape):
+                self._show_3d(True)
+            else:
+                self._load_skin(flat_url, token)
+
+        self.backend.call_async(lambda: fetch_tex(name), ok,
+                                lambda *_: self._load_skin(flat_url, token))
+
+    def _load_skin(self, url: str, token: int = None):
+        """平面预览兜底（第三方渲染服务出图）。"""
+        if token is None:
+            self._pix_token += 1
+            token = self._pix_token
+        if token != self._pix_token:
+            return
+        self._show_3d(False)
+        if not url:
+            return
 
         def fetch():
             import requests

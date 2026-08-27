@@ -528,13 +528,16 @@ def fetch_ygg_texture_info(api: str, uuid: str, timeout: int = 15) -> dict:
     if not url:
         raise SkinError("该角色没有皮肤纹理")
     model = ((skin_info.get("metadata") or {}).get("model") or "").lower()
-    return {"url": url, "variant": "slim" if model == "slim" else "classic"}
+    cape_url = ((data.get("textures") or {}).get("CAPE") or {}).get("url") or ""
+    return {"url": url, "variant": "slim" if model == "slim" else "classic",
+            "cape_url": cape_url}
 
 
 def fetch_skin_texture(account: dict, timeout: int = 15) -> dict:
     """下载账号当前皮肤的原始 64x64 PNG，供本地渲染预览。
 
-    返回 {"png": bytes, "variant": "classic"/"slim"}。
+    返回 {"png": bytes, "variant": "classic"/"slim"}；有披风时额外带
+    "cape_png"（披风拿不到不影响皮肤，静默跳过）。
     支持微软 / 皮肤站账号；离线账号读本地自选皮肤；
     其它类型抛 SkinError（调用方回退第三方渲染）。
     """
@@ -549,8 +552,13 @@ def fetch_skin_texture(account: dict, timeout: int = 15) -> dict:
         width, height = png_size(png)
         if width != 64 or height not in (32, 64):
             raise SkinError(f"皮肤纹理尺寸异常: {width}×{height}")
-        return {"png": png,
-                "variant": "slim" if acc.get("skin_model") == "slim" else "classic"}
+        out = {"png": png,
+               "variant": "slim" if acc.get("skin_model") == "slim" else "classic"}
+        cape_p = Path(str(acc.get("cape_file") or "")).expanduser()
+        if acc.get("cape_file") and cape_p.is_file():
+            out["cape_png"] = cape_p.read_bytes()
+        return out
+    cape_url = ""
     if kind == "microsoft":
         profile = fetch_ms_profile(acc.get("access_token") or "", timeout=timeout)
         active = next((s for s in profile["skins"] if s.get("active")),
@@ -558,10 +566,13 @@ def fetch_skin_texture(account: dict, timeout: int = 15) -> dict:
         if not active or not active.get("url"):
             raise SkinError("该账号没有皮肤")
         url, variant = active["url"], active.get("variant") or "classic"
+        cape = next((c for c in profile.get("capes") or [] if c.get("active")), None)
+        cape_url = (cape or {}).get("url") or ""
     elif kind == "authlib":
         info = fetch_ygg_texture_info(acc.get("api") or "", acc.get("uuid") or "",
                                       timeout=timeout)
         url, variant = info["url"], info["variant"]
+        cape_url = info.get("cape_url") or ""
     else:
         raise SkinError("离线 / 通行证账号没有云端皮肤纹理")
     resp = requests.get(url, timeout=timeout)
@@ -571,7 +582,15 @@ def fetch_skin_texture(account: dict, timeout: int = 15) -> dict:
     width, height = png_size(png)
     if width != 64 or height not in (32, 64):
         raise SkinError(f"皮肤纹理尺寸异常: {width}×{height}")
-    return {"png": png, "variant": variant}
+    out = {"png": png, "variant": variant}
+    if cape_url:
+        try:
+            cape_resp = requests.get(cape_url, timeout=timeout)
+            if cape_resp.status_code == 200 and cape_resp.content:
+                out["cape_png"] = cape_resp.content
+        except requests.RequestException:
+            pass  # 披风只是锦上添花，拿不到不挡皮肤预览
+    return out
 
 
 def fetch_player_skin(name: str, timeout: int = 15) -> dict:
